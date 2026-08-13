@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .http import HttpClient, HttpFailure
@@ -70,15 +70,24 @@ class ForumApi:
     http: HttpClient
     reply_depth: int = 32
     endpoint: str = GRAPHQL_ENDPOINT
+    _forum_info_cache: dict[str, dict[str, Any] | None] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
-    def get_forum_info(self, context_uri: str) -> dict[str, Any] | None:
+    def get_forum_info(
+        self, context_uri: str, *, refresh: bool = False
+    ) -> dict[str, Any] | None:
+        if not refresh and context_uri in self._forum_info_cache:
+            return self._forum_info_cache[context_uri]
         payload = {
             "operationName": "GetForumInfo",
             "variables": {"contextUri": context_uri},
             "query": forum_info_query(self.reply_depth),
         }
         response = self.http.post_json(self.endpoint, payload)
-        return (response.get("data") or {}).get("getForumByContextUri")
+        result = (response.get("data") or {}).get("getForumByContextUri")
+        self._forum_info_cache[context_uri] = result
+        return result
 
     def get_threads_page(self, forum_id: str, cursor: str | None = None) -> dict[str, Any]:
         payload = {

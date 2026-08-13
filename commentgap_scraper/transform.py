@@ -23,6 +23,12 @@ def _reaction_value(posting: dict[str, Any], name: str) -> int:
     return 0
 
 
+def effective_text(title: Any, text: Any) -> str | None:
+    """Combine non-empty title and body with a line boundary for analysis."""
+    parts = [str(value).strip() for value in (title, text) if value is not None and str(value).strip()]
+    return "\n".join(parts) or None
+
+
 def flatten_postings(
     roots: Iterable[dict[str, Any]],
     *,
@@ -52,6 +58,8 @@ def flatten_postings(
         replies = [reply for reply in (posting.get("replies") or []) if isinstance(reply, dict)]
         author = posting.get("author") or {}
         legacy = posting.get("legacy") or {}
+        title = posting.get("title")
+        text = posting.get("text")
         records.append(
             {
                 "comment_id": comment_id,
@@ -67,11 +75,14 @@ def flatten_postings(
                 "is_root": parent_id is None,
                 "is_leaf": not replies,
                 "created_at": ((posting.get("history") or {}).get("created")),
-                "title": posting.get("title"),
-                "text": posting.get("text"),
+                "title": title,
+                "text": text,
+                "effective_text": effective_text(title, text),
                 "lifecycle_status": posting.get("lifecycleStatus"),
                 "flags_json": _json_list(posting.get("flags")),
-                "is_sticky": is_sticky,
+                # The sticky API record is a root thread. Replies are ordinary
+                # comments and must not inherit the root's pinned state.
+                "is_sticky": is_sticky and depth == 0,
                 "votes_positive": _reaction_value(posting, "positive"),
                 "votes_negative": _reaction_value(posting, "negative"),
                 "author_hash": pseudonymizer.pseudonymize(posting),
@@ -112,8 +123,11 @@ def merge_comment_records(records: Iterable[dict[str, Any]]) -> list[dict[str, A
             by_id[comment_id] = dict(record)
             continue
         sticky = bool(existing.get("is_sticky")) or bool(record.get("is_sticky"))
-        # Prefer the regular thread copy because it has the canonical page order.
-        if existing.get("is_sticky") and not record.get("is_sticky"):
+        # Page zero is the sticky-thread copy. Prefer every regular thread copy,
+        # including descendants which correctly have is_sticky=False in both trees.
+        existing_is_sticky_page = int(existing.get("root_order") or 0) < 100_000
+        record_is_regular_page = int(record.get("root_order") or 0) >= 100_000
+        if existing_is_sticky_page and record_is_regular_page:
             by_id[comment_id] = dict(record)
         by_id[comment_id]["is_sticky"] = sticky
 

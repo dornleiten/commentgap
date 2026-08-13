@@ -1,4 +1,5 @@
 import io
+import http.client
 from unittest import mock
 import unittest
 import urllib.error
@@ -39,6 +40,25 @@ class HttpApiTests(unittest.TestCase):
              mock.patch("commentgap_scraper.http.random.uniform", return_value=0.0):
             self.assertEqual(client.request("https://example.test"), b"ok")
         sleep.assert_called_once_with(2.0)
+
+    def test_http_client_retries_truncated_response(self):
+        truncated = mock.MagicMock()
+        truncated.__enter__.return_value.read.side_effect = http.client.IncompleteRead(
+            b"partial", 20
+        )
+        complete = mock.MagicMock()
+        complete.__enter__.return_value.read.return_value = b"complete"
+        client = HttpClient("Research crawler (contact: x@example.org)", max_retries=1)
+        with mock.patch(
+            "commentgap_scraper.http.urllib.request.urlopen",
+            side_effect=[truncated, complete],
+        ), mock.patch.object(client._limiter, "wait"), mock.patch(
+            "commentgap_scraper.http.time.sleep"
+        ) as sleep, mock.patch(
+            "commentgap_scraper.http.random.uniform", return_value=0.0
+        ):
+            self.assertEqual(client.request("https://example.test"), b"complete")
+        sleep.assert_called_once_with(1.0)
 
 
 if __name__ == "__main__":

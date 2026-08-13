@@ -20,6 +20,7 @@ def _quoted(path: Path) -> str:
 def export_legacy(root: Path, year: int) -> tuple[Path, Path]:
     comments = _quoted(root / "comments" / f"year={year}" / "month=*" / "*.parquet")
     articles = _quoted(root / "articles" / f"year={year}" / "month=*" / "*.parquet")
+    forums = _quoted(root / "forums" / f"year={year}" / "month=*" / "*.parquet")
     destination = root / "legacy" / f"year={year}"
     destination.mkdir(parents=True, exist_ok=True)
     comment_output = destination / "comments_legacy.parquet"
@@ -28,6 +29,25 @@ def export_legacy(root: Path, year: int) -> tuple[Path, Path]:
     duckdb = _duckdb()
     connection = duckdb.connect()
     try:
+        comment_columns = {
+            str(row[0]).lower()
+            for row in connection.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{comments}', hive_partitioning=false, union_by_name=true)"
+            ).fetchall()
+        }
+        combined_fallback = """
+            CASE
+                WHEN c.title IS NOT NULL AND trim(c.title) <> ''
+                 AND c.text IS NOT NULL AND trim(c.text) <> ''
+                    THEN trim(c.title) || chr(10) || trim(c.text)
+                ELSE coalesce(nullif(trim(c.title), ''), nullif(trim(c.text), ''))
+            END
+        """
+        combined_text = (
+            f"coalesce(c.effective_text, {combined_fallback})"
+            if "effective_text" in comment_columns
+            else combined_fallback
+        )
         connection.execute(
             f"""
             COPY (
@@ -40,6 +60,7 @@ def export_legacy(root: Path, year: int) -> tuple[Path, Path]:
                     c.created_at AS timestamp,
                     c.title AS heading,
                     c.text,
+                    {combined_text} AS "heading_and_text.comment",
                     CASE WHEN c.is_sticky THEN ' Angeheftet ·' ELSE '' END AS pinned,
                     c.is_root AS is_root_comment,
                     c.is_leaf AS is_leaf_comment,
@@ -51,8 +72,10 @@ def export_legacy(root: Path, year: int) -> tuple[Path, Path]:
                     CASE WHEN c.is_sticky THEN 1 ELSE 0 END AS pinned_f,
                     c.votes_positive - c.votes_negative AS votes_rel,
                     c.display_order AS order_all
-                FROM read_parquet('{comments}', hive_partitioning=false) c
+                FROM read_parquet('{comments}', hive_partitioning=false, union_by_name=true) c
                 JOIN read_parquet('{articles}', hive_partitioning=false) a USING (story_id)
+                JOIN read_parquet('{forums}', hive_partitioning=false, union_by_name=true) f
+                  ON c.story_id = f.story_id AND c.forum_id = f.forum_id
                 ORDER BY c.story_id, c.display_order
             ) TO '{_quoted(comment_output)}' (FORMAT PARQUET, COMPRESSION ZSTD)
             """

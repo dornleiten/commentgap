@@ -57,7 +57,8 @@ data. The collector enforces a minimum one-second interval between request start
 commentgap-scrape discover --year 2025
 
 # Recommended small live smoke test before a full run.
-commentgap-scrape crawl --year 2025 --limit 100 --selection monthly-round-robin
+commentgap-scrape crawl --year 2025 --limit 100 --selection stratified-pilot \
+  --selection-seed 2025 --pilot-candidate-pool 500
 commentgap-scrape validate --year 2025 --allow-incomplete
 
 # Resume pending/in-progress work; add --retry-failed to revisit failures.
@@ -70,15 +71,62 @@ commentgap-scrape export-legacy --year 2025
 
 Use repeated `--story-id ID` arguments to target known fixtures or unusual forums.
 Outputs default to `data/scrape_2025/`, which is ignored by Git. The main tables are
-partitioned Parquet datasets named `articles`, `forums`, and `comments`; the SQLite
+partitioned Parquet datasets named `articles`, `forums`, `forum_pages`, and `comments`; the SQLite
 manifest and page-level staging files make interrupted crawls resumable. Validation
 writes both JSON and Parquet summaries under `qa_summary`.
+
+`stratified-pilot` first inspects the forum counters of a bounded, seeded candidate
+pool, then balances the selected stories across months and the bands no forum, no
+postings, 1–49, 50–249, 250–999, and 1,000+ postings. At the required one-second
+interval, the default 500-candidate preflight takes at least about eight minutes. Its
+selection and achieved bands are recorded in `pilot_selection.json`.
 
 Progress is written to the normal log stream so it remains readable in an interactive
 terminal, a redirected log file, or an unattended job. Crawl updates include overall
 percentage, elapsed time, ETA, throughput, and status counts. Large forums also report
 page and posting progress every ten GraphQL pages; adjust this with
 `--progress-every-pages N`.
+
+Comments retain the API's separate `title` and `text` fields. `effective_text` is the
+analysis-ready combination: when both are present it is `title`, one newline, then
+`text`; when only one is present it uses that field. Deleted tombstones may have no
+effective text. The legacy export provides the same newline-separated value as
+`heading_and_text.comment`.
+
+`totalPostingCount` is treated as an advisory forum counter. If a complete cursor
+walk does not reconcile, the scraper refreshes the lightweight forum counter but
+does not repeat the article or comment-page requests. A remaining discrepancy becomes
+the explicit terminal state `completed_with_count_discrepancy`, rather than a failure.
+The forum row records reported, unique, published, and deleted counts; signed and
+absolute differences; and percentage discrepancy. `count_discrepancy_reproduced` is null for new records
+because no second crawl was performed; older audited records retain their historical
+true/false value.
+Validation accepts this state while continuing to reject broken pagination, trees,
+or comment-to-forum references.
+Each new crawl also writes per-page diagnostics without retaining response payloads:
+hashed cursors, root-edge and flattened-record counts, page completion, and cursor
+progression. Aggregate diagnostics are repeated in the forum row for convenient QA.
+
+To migrate a pilot produced by the earlier strict-count version, use the original
+hash key and rerun only its failed stories:
+
+```bash
+commentgap-scrape migrate-existing --year 2025
+commentgap-scrape crawl --year 2025 --only-failed
+commentgap-scrape validate --year 2025 --allow-incomplete
+```
+
+`--only-failed` includes both failed and interrupted `in_progress` stories while
+excluding untouched pending stories. The retry removes legacy orphan comment files
+for count-mismatch failures and replaces them only after a complete, internally valid
+cursor walk reaches a terminal state. Keeping the original `COMMENTGAP_HASH_KEY`
+preserves author pseudonyms across the pilot.
+The offline migration adds newline-separated `effective_text`, clears incorrectly
+inherited sticky flags only in historical files without page evidence, and upgrades
+old forum schemas. Current validation reconciles retained sticky-record counts against
+the sticky API count because an individually sticky posting can legitimately be nested
+in its normal thread. The migration does not invent diagnostics that were not retained
+originally.
 
 The compatibility export intentionally keeps article text in a separate article
 table rather than duplicating it for every comment. `user_names` contains the stable

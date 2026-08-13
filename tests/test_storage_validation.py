@@ -3,15 +3,77 @@ from pathlib import Path
 import tempfile
 import unittest
 
+import pyarrow.parquet as pq
+import pyarrow as pa
+
 from commentgap_scraper.legacy import export_legacy
 from commentgap_scraper.crawler import _resume_is_consistent
 from commentgap_scraper.manifest import Manifest
+from commentgap_scraper.migration import migrate_existing
 from commentgap_scraper.parsing import DiscoveredStory
 from commentgap_scraper.storage import ParquetStore
 from commentgap_scraper.validation import validate_dataset
 
 
 class StorageValidationTests(unittest.TestCase):
+    def test_offline_migration_adds_effective_text_and_clears_sticky_reply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "comments/year=2025/month=01/story.parquet"
+            path.parent.mkdir(parents=True)
+            pq.write_table(
+                pa.Table.from_pylist(
+                    [
+                        {
+                            "comment_id": "reply",
+                            "story_id": "story",
+                            "forum_id": "forum",
+                            "year": 2025,
+                            "month": 1,
+                            "depth": 1,
+                            "title": "Heading",
+                            "text": "Comment",
+                            "is_sticky": True,
+                        }
+                    ]
+                ),
+                path,
+            )
+            result = migrate_existing(root, 2025)
+            row = pq.read_table(path).to_pylist()[0]
+            self.assertEqual(row["effective_text"], "Heading\nComment")
+            self.assertFalse(row["is_sticky"])
+            self.assertEqual(result["sticky_descendants_cleared"], 1)
+
+    def test_offline_migration_preserves_evidenced_sticky_reply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "comments/year=2025/month=01/story.parquet"
+            path.parent.mkdir(parents=True)
+            pq.write_table(
+                pa.Table.from_pylist(
+                    [
+                        {
+                            "comment_id": "reply",
+                            "story_id": "story",
+                            "forum_id": "forum",
+                            "year": 2025,
+                            "month": 1,
+                            "depth": 1,
+                            "is_sticky": True,
+                        }
+                    ]
+                ),
+                path,
+            )
+            diagnostic = root / "forum_pages/year=2025/month=01/story.parquet"
+            diagnostic.parent.mkdir(parents=True)
+            diagnostic.touch()
+            result = migrate_existing(root, 2025)
+            row = pq.read_table(path).to_pylist()[0]
+            self.assertTrue(row["is_sticky"])
+            self.assertEqual(result["sticky_descendants_cleared"], 0)
+
     def test_resume_prunes_only_an_uncommitted_page(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -88,9 +150,12 @@ class StorageValidationTests(unittest.TestCase):
             }
             store.write_comment_page(article["story_id"], 0, [{**root_comment, "is_sticky": True}])
             store.write_comment_page(article["story_id"], 1, [root_comment, child])
-            _, count, reconciled = store.finalize_comments(article["story_id"], 2025, 1)
+            _, count, reconciled, deleted = store.finalize_comments(
+                article["story_id"], 2025, 1
+            )
             self.assertEqual(count, 2)
             self.assertEqual(reconciled, 2)
+            self.assertEqual(deleted, 0)
             store.write_forum(
                 {
                     "story_id": article["story_id"],
@@ -101,7 +166,14 @@ class StorageValidationTests(unittest.TestCase):
                     "metadata_json": "[]",
                     "reported_posting_count": 2,
                     "observed_unique_count": 2,
+                    "observed_published_count": 2,
+                    "observed_deleted_count": 0,
                     "reconciled_posting_count": 2,
+                    "posting_count_difference": 0,
+                    "posting_count_discrepancy_absolute": 0,
+                    "posting_count_discrepancy_pct": 0.0,
+                    "count_discrepancy_reproduced": None,
+                    "crawl_status": "completed",
                     "collected_at": "2026-08-13T12:00:00Z",
                 }
             )
@@ -130,9 +202,15 @@ class StorageValidationTests(unittest.TestCase):
             self.assertEqual(summary["invalid_tree_relationship_rows"], 0)
             self.assertEqual(summary["monthly_comment_rows"], {"01": 2})
             self.assertEqual(summary["raw_author_identifier_columns"], [])
+            self.assertEqual(summary["comments_without_forum_rows"], 0)
+            self.assertEqual(summary["unexpected_forum_count_mismatches"], 0)
             comments_path, articles_path = export_legacy(root, 2025)
             self.assertTrue(comments_path.exists())
             self.assertTrue(articles_path.exists())
+            legacy_rows = pq.read_table(comments_path).to_pylist()
+            self.assertEqual(
+                legacy_rows[0]["heading_and_text.comment"], "Comment\nText"
+            )
 
 
 if __name__ == "__main__":

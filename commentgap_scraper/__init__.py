@@ -3,4 +3,4 @@
 from .config import ScrapeConfig
 
 __all__ = ["ScrapeConfig"]
-__version__ = "0.1.0"
+__version__ = "0.3.2"

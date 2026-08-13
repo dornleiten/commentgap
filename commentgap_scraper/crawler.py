@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import time
@@ -15,21 +16,146 @@ from .http import HttpClient, HttpFailure
 from .manifest import Manifest
 from .parsing import DiscoveredStory, parse_article, parse_sitemap
 from .privacy import AuthorPseudonymizer
-from .progress import crawl_progress_line, forum_progress_line
+from .progress import crawl_progress_line, format_duration, forum_progress_line
 from .storage import ParquetStore
 from .transform import flatten_postings
 
 
 LOG = logging.getLogger("commentgap_scraper")
 SITEMAP_TEMPLATE = "https://www.derstandard.at/sitemaps/sitemap-{year}-{month:02d}.xml"
-
-
-class CountMismatch(RuntimeError):
-    pass
+PILOT_SIZE_BANDS = (
+    "no_forum",
+    "no_postings",
+    "1-49",
+    "50-249",
+    "250-999",
+    "1000+",
+)
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _cursor_hash(cursor: str | None) -> str | None:
+    if not cursor:
+        return None
+    return hashlib.sha256(cursor.encode("utf-8")).hexdigest()
+
+
+def _forum_size_band(info: dict[str, Any] | None) -> str:
+    if not info or not info.get("id"):
+        return "no_forum"
+    count = int(info.get("totalPostingCount") or 0)
+    if count == 0:
+        return "no_postings"
+    if count < 50:
+        return "1-49"
+    if count < 250:
+        return "50-249"
+    if count < 1000:
+        return "250-999"
+    return "1000+"
+
+
+def select_stratified_pilot(
+    candidates: list[dict[str, Any]],
+    *,
+    api: ForumApi,
+    limit: int,
+    seed: int,
+    output_dir: Path,
+) -> list[dict[str, Any]]:
+    """Balance a reproducible candidate pool across month and forum-size bands."""
+    assessed: list[dict[str, Any]] = []
+    for index, story in enumerate(candidates, start=1):
+        try:
+            info = api.get_forum_info(context_uri(story["story_id"]))
+        except HttpFailure as exc:
+            LOG.warning("pilot preflight skipped story %s: %s", story["story_id"], exc)
+            continue
+        band = _forum_size_band(info)
+        assessed.append(
+            {
+                "story": story,
+                "story_id": story["story_id"],
+                "month": int(story["month"]),
+                "size_band": band,
+                "reported_posting_count": (
+                    int(info.get("totalPostingCount") or 0) if info else None
+                ),
+            }
+        )
+        if index == 1 or index % 25 == 0 or index == len(candidates):
+            LOG.info(
+                "pilot preflight: %d/%d (%.1f%%) forum sizes assessed",
+                index,
+                len(candidates),
+                index / len(candidates) * 100,
+            )
+
+    month_targets = {
+        month: sum(index % 12 + 1 == month for index in range(limit))
+        for month in range(1, 13)
+    }
+    band_targets = {
+        band: sum(PILOT_SIZE_BANDS[index % len(PILOT_SIZE_BANDS)] == band for index in range(limit))
+        for band in PILOT_SIZE_BANDS
+    }
+    month_counts = {month: 0 for month in month_targets}
+    band_counts = {band: 0 for band in band_targets}
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+
+    def add(item: dict[str, Any]) -> None:
+        selected.append(item)
+        selected_ids.add(item["story_id"])
+        month_counts[item["month"]] += 1
+        band_counts[item["size_band"]] += 1
+
+    # First fill both dimensions; then fill any remaining monthly slots even
+    # where rare bands were unavailable in the bounded pool.
+    for item in assessed:
+        if len(selected) >= limit:
+            break
+        if (
+            month_counts[item["month"]] < month_targets[item["month"]]
+            and band_counts[item["size_band"]] < band_targets[item["size_band"]]
+        ):
+            add(item)
+    for item in assessed:
+        if len(selected) >= limit:
+            break
+        if item["story_id"] not in selected_ids and (
+            month_counts[item["month"]] < month_targets[item["month"]]
+        ):
+            add(item)
+    for item in assessed:
+        if len(selected) >= limit:
+            break
+        if item["story_id"] not in selected_ids:
+            add(item)
+
+    audit = {
+        "generated_at": utc_now(),
+        "selection": "stratified-pilot",
+        "seed": seed,
+        "candidate_pool_size": len(candidates),
+        "requested_limit": limit,
+        "selected_count": len(selected),
+        "month_counts": month_counts,
+        "size_band_counts": band_counts,
+        "size_band_targets": band_targets,
+        "stories": [
+            {key: item[key] for key in ("story_id", "month", "size_band", "reported_posting_count")}
+            for item in selected
+        ],
+    }
+    path = output_dir / "pilot_selection.json"
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+    return [item["story"] for item in selected]
 
 
 def build_http(config: ScrapeConfig) -> HttpClient:
@@ -89,9 +215,18 @@ def _forum_record(
     story: dict[str, Any],
     info: dict[str, Any],
     observed_unique: int,
-    reconciled: int,
+    observed_published: int,
+    observed_deleted: int,
     collected_at: str,
+    *,
+    crawl_status: str,
+    discrepancy_reproduced: bool | None = None,
+    page_diagnostics: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    reported = int(info.get("totalPostingCount") or 0)
+    difference = observed_published - reported
+    diagnostics = page_diagnostics or []
+    thread_pages = [row for row in diagnostics if row.get("page_kind") == "threads"]
     return {
         "story_id": story["story_id"],
         "year": int(story["year"]),
@@ -105,9 +240,27 @@ def _forum_record(
         "metadata_json": json.dumps(
             info.get("metadata") or [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ),
-        "reported_posting_count": int(info.get("totalPostingCount") or 0),
+        "reported_posting_count": reported,
         "observed_unique_count": observed_unique,
-        "reconciled_posting_count": reconciled,
+        "observed_published_count": observed_published,
+        "observed_deleted_count": observed_deleted,
+        "reconciled_posting_count": observed_published,
+        "posting_count_difference": difference,
+        "posting_count_discrepancy_absolute": abs(difference),
+        "posting_count_discrepancy_pct": (
+            abs(difference) / reported * 100.0 if reported else 0.0
+        ),
+        "count_discrepancy_reproduced": discrepancy_reproduced,
+        "pagination_page_count": len(thread_pages),
+        "root_edge_count": sum(int(row.get("root_edge_count") or 0) for row in thread_pages),
+        "flattened_record_count": sum(
+            int(row.get("flattened_record_count") or 0) for row in diagnostics
+        ),
+        "cursor_walk_complete": bool(thread_pages) and not bool(thread_pages[-1].get("has_next_page")),
+        "cursor_progression_valid": all(
+            bool(row.get("cursor_progression_valid")) for row in thread_pages
+        ),
+        "crawl_status": crawl_status,
         "collected_at": collected_at,
     }
 
@@ -142,6 +295,12 @@ def crawl_story(
     story_id = story["story_id"]
     collected_at = utc_now()
     manifest.mark_in_progress(story_id, collected_at)
+    if story.get("status") in {"failed", "in_progress"}:
+        # Older versions exposed mismatch rows before failure, and a process can
+        # stop between file publication and the final manifest transaction.
+        store.remove_published_outputs(
+            story_id, int(story["year"]), int(story["month"])
+        )
 
     try:
         html = http.get_text(story["url"])
@@ -157,7 +316,18 @@ def crawl_story(
         expected = int(info.get("totalPostingCount") or 0)
         if expected == 0:
             store.reset_staging(story_id)
-            store.write_forum(_forum_record(story, info, 0, 0, collected_at))
+            store.write_forum(
+                _forum_record(
+                    story,
+                    info,
+                    0,
+                    0,
+                    0,
+                    collected_at,
+                    crawl_status="no_postings",
+                    page_diagnostics=[],
+                )
+            )
             manifest.mark_terminal(
                 story_id,
                 "no_postings",
@@ -188,6 +358,24 @@ def crawl_story(
                 is_sticky=True,
             )
             store.write_comment_page(story_id, 0, sticky_records)
+            store.write_page_diagnostic(
+                story_id,
+                {
+                    "story_id": story_id,
+                    "forum_id": forum_id,
+                    "year": int(story["year"]),
+                    "month": int(story["month"]),
+                    "page_index": 0,
+                    "page_kind": "sticky",
+                    "request_cursor_hash": None,
+                    "next_cursor_hash": None,
+                    "root_edge_count": len(info.get("stickyPostings") or []),
+                    "flattened_record_count": len(sticky_records),
+                    "has_next_page": None,
+                    "cursor_progression_valid": True,
+                    "collected_at": collected_at,
+                },
+            )
             staged_record_count = len(sticky_records)
             cursor = None
             page_index = 1
@@ -201,6 +389,7 @@ def crawl_story(
             )
 
         while not pagination_complete:
+            request_cursor = cursor
             page = api.get_threads_page(forum_id, cursor)
             edges = page.get("edges") or []
             roots = [edge.get("node") for edge in edges if isinstance(edge, dict) and edge.get("node")]
@@ -219,6 +408,26 @@ def crawl_story(
             next_cursor = page_info.get("nextCursor")
             if has_next and (not next_cursor or next_cursor == cursor):
                 raise RuntimeError(f"pagination cursor did not advance for story {story_id}")
+            store.write_page_diagnostic(
+                story_id,
+                {
+                    "story_id": story_id,
+                    "forum_id": forum_id,
+                    "year": int(story["year"]),
+                    "month": int(story["month"]),
+                    "page_index": page_index,
+                    "page_kind": "threads",
+                    "request_cursor_hash": _cursor_hash(request_cursor),
+                    "next_cursor_hash": _cursor_hash(next_cursor),
+                    "root_edge_count": len(edges),
+                    "flattened_record_count": len(records),
+                    "has_next_page": has_next,
+                    "cursor_progression_valid": (
+                        not has_next or bool(next_cursor and next_cursor != request_cursor)
+                    ),
+                    "collected_at": utc_now(),
+                },
+            )
             cursor = next_cursor if has_next else None
             page_index += 1
             pagination_complete = not has_next
@@ -246,32 +455,59 @@ def crawl_story(
                     ),
                 )
 
-        _, observed_unique, reconciled = store.finalize_comments(
+        _, observed_unique, observed_published, observed_deleted = store.prepare_comments(
             story_id, int(story["year"]), int(story["month"])
         )
-        if reconciled != expected:
-            refreshed = api.get_forum_info(context_uri(story_id)) or info
+        if observed_published != expected:
+            refreshed = api.get_forum_info(context_uri(story_id), refresh=True) or info
             refreshed_expected = int(refreshed.get("totalPostingCount") or 0)
             info = refreshed
             expected = refreshed_expected
-        if reconciled != expected:
-            raise CountMismatch(
-                f"story {story_id}: API reports {expected} postings but {reconciled} published records "
-                f"({observed_unique} including deletion tombstones) were collected"
+        status = (
+            "completed_with_count_discrepancy"
+            if observed_published != expected
+            else "completed"
+        )
+        if status == "completed_with_count_discrepancy":
+            LOG.warning(
+                "story %s completed with count discrepancy: API reports %d postings "
+                "but %d published records (%d including %d deletion tombstones) "
+                "were collected; retaining the complete cursor walk without recrawling",
+                story_id,
+                expected,
+                observed_published,
+                observed_unique,
+                observed_deleted,
             )
-
+        page_diagnostics = store.staging_diagnostics(story_id)
+        store.publish_prepared_comments(
+            story_id, int(story["year"]), int(story["month"])
+        )
         store.write_forum(
-            _forum_record(story, info, observed_unique, reconciled, collected_at)
+            _forum_record(
+                story,
+                info,
+                observed_unique,
+                observed_published,
+                observed_deleted,
+                collected_at,
+                crawl_status=status,
+                # Full reconciliation recrawls were retired in scraper 0.3.2.
+                # Null means the internally valid first walk was accepted
+                # without repeating its article and comment-page requests.
+                discrepancy_reproduced=None,
+                page_diagnostics=page_diagnostics,
+            )
         )
         manifest.mark_terminal(
             story_id,
-            "completed",
+            status,
             utc_now(),
             forum_id=forum_id,
             expected_count=expected,
-            observed_count=reconciled,
+            observed_count=observed_published,
         )
-        return "completed"
+        return status
     except HttpFailure as exc:
         status = "inaccessible" if exc.status in {401, 403, 404, 410} else "failed"
         manifest.mark_terminal(
@@ -301,10 +537,20 @@ def crawl(
     hash_key: str,
     limit: int | None = None,
     retry_failed: bool = False,
+    only_failed: bool = False,
     story_ids: list[str] | None = None,
-    monthly_round_robin: bool = False,
+    monthly_random: bool = False,
+    selection_seed: int = 2025,
+    stratified_pilot: bool = False,
+    pilot_candidate_pool: int = 500,
     http: HttpClient | None = None,
 ) -> dict[str, int]:
+    if stratified_pilot and limit is None:
+        raise ValueError("stratified-pilot selection requires --limit")
+    if stratified_pilot and pilot_candidate_pool < limit:
+        raise ValueError("--pilot-candidate-pool must be at least --limit")
+    if only_failed and stratified_pilot:
+        raise ValueError("--only-failed cannot be combined with stratified-pilot selection")
     client = http or build_http(config)
     api = ForumApi(client, reply_depth=config.reply_query_depth)
     pseudonymizer = AuthorPseudonymizer(hash_key)
@@ -318,7 +564,8 @@ def crawl(
             LOG.warning("replacing unreadable collection metadata at %s", metadata_path)
     metadata_updated_at = utc_now()
     metadata = {
-        "schema_version": 1,
+        **existing_metadata,
+        "schema_version": 3,
         "year": config.year,
         "scope": "All comments visible at collection time on articles published in the selected year",
         "snapshot_warning": (
@@ -328,23 +575,56 @@ def crawl(
         "forum_endpoint": GRAPHQL_ENDPOINT,
         "reply_query_depth": config.reply_query_depth,
         "minimum_request_interval_seconds": config.request_interval,
+        "count_discrepancy_policy": (
+            "refresh forum counter, then retain a complete cursor walk without recrawling"
+        ),
         "collection_started_at": existing_metadata.get("collection_started_at")
         or metadata_updated_at,
         "metadata_updated_at": metadata_updated_at,
+        "last_selection": (
+            "only-failed"
+            if only_failed
+            else "stratified-pilot"
+            if stratified_pilot
+            else "monthly-random" if monthly_random else "chronological"
+        ),
+        "last_selection_seed": selection_seed if (monthly_random or stratified_pilot) else None,
     }
     metadata_temp = metadata_path.with_suffix(".json.tmp")
     metadata_temp.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(metadata_temp, metadata_path)
     results: dict[str, int] = {}
-    crawl_started = time.monotonic()
+    final_status_counts: dict[str, int] = {}
     with Manifest(config.manifest_path) as manifest:
+        requested_limit = limit
+        candidate_limit = pilot_candidate_pool if stratified_pilot else limit
         stories = manifest.stories_for_crawl(
             config.year,
             retry_failed=retry_failed,
-            limit=limit,
+            only_failed=only_failed,
+            limit=candidate_limit,
             story_ids=story_ids,
-            monthly_round_robin=monthly_round_robin,
+            monthly_random=monthly_random or stratified_pilot,
+            selection_seed=selection_seed,
         )
+        if stratified_pilot:
+            preflight_started = time.monotonic()
+            stories = select_stratified_pilot(
+                stories,
+                api=api,
+                limit=requested_limit,
+                seed=selection_seed,
+                output_dir=config.output_dir,
+            )
+            LOG.info(
+                "pilot preflight complete: %d stories selected | elapsed %s",
+                len(stories),
+                format_duration(time.monotonic() - preflight_started),
+            )
+        # Selection and forum-size preflight are setup work. Start the crawl
+        # clock only after they finish so their fixed cost is not projected
+        # across every remaining story by the rate and ETA calculations.
+        crawl_started = time.monotonic()
         if not stories:
             LOG.warning("no pending stories; run discover first or pass --retry-failed")
         elif stories:
@@ -360,25 +640,6 @@ def crawl(
                 store=store,
                 pseudonymizer=pseudonymizer,
             )
-            current = manifest.story(story["story_id"])
-            if (
-                status == "failed"
-                and current is not None
-                and current.get("error_category") == "CountMismatch"
-            ):
-                LOG.warning(
-                    "story %s had a count mismatch; starting one clean reconciliation pass",
-                    story["story_id"],
-                )
-                status = crawl_story(
-                    current,
-                    config=config,
-                    http=client,
-                    api=api,
-                    manifest=manifest,
-                    store=store,
-                    pseudonymizer=pseudonymizer,
-                )
             results[status] = results.get(status, 0) + 1
             LOG.info(
                 "%s",
@@ -390,6 +651,21 @@ def crawl(
                 ),
             )
         rows = manifest.rows(config.year)
+        final_status_counts = manifest.status_counts(config.year)
         if rows:
             store.export_manifest(rows, config.year)
+    metadata["last_crawl_finished_at"] = utc_now()
+    metadata["last_crawl_results"] = results
+    metadata["status_counts_after_last_crawl"] = final_status_counts
+    unfinished = sum(
+        count
+        for status, count in final_status_counts.items()
+        if status in {"pending", "in_progress"}
+    )
+    if unfinished == 0 and final_status_counts.get("failed", 0) == 0:
+        metadata["collection_completed_at"] = metadata["last_crawl_finished_at"]
+    metadata_temp.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    os.replace(metadata_temp, metadata_path)
     return results

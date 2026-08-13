@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import random
 import threading
 import time
@@ -90,7 +91,13 @@ class HttpClient:
                     ) from exc
                 last_error = exc
                 retry_after = self._retry_after_seconds(exc.headers.get("Retry-After"))
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            except (
+                urllib.error.URLError,
+                http.client.IncompleteRead,
+                http.client.RemoteDisconnected,
+                TimeoutError,
+                OSError,
+            ) as exc:
                 last_error = exc
                 retry_after = None
 

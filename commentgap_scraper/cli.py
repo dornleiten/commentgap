@@ -10,6 +10,7 @@ from . import __version__
 from .config import ScrapeConfig
 from .crawler import crawl, discover
 from .legacy import export_legacy
+from .migration import migrate_existing
 from .validation import validate_dataset
 
 
@@ -70,12 +71,43 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_parser.add_argument("--limit", type=int, help="Process at most this many stories")
     crawl_parser.add_argument(
         "--selection",
-        choices=("chronological", "monthly-round-robin"),
+        choices=(
+            "chronological",
+            "monthly-random",
+            "stratified-pilot",
+            "monthly-round-robin",
+        ),
         default="chronological",
-        help="Ordering used with --limit; monthly-round-robin is recommended for pilots",
+        help=(
+            "Ordering used with --limit; stratified-pilot is recommended for pilots "
+            "(monthly-round-robin is a compatibility alias)"
+        ),
     )
     crawl_parser.add_argument(
+        "--selection-seed",
+        type=int,
+        default=2025,
+        help="Reproducible seed used by randomized selection modes (default: 2025)",
+    )
+    crawl_parser.add_argument(
+        "--pilot-candidate-pool",
+        type=int,
+        default=500,
+        help=(
+            "Candidates whose forum sizes are inspected by stratified-pilot "
+            "before selecting --limit stories (default: 500)"
+        ),
+    )
+    retry_group = crawl_parser.add_mutually_exclusive_group()
+    retry_group.add_argument(
         "--retry-failed", action="store_true", help="Include previously failed stories"
+    )
+    retry_group.add_argument(
+        "--only-failed",
+        action="store_true",
+        help=(
+            "Process only failed or interrupted stories; excludes untouched pending stories"
+        ),
     )
     crawl_parser.add_argument(
         "--story-id",
@@ -108,6 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
         "export-legacy", help="Export normalized tables using the original column names"
     )
     _add_year_output(legacy_parser)
+    migration_parser = subparsers.add_parser(
+        "migrate-existing",
+        help="Offline upgrade of existing Parquet files to the current schema",
+    )
+    _add_year_output(migration_parser)
     return parser
 
 
@@ -154,8 +191,12 @@ def main(argv: list[str] | None = None) -> int:
                 hash_key=key,
                 limit=args.limit,
                 retry_failed=args.retry_failed,
+                only_failed=args.only_failed,
                 story_ids=args.story_ids,
-                monthly_round_robin=args.selection == "monthly-round-robin",
+                monthly_random=args.selection in {"monthly-random", "monthly-round-robin"},
+                selection_seed=args.selection_seed,
+                stratified_pilot=args.selection == "stratified-pilot",
+                pilot_candidate_pool=args.pilot_candidate_pool,
             )
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0 if result.get("failed", 0) == 0 else 2
@@ -168,6 +209,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "export-legacy":
             comments, articles = export_legacy(_output(args), args.year)
             print(json.dumps({"comments": str(comments), "articles": str(articles)}, indent=2))
+            return 0
+        if args.command == "migrate-existing":
+            result = migrate_existing(_output(args), args.year)
+            print(json.dumps(result, indent=2, sort_keys=True))
             return 0
     except (RuntimeError, ValueError) as exc:
         logging.getLogger("commentgap_scraper").error("%s", exc)

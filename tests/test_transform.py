@@ -29,6 +29,7 @@ class TransformTests(unittest.TestCase):
         self.assertEqual(rows[2]["root_comment_id"], "root-1")
         self.assertEqual(rows[0]["votes_positive"], 12)
         self.assertEqual(rows[0]["votes_negative"], 3)
+        self.assertEqual(rows[0]["effective_text"], "Root heading\nRoot text")
         self.assertFalse(rows[0]["is_leaf"])
         self.assertTrue(rows[2]["is_leaf"])
 
@@ -68,9 +69,35 @@ class TransformTests(unittest.TestCase):
         )
         merged = merge_comment_records(sticky + regular)
         self.assertEqual(len(merged), 3)
-        self.assertTrue(all(row["is_sticky"] for row in merged))
+        self.assertTrue(merged[0]["is_sticky"])
+        self.assertFalse(merged[1]["is_sticky"])
+        self.assertFalse(merged[2]["is_sticky"])
         self.assertEqual([row["display_order"] for row in merged], [1, 2, 3])
         self.assertEqual(validate_row_invariants(merged), [])
+
+    def test_individually_sticky_reply_retains_normal_tree_depth(self):
+        regular = flatten_postings(
+            self.roots,
+            story_id="s",
+            forum_id="f",
+            pseudonymizer=self.pseudonymizer,
+            collected_at="now",
+            page_index=1,
+        )
+        sticky_reply = flatten_postings(
+            [self.roots[0]["replies"][0]],
+            story_id="s",
+            forum_id="f",
+            pseudonymizer=self.pseudonymizer,
+            collected_at="now",
+            page_index=0,
+            is_sticky=True,
+        )
+        merged = merge_comment_records(sticky_reply + regular)
+        reply = next(row for row in merged if row["comment_id"] == "reply-1")
+        self.assertEqual(reply["depth"], 1)
+        self.assertEqual(reply["parent_comment_id"], "root-1")
+        self.assertTrue(reply["is_sticky"])
 
     def test_pseudonym_is_stable_and_keyed(self):
         first = self.pseudonymizer.pseudonymize(self.roots[0])

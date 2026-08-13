@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import random
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,14 @@ from typing import Any
 from .parsing import DiscoveredStory
 
 
-TERMINAL_STATUSES = ("completed", "no_forum", "no_postings", "inaccessible", "failed")
+TERMINAL_STATUSES = (
+    "completed",
+    "completed_with_count_discrepancy",
+    "no_forum",
+    "no_postings",
+    "inaccessible",
+    "failed",
+)
 
 
 class Manifest:
@@ -92,12 +100,14 @@ class Manifest:
         year: int,
         *,
         retry_failed: bool = False,
+        only_failed: bool = False,
         limit: int | None = None,
         story_ids: list[str] | None = None,
-        monthly_round_robin: bool = False,
+        monthly_random: bool = False,
+        selection_seed: int = 2025,
     ) -> list[dict[str, Any]]:
-        statuses = ["pending", "in_progress"]
-        if retry_failed:
+        statuses = ["failed", "in_progress"] if only_failed else ["pending", "in_progress"]
+        if retry_failed and not only_failed:
             statuses.append("failed")
         placeholders = ",".join("?" for _ in statuses)
         params: list[Any] = [year, *statuses]
@@ -105,14 +115,27 @@ class Manifest:
         if story_ids:
             query += f" AND story_id IN ({','.join('?' for _ in story_ids)})"
             params.extend(story_ids)
-        if monthly_round_robin:
-            query = f"SELECT * FROM ({query.replace('SELECT *', 'SELECT *, ROW_NUMBER() OVER (PARTITION BY month ORDER BY story_id) AS monthly_rank')}) ORDER BY monthly_rank, month"
-        else:
+        if not monthly_random:
             query += " ORDER BY month, story_id"
-        if limit is not None:
+        if limit is not None and not monthly_random:
             query += " LIMIT ?"
             params.append(limit)
-        return [dict(row) for row in self.connection.execute(query, params)]
+        rows = [dict(row) for row in self.connection.execute(query, params)]
+        if monthly_random:
+            by_month: dict[int, list[dict[str, Any]]] = {}
+            for row in rows:
+                by_month.setdefault(int(row["month"]), []).append(row)
+            for month, month_rows in by_month.items():
+                random.Random(f"{selection_seed}:{month}").shuffle(month_rows)
+            rows = [
+                row
+                for rank in range(max((len(values) for values in by_month.values()), default=0))
+                for month in sorted(by_month)
+                for row in by_month[month][rank : rank + 1]
+            ]
+            if limit is not None:
+                rows = rows[:limit]
+        return rows
 
     def mark_in_progress(self, story_id: str, started_at: str) -> None:
         self.connection.execute(
@@ -164,7 +187,11 @@ class Manifest:
             """
             UPDATE stories SET status=?, forum_id=COALESCE(?, forum_id),
                 expected_count=COALESCE(?, expected_count), observed_count=?,
-                next_cursor=NULL, pagination_complete=CASE WHEN ?='completed' THEN 1 ELSE pagination_complete END,
+                next_cursor=NULL,
+                pagination_complete=CASE
+                    WHEN ? IN ('completed', 'completed_with_count_discrepancy') THEN 1
+                    ELSE pagination_complete
+                END,
                 error_category=?, error_message=?,
                 finished_at=?, updated_at=CURRENT_TIMESTAMP WHERE story_id=?
             """,
