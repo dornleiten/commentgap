@@ -4,6 +4,12 @@ output: html_document
 date: "2022-10-11"
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache.path = ".cache/knitr/01_der-standard-scraping/"
+)
+```
+
 ```{r}
 # scraping
 library(RSelenium)

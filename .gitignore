@@ -5,12 +5,14 @@
 /data/comment_data_general_091022_untilarticle5874_corrected.csv
 betareg.xlsx
 scrap*
-Presentation-IC2S2-2024.pptx
-~$Presentation-IC2S2-2024.pptx
-~$3C_283.pptx
-3C_283.pptx
+
 .Rhistory
+/*.html
+/.cache/
 /Capstone Code
+/submissions
+/notes
+/presentations
 model_output/regressions/votes_neg_results.rds
 model_output/regressions/votes_pos_results.rds
 model_output/regressions/pin_results.rds

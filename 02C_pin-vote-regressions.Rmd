@@ -5,7 +5,10 @@ date: "2024-05-09"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  cache.path = ".cache/knitr/02C_pin-vote-regressions/"
+)
 ```
 
 ## Read data
@@ -720,4 +723,3 @@ write.csv(r5, 'model_output/regressions/pin_votes_compound_diffs.csv')
 
 
 ```
-

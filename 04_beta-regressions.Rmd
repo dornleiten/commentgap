@@ -5,7 +5,10 @@ date: "2023-12-17"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  cache.path = ".cache/knitr/04_beta-regressions/"
+)
 ```
 
 ## Read Data
@@ -174,4 +177,3 @@ for (n in c("10", "N")) {
   }
 }
 ```
-

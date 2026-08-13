@@ -1,0 +1,397 @@
+---
+title: "Gap Regression (02C-Consistent, Streamlined)"
+output: html_document
+date: "2026-02-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  cache.path = ".cache/knitr/02E_better-gap-measures/"
+)
+library(dplyr)
+```
+
+## Load data
+
+```{r}
+file <- "data/comment_data_general_091022_untilarticle5874_final_redacted.csv"
+comment_data_general <- read.csv(file)[, -1]
+
+comment_data_general$article <- as.factor(comment_data_general$article)
+comment_data_general$pinned_f <- as.logical(comment_data_general$pinned_f)
+comment_data_general$is_root_comment <- as.logical(comment_data_general$is_root_comment)
+
+if (!("votes_rel" %in% names(comment_data_general))) {
+  comment_data_general$votes_rel <- comment_data_general$votes_pos - comment_data_general$votes_neg
+}
+
+cat("Data loaded:", nrow(comment_data_general), "comments\\n")
+cat("Articles:", dplyr::n_distinct(comment_data_general$article), "\\n")
+cat("Pinned comments:", sum(comment_data_general$pinned_f, na.rm = TRUE), "\\n")
+```
+
+## Variable mapping (02C -> 02E aggregate)
+
+```{r}
+variable_mapping_02c_to_02e <- data.frame(
+  var_02c = c(
+    "hours_since_article",
+    "num_sentences",
+    "user_follower",
+    "article_comments",
+    "votes_pos_mean",
+    "votes_neg_mean",
+    "genre1",
+    "(extension) n/a",
+    "(extension) n/a",
+    "(extension) n/a"
+  ),
+  var_02e = c(
+    "hours_since_article_editors_mean",
+    "num_sentences_editors_mean",
+    "user_follower_editors_mean",
+    "article_comments",
+    "votes_pos_mean",
+    "votes_neg_mean",
+    "genre1",
+    "n_picks",
+    "follower_diff",
+    "controversy"
+  ),
+  notes = c(
+    "Mean over Editors' Picks in each discussion",
+    "Mean over Editors' Picks in each discussion",
+    "Mean over Editors' Picks in each discussion",
+    "Discussion-level count (all comments)",
+    "Discussion-level mean (all comments)",
+    "Discussion-level mean (all comments)",
+    "Same article-level genre factor as 02C",
+    "Gap-specific extension (selection intensity)",
+    "Gap-specific extension (editors vs top user picks)",
+    "Gap-specific extension (root-comment downvote share)"
+  ),
+  stringsAsFactors = FALSE
+)
+
+print(variable_mapping_02c_to_02e)
+```
+
+## Build discussion-level modeling dataset
+
+```{r build-model-data, cache=TRUE}
+build_gap_model_df_consistent <- function(comment_data_general) {
+  by_article <- split(comment_data_general, comment_data_general$article)
+
+  one_article <- function(df) {
+    editors <- df[df$pinned_f == TRUE, , drop = FALSE]
+    if (nrow(editors) == 0) return(NULL)
+
+    roots <- df[df$is_root_comment == TRUE, , drop = FALSE]
+    if (nrow(roots) < 2) return(NULL)
+
+    # Gap outcome among root comments only (aligned candidate set)
+    user_ranking <- roots %>%
+      arrange(desc(votes_rel)) %>%
+      mutate(user_rank = row_number())
+
+    editor_ranks <- user_ranking %>%
+      filter(comment_id %in% editors$comment_id) %>%
+      pull(user_rank)
+
+    if (length(editor_ranks) == 0) return(NULL)
+
+    gap_score <- (mean(editor_ranks) - 1) / (nrow(roots) - 1)
+
+    # Extension features
+    controversy <- mean(roots$votes_neg / (roots$votes_pos + roots$votes_neg + 1), na.rm = TRUE)
+
+    n_picks <- nrow(editors)
+    top_user <- roots %>%
+      arrange(desc(votes_rel)) %>%
+      slice_head(n = n_picks)
+
+    follower_diff <- mean(editors$user_follower, na.rm = TRUE) - mean(top_user$user_follower, na.rm = TRUE)
+
+    data.frame(
+      article = as.character(df$article[1]),
+      gap_score = gap_score,
+      hours_since_article_editors_mean = mean(editors$hours_since_article, na.rm = TRUE),
+      num_sentences_editors_mean = mean(editors$num_sentences, na.rm = TRUE),
+      user_follower_editors_mean = mean(editors$user_follower, na.rm = TRUE),
+      article_comments = nrow(df),
+      votes_pos_mean = mean(df$votes_pos, na.rm = TRUE),
+      votes_neg_mean = mean(df$votes_neg, na.rm = TRUE),
+      genre1 = as.character(df$genre1[1]),
+      n_picks = n_picks,
+      follower_diff = follower_diff,
+      controversy = controversy,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  out <- bind_rows(lapply(by_article, one_article))
+  out
+}
+
+gap_model_df_consistent <- build_gap_model_df_consistent(comment_data_general)
+
+cat("N discussions with picks:", nrow(gap_model_df_consistent), "\\n")
+```
+
+## Preprocessing (02C-style transforms)
+
+```{r preprocess-model-data}
+preprocess_gap_predictors_02c_style <- function(gap_model_df_consistent) {
+  gap_model_df_consistent <- gap_model_df_consistent %>%
+    filter(
+      !is.na(gap_score),
+      !is.na(hours_since_article_editors_mean),
+      !is.na(num_sentences_editors_mean),
+      !is.na(user_follower_editors_mean),
+      !is.na(article_comments),
+      !is.na(votes_pos_mean),
+      !is.na(votes_neg_mean),
+      !is.na(genre1),
+      !is.na(n_picks),
+      !is.na(follower_diff),
+      !is.na(controversy)
+    )
+
+  gap_model_df_consistent$genre1 <- relevel(as.factor(gap_model_df_consistent$genre1), ref = "/inland")
+
+  log_vars <- c(
+    "hours_since_article_editors_mean",
+    "user_follower_editors_mean",
+    "article_comments",
+    "votes_pos_mean",
+    "votes_neg_mean",
+    "n_picks"
+  )
+
+  for (v in log_vars) {
+    gap_model_df_consistent[[paste0("log_", v)]] <- log1p(gap_model_df_consistent[[v]])
+  }
+
+  z_vars <- c(
+    "log_hours_since_article_editors_mean",
+    "num_sentences_editors_mean",
+    "log_user_follower_editors_mean",
+    "log_article_comments",
+    "log_votes_pos_mean",
+    "log_votes_neg_mean",
+    "log_n_picks",
+    "follower_diff",
+    "controversy"
+  )
+
+  for (v in z_vars) {
+    gap_model_df_consistent[[paste0("z_", v)]] <- as.numeric(scale(gap_model_df_consistent[[v]]))
+  }
+
+  # Epsilon clipping for beta family support in (0,1)
+  eps <- 1e-6
+  gap_model_df_consistent$gap_beta <- pmin(pmax(gap_model_df_consistent$gap_score, eps), 1 - eps)
+
+  gap_model_df_consistent
+}
+
+gap_model_df_consistent <- preprocess_gap_predictors_02c_style(gap_model_df_consistent)
+
+cat("Post-filter N:", nrow(gap_model_df_consistent), "\\n")
+cat("Genre baseline:", levels(gap_model_df_consistent$genre1)[1], "\\n")
+```
+
+## Consistency and transform checks
+
+```{r checks}
+required_core <- c(
+  "gap_score", "gap_beta",
+  "hours_since_article_editors_mean", "num_sentences_editors_mean",
+  "user_follower_editors_mean", "article_comments",
+  "votes_pos_mean", "votes_neg_mean", "genre1"
+)
+missing_required <- setdiff(required_core, names(gap_model_df_consistent))
+if (length(missing_required) > 0) {
+  stop("Missing required columns: ", paste(missing_required, collapse = ", "))
+}
+
+required_transformed <- c(
+  "z_log_hours_since_article_editors_mean",
+  "z_num_sentences_editors_mean",
+  "z_log_user_follower_editors_mean",
+  "z_log_article_comments",
+  "z_log_votes_pos_mean",
+  "z_log_votes_neg_mean",
+  "z_log_n_picks",
+  "z_follower_diff",
+  "z_controversy"
+)
+
+stopifnot(all(required_transformed %in% names(gap_model_df_consistent)))
+finite_ok <- sapply(gap_model_df_consistent[, required_transformed], function(x) all(is.finite(x)))
+if (!all(finite_ok)) {
+  stop("Non-finite values in transformed predictors: ", paste(names(finite_ok)[!finite_ok], collapse = ", "))
+}
+
+if (levels(gap_model_df_consistent$genre1)[1] != "/inland") {
+  warning("genre1 baseline is not '/inland'; check available levels")
+}
+
+cat("All consistency/transform checks passed.\\n")
+```
+
+## Collinearity diagnostics
+
+```{r collinearity}
+num_core <- gap_model_df_consistent %>%
+  select(
+    z_log_hours_since_article_editors_mean,
+    z_num_sentences_editors_mean,
+    z_log_user_follower_editors_mean,
+    z_log_article_comments,
+    z_log_votes_pos_mean,
+    z_log_votes_neg_mean
+  )
+
+num_ext <- gap_model_df_consistent %>%
+  select(
+    z_log_hours_since_article_editors_mean,
+    z_num_sentences_editors_mean,
+    z_log_user_follower_editors_mean,
+    z_log_article_comments,
+    z_log_votes_pos_mean,
+    z_log_votes_neg_mean,
+    z_log_n_picks,
+    z_follower_diff,
+    z_controversy
+  )
+
+cat("Core predictor correlation matrix:\\n")
+print(round(cor(num_core, use = "pairwise.complete.obs"), 3))
+
+cat("\\nExtension predictor correlation matrix:\\n")
+print(round(cor(num_ext, use = "pairwise.complete.obs"), 3))
+
+compute_vif_like <- function(df_num) {
+  vars <- names(df_num)
+  out <- data.frame(variable = vars, vif_like = NA_real_)
+  for (i in seq_along(vars)) {
+    y <- vars[i]
+    x <- vars[-i]
+    f <- as.formula(paste(y, "~", paste(x, collapse = " + ")))
+    r2 <- summary(lm(f, data = df_num))$r.squared
+    out$vif_like[i] <- 1 / (1 - r2)
+  }
+  out
+}
+
+vif_like_ext <- compute_vif_like(num_ext)
+print(vif_like_ext %>% arrange(desc(vif_like)))
+```
+
+## Beta regressions (glmmTMB)
+
+```{r beta-regressions, cache=TRUE}
+fit_gap_beta_models <- function(gap_model_df_consistent) {
+  if (!requireNamespace("glmmTMB", quietly = TRUE)) return(NULL)
+
+  core_formula <- gap_beta ~
+    z_log_hours_since_article_editors_mean +
+    z_num_sentences_editors_mean +
+    z_log_user_follower_editors_mean +
+    z_log_article_comments +
+    z_log_votes_pos_mean +
+    z_log_votes_neg_mean +
+    genre1
+
+  extension_formula <- gap_beta ~
+    z_log_hours_since_article_editors_mean +
+    z_num_sentences_editors_mean +
+    z_log_user_follower_editors_mean +
+    z_log_article_comments +
+    z_log_votes_pos_mean +
+    z_log_votes_neg_mean +
+    genre1 +
+    z_log_n_picks +
+    z_follower_diff +
+    z_controversy
+
+  sensitivity_formula <- gap_beta ~
+    z_log_hours_since_article_editors_mean +
+    z_num_sentences_editors_mean +
+    z_log_user_follower_editors_mean +
+    z_log_article_comments +
+    z_log_votes_pos_mean +
+    z_log_votes_neg_mean +
+    genre1 +
+    z_follower_diff +
+    z_controversy
+
+  list(
+    core = glmmTMB::glmmTMB(core_formula, data = gap_model_df_consistent, family = glmmTMB::beta_family(link = "logit")),
+    extension = glmmTMB::glmmTMB(extension_formula, data = gap_model_df_consistent, family = glmmTMB::beta_family(link = "logit")),
+    sensitivity = glmmTMB::glmmTMB(sensitivity_formula, data = gap_model_df_consistent, family = glmmTMB::beta_family(link = "logit"))
+  )
+}
+
+gap_beta_models <- fit_gap_beta_models(gap_model_df_consistent)
+
+if (is.null(gap_beta_models)) {
+  cat("Package 'glmmTMB' is not installed; regression section skipped.\\n")
+} else {
+  cat("=== CORE MODEL ===\\n")
+  print(summary(gap_beta_models$core))
+
+  cat("\\n=== EXTENSION MODEL ===\\n")
+  print(summary(gap_beta_models$extension))
+
+  cat("\\n=== SENSITIVITY MODEL (NO n_picks) ===\\n")
+  print(summary(gap_beta_models$sensitivity))
+
+  model_comparison <- data.frame(
+    model = c("core", "extension", "sensitivity_no_n_picks"),
+    AIC = c(AIC(gap_beta_models$core), AIC(gap_beta_models$extension), AIC(gap_beta_models$sensitivity)),
+    BIC = c(BIC(gap_beta_models$core), BIC(gap_beta_models$extension), BIC(gap_beta_models$sensitivity))
+  )
+  cat("\\n=== MODEL COMPARISON ===\\n")
+  print(model_comparison)
+}
+```
+
+## Export model data and coefficients
+
+```{r export-model-data, include=FALSE}
+export_gap_model_tables <- function(gap_model_df_consistent, model_list) {
+  write.csv(gap_model_df_consistent, "data/gap_beta_model_data_consistent.csv", row.names = FALSE)
+  write.csv(gap_model_df_consistent, "data/gap_beta_model_data.csv", row.names = FALSE)
+
+  if (is.null(model_list)) return(invisible(NULL))
+
+  coef_to_df <- function(m, model_name) {
+    out <- as.data.frame(summary(m)$coefficients$cond)
+    out$term <- rownames(out)
+    rownames(out) <- NULL
+    out <- out %>%
+      select(term, Estimate, `Std. Error`, `z value`, `Pr(>|z|)`) %>%
+      mutate(model = model_name)
+    out
+  }
+
+  beta_coef_core <- coef_to_df(model_list$core, "core")
+  beta_coef_extension <- coef_to_df(model_list$extension, "extension")
+  beta_coef_sensitivity <- coef_to_df(model_list$sensitivity, "sensitivity")
+
+  write.csv(beta_coef_core, "data/gap_beta_model_coefficients_core.csv", row.names = FALSE)
+  write.csv(beta_coef_extension, "data/gap_beta_model_coefficients_extension.csv", row.names = FALSE)
+  write.csv(beta_coef_sensitivity, "data/gap_beta_model_coefficients_sensitivity.csv", row.names = FALSE)
+  write.csv(bind_rows(beta_coef_core, beta_coef_extension, beta_coef_sensitivity),
+            "data/gap_beta_model_coefficients.csv", row.names = FALSE)
+
+  invisible(list(core = beta_coef_core, extension = beta_coef_extension, sensitivity = beta_coef_sensitivity))
+}
+
+coef_exports <- export_gap_model_tables(gap_model_df_consistent, gap_beta_models)
+```

@@ -1,0 +1,15 @@
+# Core analysis stack
+ipykernel
+numpy
+pandas
+matplotlib
+seaborn
+scipy
+scikit-learn
+xgboost
+regex
+
+# Sentiment notebook stack
+torch
+transformers
+germansentiment
