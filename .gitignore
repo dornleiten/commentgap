@@ -16,3 +16,10 @@ scrap*
 model_output/regressions/votes_neg_results.rds
 model_output/regressions/votes_pos_results.rds
 model_output/regressions/pin_results.rds
+
+# Retrospective forum scraper outputs and local secrets
+/data/scrape_*/
+/.env
+/.pytest_cache/
+__pycache__/
+*.py[cod]

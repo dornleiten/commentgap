@@ -1,0 +1,3 @@
+# Install with: python -m pip install -r requirements-scraper.txt
+duckdb>=1.1
+pyarrow>=18

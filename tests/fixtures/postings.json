@@ -1,0 +1,68 @@
+[
+  {
+    "id": "root-1",
+    "lifecycleStatus": "Published",
+    "flags": ["flagB", "flagA"],
+    "rootPostingId": "root-1",
+    "title": "Root heading",
+    "text": "Root text",
+    "author": {
+      "id": "private-author-id",
+      "name": "Visible Name",
+      "lifecycleStatus": "Active",
+      "flags": ["isSmartUser"],
+      "followerCount": 7
+    },
+    "reactions": {
+      "aggregated": [
+        {"name": "positive", "value": 12, "statistic": "SUM"},
+        {"name": "negative", "value": 3, "statistic": "SUM"}
+      ]
+    },
+    "history": {"created": "2025-02-17T09:32:15.589Z"},
+    "legacy": {
+      "postingId": 1134371054,
+      "communityIdentityId": 967956,
+      "communityName": "Visible Name"
+    },
+    "replies": [
+      {
+        "id": "reply-1",
+        "lifecycleStatus": "Published",
+        "flags": [],
+        "rootPostingId": "root-1",
+        "title": null,
+        "text": "Reply text",
+        "author": {
+          "id": "",
+          "name": "",
+          "lifecycleStatus": "Deleted",
+          "flags": [],
+          "followerCount": 0
+        },
+        "reactions": {"aggregated": []},
+        "history": {"created": "2025-02-17T09:33:00Z"},
+        "legacy": {
+          "postingId": 1134371055,
+          "communityIdentityId": 123456,
+          "communityName": "raw-deleted-uuid"
+        },
+        "replies": [
+          {
+            "id": "reply-2",
+            "lifecycleStatus": "Deleted",
+            "flags": [],
+            "rootPostingId": "root-1",
+            "title": null,
+            "text": null,
+            "author": null,
+            "reactions": {"aggregated": [{"name": "positive", "value": 0}]},
+            "history": {"created": "2025-02-17T09:34:00Z"},
+            "legacy": {"postingId": 1134371056},
+            "replies": []
+          }
+        ]
+      }
+    ]
+  }
+]
