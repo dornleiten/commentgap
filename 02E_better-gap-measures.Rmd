@@ -81,36 +81,61 @@ print(variable_mapping_02c_to_02e)
 
 ## Build discussion-level modeling dataset
 
-```{r build-model-data, cache=TRUE}
+```{r build-model-data}
+normalised_selection_rank_gap <- function(scores, selected) {
+  if (length(scores) != length(selected)) {
+    stop("scores and selected must have the same length")
+  }
+
+  keep <- !is.na(scores) & !is.na(selected)
+  scores <- scores[keep]
+  selected <- as.logical(selected[keep])
+
+  n_candidates <- length(scores)
+  n_selected <- sum(selected)
+
+  if (n_candidates < 2 || n_selected < 1) return(NA_real_)
+
+  # The ranking contains no information about selection quality when every
+  # eligible candidate is selected: best, random, and worst sets coincide.
+  if (n_selected >= n_candidates) return(NA_real_)
+
+  # Midranks ensure tied vote totals do not inherit arbitrary row-order ranks.
+  audience_ranks <- rank(-scores, ties.method = "average")
+  mean_selected_rank <- mean(audience_ranks[selected])
+
+  best_mean_rank <- (n_selected + 1) / 2
+  worst_mean_rank <- n_candidates - (n_selected - 1) / 2
+
+  (mean_selected_rank - best_mean_rank) /
+    (worst_mean_rank - best_mean_rank)
+}
+
 build_gap_model_df_consistent <- function(comment_data_general) {
   by_article <- split(comment_data_general, comment_data_general$article)
 
   one_article <- function(df) {
-    editors <- df[df$pinned_f == TRUE, , drop = FALSE]
-    if (nrow(editors) == 0) return(NULL)
-
     roots <- df[df$is_root_comment == TRUE, , drop = FALSE]
     if (nrow(roots) < 2) return(NULL)
 
-    # Gap outcome among root comments only (aligned candidate set)
-    user_ranking <- roots %>%
-      arrange(desc(votes_rel)) %>%
-      mutate(user_rank = row_number())
+    # Editors' Picks and the audience ranking must use the same eligible set.
+    # Non-root pins are treated as data anomalies and excluded from this metric.
+    editors <- roots[roots$pinned_f == TRUE, , drop = FALSE]
+    if (nrow(editors) == 0) return(NULL)
 
-    editor_ranks <- user_ranking %>%
-      filter(comment_id %in% editors$comment_id) %>%
-      pull(user_rank)
-
-    if (length(editor_ranks) == 0) return(NULL)
-
-    gap_score <- (mean(editor_ranks) - 1) / (nrow(roots) - 1)
+    n_picks <- nrow(editors)
+    gap_score <- normalised_selection_rank_gap(
+      scores = roots$votes_rel,
+      selected = roots$pinned_f
+    )
 
     # Extension features
     controversy <- mean(roots$votes_neg / (roots$votes_pos + roots$votes_neg + 1), na.rm = TRUE)
 
-    n_picks <- nrow(editors)
+    # A stable secondary key makes the separate follower-difference covariate
+    # reproducible when relative-vote totals are tied at the top-k boundary.
     top_user <- roots %>%
-      arrange(desc(votes_rel)) %>%
+      arrange(desc(votes_rel), comment_id) %>%
       slice_head(n = n_picks)
 
     follower_diff <- mean(editors$user_follower, na.rm = TRUE) - mean(top_user$user_follower, na.rm = TRUE)
@@ -139,6 +164,8 @@ build_gap_model_df_consistent <- function(comment_data_general) {
 gap_model_df_consistent <- build_gap_model_df_consistent(comment_data_general)
 
 cat("N discussions with picks:", nrow(gap_model_df_consistent), "\\n")
+cat("N with undefined gap because every eligible root was selected:",
+    sum(is.na(gap_model_df_consistent$gap_score)), "\\n")
 ```
 
 ## Preprocessing (02C-style transforms)
@@ -207,6 +234,37 @@ cat("Genre baseline:", levels(gap_model_df_consistent$genre1)[1], "\\n")
 ## Consistency and transform checks
 
 ```{r checks}
+# Metric invariants for a ten-item ranking with three selected items.
+toy_scores <- 10:1
+stopifnot(all.equal(
+  normalised_selection_rank_gap(toy_scores, seq_along(toy_scores) <= 3),
+  0
+))
+stopifnot(all.equal(
+  normalised_selection_rank_gap(toy_scores, seq_along(toy_scores) >= 8),
+  1
+))
+stopifnot(is.na(
+  normalised_selection_rank_gap(toy_scores, rep(TRUE, length(toy_scores)))
+))
+
+# The expected mean selected rank under random selection is (N + 1) / 2,
+# which maps exactly to 0.5 under the corrected top-k/bottom-k normalisation.
+n_toy <- length(toy_scores)
+k_toy <- 3
+random_expected_gap <- (
+  (n_toy + 1) / 2 - (k_toy + 1) / 2
+) / (n_toy - k_toy)
+stopifnot(all.equal(random_expected_gap, 0.5))
+
+# Tied scores receive equal midranks rather than row-order-dependent ranks.
+tied_ranks <- rank(-c(10, 9, 9, 9, 8), ties.method = "average")
+stopifnot(identical(tied_ranks[2:4], c(3, 3, 3)))
+stopifnot(all.equal(
+  normalised_selection_rank_gap(rep(1, 5), c(TRUE, FALSE, TRUE, FALSE, FALSE)),
+  0.5
+))
+
 required_core <- c(
   "gap_score", "gap_beta",
   "hours_since_article_editors_mean", "num_sentences_editors_mean",
@@ -238,6 +296,10 @@ if (!all(finite_ok)) {
 
 if (levels(gap_model_df_consistent$genre1)[1] != "/inland") {
   warning("genre1 baseline is not '/inland'; check available levels")
+}
+
+if (any(gap_model_df_consistent$gap_score < 0 | gap_model_df_consistent$gap_score > 1)) {
+  stop("Corrected gap score is outside [0, 1]")
 }
 
 cat("All consistency/transform checks passed.\\n")
@@ -294,7 +356,7 @@ print(vif_like_ext %>% arrange(desc(vif_like)))
 
 ## Beta regressions (glmmTMB)
 
-```{r beta-regressions, cache=TRUE}
+```{r beta-regressions}
 fit_gap_beta_models <- function(gap_model_df_consistent) {
   if (!requireNamespace("glmmTMB", quietly = TRUE)) return(NULL)
 
