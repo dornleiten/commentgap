@@ -1,0 +1,126 @@
+import unittest
+
+import numpy as np
+import pandas as pd
+
+from commentgap_analysis.features import (
+    article_similarity_top3,
+    assign_audience_labels,
+    compute_author_history,
+    compute_discussion_history,
+    temporal_novelty,
+    validate_approximate_novelty,
+    validate_qa_summary,
+    vienna_period,
+)
+
+
+class AnalysisFeatureTests(unittest.TestCase):
+    def test_strict_discussion_and_branch_history(self):
+        frame = pd.DataFrame(
+            [
+                ("r1", "s", None, "r1", True, "2025-03-01T10:00:00Z", "a"),
+                ("c1", "s", "r1", "r1", False, "2025-03-01T10:30:00Z", "b"),
+                ("r2", "s", None, "r2", True, "2025-03-01T11:00:00Z", "a"),
+                ("c2", "s", "r1", "r1", False, "2025-03-01T11:00:00Z", "a"),
+            ],
+            columns=[
+                "comment_id",
+                "story_id",
+                "parent_comment_id",
+                "root_comment_id",
+                "is_root",
+                "created_at",
+                "author_hash",
+            ],
+        )
+        result = compute_discussion_history(frame).set_index("comment_id")
+        self.assertEqual(result.at["c1", "prior_roots"], 1)
+        self.assertEqual(result.at["c1", "branch_prior_comments"], 1)
+        self.assertEqual(result.at["r2", "prior_comments"], 2)
+        self.assertEqual(result.at["c2", "prior_comments"], 2)
+        self.assertEqual(result.at["c2", "branch_prior_comments"], 2)
+        self.assertEqual(result.at["r2", "branch_prior_comments"], 0)
+        self.assertEqual(result.at["r2", "author_prior_comments_story"], 1)
+        self.assertEqual(result.at["c2", "author_prior_comments_story"], 1)
+
+    def test_author_history_excludes_focal_story_and_timestamp_ties(self):
+        frame = pd.DataFrame(
+            [
+                ("a1", "A", "2025-01-01T10:00:00Z", "u", 5, 1),
+                ("a2", "A", "2025-01-02T10:00:00Z", "u", 7, 2),
+                ("b1", "B", "2025-01-03T10:00:00Z", "u", 0, 0),
+                ("c1", "C", "2025-01-03T10:00:00Z", "u", 0, 0),
+                ("late", "D", "2025-02-15T10:00:00Z", "u", 0, 0),
+            ],
+            columns=[
+                "comment_id",
+                "story_id",
+                "created_at",
+                "author_hash",
+                "votes_positive",
+                "votes_negative",
+            ],
+        )
+        result = compute_author_history(frame).set_index("comment_id")
+        self.assertEqual(result.at["a2", "author_prior_30d_comments"], 0)
+        self.assertEqual(result.at["b1", "author_prior_30d_comments"], 2)
+        self.assertEqual(result.at["b1", "author_prior_30d_snapshot_upvotes"], 12)
+        self.assertEqual(result.at["b1", "author_prior_30d_snapshot_downvotes"], 3)
+        self.assertEqual(result.at["c1", "author_prior_30d_comments"], 2)
+        self.assertEqual(result.at["late", "author_prior_30d_comments"], 0)
+
+    def test_top_k_ties_are_exact_and_reproducible(self):
+        frame = pd.DataFrame(
+            {
+                "story_id": ["s"] * 5,
+                "comment_id": list("abcde"),
+                "is_sticky": [True, True, False, False, False],
+                "relative_votes": [10, 8, 8, 8, 1],
+            }
+        )
+        first, diagnostics = assign_audience_labels(frame, draws=10, seed=9)
+        second, _ = assign_audience_labels(frame.sample(frac=1), draws=10, seed=9)
+        for draw in range(1, 11):
+            column = f"audience_selected_draw_{draw:02d}"
+            self.assertEqual(int(first[column].sum()), 2)
+            left = first.set_index("comment_id")[column].sort_index()
+            right = second.set_index("comment_id")[column].sort_index()
+            pd.testing.assert_series_equal(left, right)
+        self.assertTrue(bool(diagnostics.at[0, "ambiguous_cutoff"]))
+
+    def test_similarity_and_strict_temporal_novelty(self):
+        vectors = np.array([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        passages = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        similarity = article_similarity_top3(vectors, passages)
+        np.testing.assert_allclose(similarity, [0.5, 0.5, 0.5])
+        timestamps = pd.to_datetime(
+            ["2025-01-01T10:00Z", "2025-01-01T10:00Z", "2025-01-01T11:00Z"], utc=True
+        )
+        novelty = temporal_novelty(
+            vectors, pd.Series(timestamps), np.ones(3, dtype=bool), exact_threshold=10
+        )
+        self.assertTrue(np.isnan(novelty[0]))
+        self.assertTrue(np.isnan(novelty[1]))
+        self.assertAlmostEqual(float(novelty[2]), 1.0)
+        validation = validate_approximate_novelty(
+            vectors,
+            pd.Series(timestamps),
+            np.ones(3, dtype=bool),
+            novelty,
+            seed=1,
+        )
+        self.assertEqual(validation["recall_within_1e_3"], 1.0)
+
+    def test_vienna_periods_and_qa_gate(self):
+        self.assertEqual(vienna_period(pd.Timestamp("2025-07-01T01:00:00Z")), "overnight")
+        self.assertEqual(vienna_period(pd.Timestamp("2025-07-01T08:00:00Z")), "weekday_work")
+        self.assertEqual(vienna_period(pd.Timestamp("2025-07-05T10:00:00Z")), "weekend_day_evening")
+        summary = {"passed": True, "nonterminal_stories": 1, "status_counts": {}}
+        validate_qa_summary(summary, allow_incomplete=True)
+        with self.assertRaises(ValueError):
+            validate_qa_summary(summary, allow_incomplete=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

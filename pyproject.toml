@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "commentgap-scraper"
-version = "0.3.2"
+version = "0.4.0"
 description = "Resumable, privacy-preserving Der Standard forum scraper"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,4 +16,4 @@ dependencies = [
 commentgap-scrape = "commentgap_scraper.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["commentgap_scraper*"]
+include = ["commentgap_scraper*", "commentgap_analysis*"]

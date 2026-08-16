@@ -99,6 +99,7 @@ class Manifest:
         self,
         year: int,
         *,
+        month: int | None = None,
         retry_failed: bool = False,
         only_failed: bool = False,
         limit: int | None = None,
@@ -112,6 +113,9 @@ class Manifest:
         placeholders = ",".join("?" for _ in statuses)
         params: list[Any] = [year, *statuses]
         query = f"SELECT * FROM stories WHERE year=? AND status IN ({placeholders})"
+        if month is not None:
+            query += " AND month=?"
+            params.append(month)
         if story_ids:
             query += f" AND story_id IN ({','.join('?' for _ in story_ids)})"
             params.extend(story_ids)
@@ -221,12 +225,16 @@ class Manifest:
         )
         self.connection.commit()
 
-    def rows(self, year: int) -> list[dict[str, Any]]:
+    def rows(self, year: int, month: int | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM stories WHERE year=?"
+        params: list[Any] = [year]
+        if month is not None:
+            query += " AND month=?"
+            params.append(month)
+        query += " ORDER BY month, story_id"
         return [
             dict(row)
-            for row in self.connection.execute(
-                "SELECT * FROM stories WHERE year=? ORDER BY month, story_id", (year,)
-            )
+            for row in self.connection.execute(query, params)
         ]
 
     def story(self, story_id: str) -> dict[str, Any] | None:
@@ -235,11 +243,14 @@ class Manifest:
         ).fetchone()
         return dict(row) if row is not None else None
 
-    def status_counts(self, year: int) -> dict[str, int]:
+    def status_counts(self, year: int, month: int | None = None) -> dict[str, int]:
+        query = "SELECT status, COUNT(*) AS count FROM stories WHERE year=?"
+        params: list[Any] = [year]
+        if month is not None:
+            query += " AND month=?"
+            params.append(month)
+        query += " GROUP BY status"
         return {
             row["status"]: row["count"]
-            for row in self.connection.execute(
-                "SELECT status, COUNT(*) AS count FROM stories WHERE year=? GROUP BY status",
-                (year,),
-            )
+            for row in self.connection.execute(query, params)
         }

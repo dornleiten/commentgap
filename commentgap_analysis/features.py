@@ -1,0 +1,1075 @@
+"""Build model-ready features from the normalized 2025 Parquet collection."""
+
+from __future__ import annotations
+
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
+from functools import lru_cache
+import hashlib
+from importlib.metadata import PackageNotFoundError, version as package_version
+import json
+import math
+import os
+from pathlib import Path
+import platform
+import re
+from typing import Any, Iterable
+from zoneinfo import ZoneInfo
+
+import numpy as np
+import pandas as pd
+
+from .nlp import (
+    BGEM3Embedder,
+    GermanSentimentEncoder,
+    PilotHashEmbedder,
+    PilotLexiconSentiment,
+    SentimentEncoder,
+    TextEmbedder,
+    select_torch_device,
+)
+
+
+URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+WORD_RE = re.compile(r"\b[\wÄÖÜäöüß]+\b", re.UNICODE)
+SENTENCE_RE = re.compile(r"[.!?]+(?:\s|$)")
+VOWEL_GROUP_RE = re.compile(r"[aeiouyäöü]+", re.IGNORECASE)
+VIENNA = ZoneInfo("Europe/Vienna")
+
+BASE_SEED = 20260813
+DEFAULT_TIE_DRAWS = 10
+
+
+ROOT_MODEL_FEATURES = [
+    "log_words",
+    "sentiment_positive",
+    "sentiment_negative",
+    "lexdiv_length_adjusted",
+    "reading_level_length_adjusted",
+    "url_present",
+    "article_similarity_top3",
+    "novelty_prior_roots_model",
+    "log_hours_since_article",
+    "log_prior_roots",
+    "log_prior_comments",
+    "log_comments_prev_hour",
+    "vienna_overnight",
+    "vienna_weekday_shoulder_evening",
+    "vienna_weekend_day_evening",
+    "log_author_prior_30d_comments",
+    "log_author_prior_30d_snapshot_upvotes",
+    "log_author_prior_30d_snapshot_downvotes",
+    "log_author_prior_comments_story",
+]
+
+ALL_MODEL_FEATURES = [
+    feature.replace("novelty_prior_roots_model", "novelty_prior_all_model")
+    for feature in ROOT_MODEL_FEATURES
+] + [
+    "is_reply",
+    "log_depth",
+    "log_branch_prior_comments",
+    "log_branch_comments_prev_hour",
+]
+
+BINARY_FEATURES = {
+    "url_present",
+    "vienna_overnight",
+    "vienna_weekday_shoulder_evening",
+    "vienna_weekend_day_evening",
+    "is_reply",
+}
+
+
+@dataclass(frozen=True)
+class FeatureBuildConfig:
+    data_root: Path = Path("data/scrape_2025")
+    output_root: Path = Path("model_output/selection_2025/features")
+    year: int = 2025
+    lookback_root: Path | None = None
+    allow_incomplete: bool = False
+    inference_mode: bool = True
+    nlp_mode: str = "real"
+    device: str = "auto"
+    sentiment_revision: str | None = None
+    embedding_revision: str | None = None
+    sentiment_batch_size: int = 32
+    embedding_batch_size: int = 64
+    tie_draws: int = DEFAULT_TIE_DRAWS
+    seed: int = BASE_SEED
+    exact_novelty_threshold: int = 5_000
+    require_page_publication_time: bool = True
+    exclude_january_without_lookback: bool = True
+    overwrite: bool = False
+    max_stories: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "data_root", Path(self.data_root))
+        object.__setattr__(self, "output_root", Path(self.output_root))
+        if self.lookback_root is not None:
+            object.__setattr__(self, "lookback_root", Path(self.lookback_root))
+        if self.nlp_mode not in {"real", "pilot"}:
+            raise ValueError("nlp_mode must be 'real' or 'pilot'")
+        if self.inference_mode and (self.allow_incomplete or self.nlp_mode != "real"):
+            raise ValueError("Inference mode requires complete data and production NLP")
+        if self.inference_mode and self.max_stories is not None:
+            raise ValueError("Inference mode cannot limit the number of stories")
+        if self.tie_draws < 1:
+            raise ValueError("tie_draws must be positive")
+
+
+def validate_qa_summary(summary: dict[str, Any], allow_incomplete: bool = False) -> None:
+    integrity_fields = (
+        "duplicate_comment_ids",
+        "negative_reaction_rows",
+        "invalid_author_hash_rows",
+        "sticky_count_mismatch_stories",
+        "missing_parent_rows",
+        "missing_root_rows",
+        "invalid_tree_relationship_rows",
+        "comments_without_forum_rows",
+        "manifest_count_mismatches",
+        "invalid_discrepancy_status_rows",
+        "unexpected_forum_count_mismatches",
+        "invalid_forum_discrepancy_status_rows",
+        "invalid_cursor_progression_pages",
+        "incomplete_terminal_page_walks",
+        "invalid_cursor_hash_rows",
+        "forum_page_aggregate_mismatches",
+        "reply_depth_limit_rows",
+    )
+    failures = {key: summary.get(key) for key in integrity_fields if summary.get(key, 0) != 0}
+    if summary.get("raw_author_identifier_columns"):
+        failures["raw_author_identifier_columns"] = summary["raw_author_identifier_columns"]
+    if failures:
+        raise ValueError(f"Collection QA integrity checks failed: {failures}")
+    status_counts = summary.get("status_counts", {})
+    if status_counts.get("failed", 0):
+        raise ValueError("Collection contains failed stories")
+    if not allow_incomplete and summary.get("nonterminal_stories", 0):
+        raise ValueError(
+            f"Collection is incomplete: {summary['nonterminal_stories']} nonterminal stories"
+        )
+    if not bool(summary.get("passed")):
+        raise ValueError("Collection QA summary is not marked as passed")
+
+
+def _hash_file_inventory(paths: Iterable[Path], root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        stat = path.stat()
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+    return digest.hexdigest()
+
+
+def dataset_fingerprint(data_root: Path, year: int) -> str:
+    paths: list[Path] = []
+    for table in ("articles", "forums", "comments", "forum_pages"):
+        paths.extend((data_root / table / f"year={year}").glob("month=*/*.parquet"))
+    qa = data_root / "qa_summary" / f"year={year}" / "summary.json"
+    if qa.exists():
+        paths.append(qa)
+    return _hash_file_inventory(paths, data_root)
+
+
+def _analysis_package_versions() -> dict[str, str]:
+    packages = (
+        "duckdb",
+        "pyarrow",
+        "numpy",
+        "pandas",
+        "scikit-learn",
+        "xgboost",
+        "torch",
+        "transformers",
+        "sentence-transformers",
+        "hnswlib",
+        "pyphen",
+    )
+    output: dict[str, str] = {}
+    for package in packages:
+        try:
+            output[package] = package_version(package)
+        except PackageNotFoundError:
+            output[package] = "not-installed"
+    return output
+
+
+def _stable_tie_key(story_id: str, comment_id: str, seed: int, draw: int) -> int:
+    payload = f"{seed}|{draw}|{story_id}|{comment_id}".encode("utf-8")
+    return int.from_bytes(hashlib.blake2b(payload, digest_size=8).digest(), "big")
+
+
+def assign_audience_labels(
+    candidates: pd.DataFrame,
+    *,
+    draws: int = DEFAULT_TIE_DRAWS,
+    seed: int = BASE_SEED,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    required = {"story_id", "comment_id", "is_sticky", "relative_votes"}
+    missing = required - set(candidates.columns)
+    if missing:
+        raise ValueError(f"Missing audience-label columns: {sorted(missing)}")
+    output = candidates.copy()
+    diagnostics: list[dict[str, Any]] = []
+    for draw in range(1, draws + 1):
+        output[f"audience_selected_draw_{draw:02d}"] = False
+
+    for story_id, indices in output.groupby("story_id", sort=False).groups.items():
+        group = output.loc[indices]
+        n_candidates = len(group)
+        n_picks = int(group["is_sticky"].astype(bool).sum())
+        if not 0 < n_picks < n_candidates:
+            raise ValueError(f"Uninformative choice set {story_id}: k={n_picks}, N={n_candidates}")
+        cutoff = float(group["relative_votes"].nlargest(n_picks).iloc[-1])
+        above = int((group["relative_votes"] > cutoff).sum())
+        tied = int((group["relative_votes"] == cutoff).sum())
+        slots = n_picks - above
+        diagnostics.append(
+            {
+                "story_id": story_id,
+                "n_candidates": n_candidates,
+                "n_picks": n_picks,
+                "cutoff_relative_votes": cutoff,
+                "n_above_cutoff": above,
+                "n_tied_at_cutoff": tied,
+                "slots_within_cutoff_tie": slots,
+                "cutoff_inclusion_probability": slots / tied,
+                "ambiguous_cutoff": tied > slots,
+            }
+        )
+        for draw in range(1, draws + 1):
+            ordered = sorted(
+                indices,
+                key=lambda idx: (
+                    -float(output.at[idx, "relative_votes"]),
+                    _stable_tie_key(
+                        str(story_id), str(output.at[idx, "comment_id"]), seed, draw
+                    ),
+                ),
+            )
+            output.loc[ordered[:n_picks], f"audience_selected_draw_{draw:02d}"] = True
+    return output, pd.DataFrame(diagnostics)
+
+
+def _as_utc(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, utc=True, errors="coerce")
+
+
+def compute_discussion_history(comments: pd.DataFrame) -> pd.DataFrame:
+    """Compute strictly prior discussion and branch activity without tie leakage."""
+    required = {
+        "comment_id",
+        "story_id",
+        "created_at",
+        "is_root",
+        "root_comment_id",
+        "author_hash",
+    }
+    missing = required - set(comments.columns)
+    if missing:
+        raise ValueError(f"Missing discussion-history columns: {sorted(missing)}")
+    output = comments.copy()
+    output["created_at"] = _as_utc(output["created_at"])
+    for name in (
+        "prior_roots",
+        "prior_comments",
+        "comments_prev_hour",
+        "branch_prior_comments",
+        "branch_comments_prev_hour",
+        "author_prior_comments_story",
+    ):
+        output[name] = np.int64(0)
+
+    for _, story_indices in output.groupby("story_id", sort=False).groups.items():
+        story = output.loc[story_indices].sort_values(["created_at", "comment_id"])
+        roots_before = 0
+        comments_before = 0
+        recent: deque[pd.Timestamp] = deque()
+        branch_counts: defaultdict[str, int] = defaultdict(int)
+        branch_recent: defaultdict[str, deque[pd.Timestamp]] = defaultdict(deque)
+        author_counts: defaultdict[str, int] = defaultdict(int)
+        for timestamp, batch in story.groupby("created_at", sort=True, dropna=False):
+            if pd.isna(timestamp):
+                continue
+            hour_start = timestamp - pd.Timedelta(hours=1)
+            while recent and recent[0] < hour_start:
+                recent.popleft()
+            for idx, row in batch.iterrows():
+                branch = str(row["root_comment_id"] or row["comment_id"])
+                branch_queue = branch_recent[branch]
+                while branch_queue and branch_queue[0] < hour_start:
+                    branch_queue.popleft()
+                author = str(row["author_hash"] or "")
+                output.at[idx, "prior_roots"] = roots_before
+                output.at[idx, "prior_comments"] = comments_before
+                output.at[idx, "comments_prev_hour"] = len(recent)
+                output.at[idx, "branch_prior_comments"] = 0 if row["is_root"] else branch_counts[branch]
+                output.at[idx, "branch_comments_prev_hour"] = 0 if row["is_root"] else len(branch_queue)
+                output.at[idx, "author_prior_comments_story"] = author_counts[author] if author else 0
+            for idx, row in batch.iterrows():
+                branch = str(row["root_comment_id"] or row["comment_id"])
+                author = str(row["author_hash"] or "")
+                comments_before += 1
+                roots_before += int(bool(row["is_root"]))
+                recent.append(timestamp)
+                branch_counts[branch] += 1
+                branch_recent[branch].append(timestamp)
+                if author:
+                    author_counts[author] += 1
+    return output
+
+
+def compute_author_history(
+    comments: pd.DataFrame,
+    *,
+    target_mask: pd.Series | None = None,
+    window_days: int = 30,
+) -> pd.DataFrame:
+    """Compute prior cross-article history using collection-snapshot vote totals."""
+    required = {
+        "comment_id",
+        "story_id",
+        "created_at",
+        "author_hash",
+        "votes_positive",
+        "votes_negative",
+    }
+    missing = required - set(comments.columns)
+    if missing:
+        raise ValueError(f"Missing author-history columns: {sorted(missing)}")
+    output = comments.copy()
+    output["created_at"] = _as_utc(output["created_at"])
+    if target_mask is None:
+        target_mask = pd.Series(True, index=output.index)
+    target_mask = target_mask.reindex(output.index, fill_value=False)
+    output["author_prior_30d_comments"] = np.int64(0)
+    output["author_prior_30d_snapshot_upvotes"] = np.int64(0)
+    output["author_prior_30d_snapshot_downvotes"] = np.int64(0)
+
+    histories: defaultdict[str, deque[tuple[pd.Timestamp, str, int, int]]] = defaultdict(deque)
+    totals: defaultdict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
+    by_story: defaultdict[str, defaultdict[str, list[int]]] = defaultdict(
+        lambda: defaultdict(lambda: [0, 0, 0])
+    )
+    ordered = output.sort_values(["created_at", "comment_id"])
+    window = pd.Timedelta(days=window_days)
+    for timestamp, batch in ordered.groupby("created_at", sort=True, dropna=False):
+        if pd.isna(timestamp):
+            continue
+        for idx, row in batch.iterrows():
+            if not target_mask.at[idx]:
+                continue
+            author = str(row["author_hash"] or "")
+            if not author:
+                continue
+            history = histories[author]
+            cutoff = timestamp - window
+            while history and history[0][0] < cutoff:
+                _, old_story, up, down = history.popleft()
+                totals[author][0] -= 1
+                totals[author][1] -= up
+                totals[author][2] -= down
+                by_story[author][old_story][0] -= 1
+                by_story[author][old_story][1] -= up
+                by_story[author][old_story][2] -= down
+            story = str(row["story_id"])
+            focal = by_story[author][story]
+            output.at[idx, "author_prior_30d_comments"] = totals[author][0] - focal[0]
+            output.at[idx, "author_prior_30d_snapshot_upvotes"] = totals[author][1] - focal[1]
+            output.at[idx, "author_prior_30d_snapshot_downvotes"] = totals[author][2] - focal[2]
+        # Add the whole timestamp batch only after all focal rows were evaluated.
+        for _, row in batch.iterrows():
+            author = str(row["author_hash"] or "")
+            if not author:
+                continue
+            story = str(row["story_id"])
+            up = max(0, int(row["votes_positive"] or 0))
+            down = max(0, int(row["votes_negative"] or 0))
+            histories[author].append((timestamp, story, up, down))
+            totals[author][0] += 1
+            totals[author][1] += up
+            totals[author][2] += down
+            by_story[author][story][0] += 1
+            by_story[author][story][1] += up
+            by_story[author][story][2] += down
+    return output
+
+
+def word_count(text: str) -> int:
+    return len(WORD_RE.findall(text or ""))
+
+
+def cttr(text: str) -> float:
+    tokens = [token.lower() for token in WORD_RE.findall(text or "")]
+    return len(set(tokens)) / math.sqrt(2 * len(tokens)) if tokens else 0.0
+
+
+@lru_cache(maxsize=100_000)
+def _syllables_de(word: str) -> int:
+    try:
+        import pyphen
+
+        dictionary = getattr(_syllables_de, "_dictionary", None)
+        if dictionary is None:
+            dictionary = pyphen.Pyphen(lang="de_DE")
+            setattr(_syllables_de, "_dictionary", dictionary)
+        pieces = dictionary.inserted(word.lower()).split("-")
+        return max(1, len([piece for piece in pieces if piece]))
+    except ImportError:
+        return max(1, len(VOWEL_GROUP_RE.findall(word.lower())))
+
+
+def smog_de(text: str) -> float:
+    words = WORD_RE.findall(text or "")
+    if not words:
+        return 0.0
+    sentences = max(1, len(SENTENCE_RE.findall((text or "").strip() + " ")))
+    polysyllables = sum(_syllables_de(word) >= 3 for word in words)
+    return math.sqrt(polysyllables * 30.0 / sentences) - 2.0
+
+
+def vienna_period(timestamp: pd.Timestamp) -> str | None:
+    if pd.isna(timestamp):
+        return None
+    local = timestamp.to_pydatetime().astimezone(VIENNA)
+    hour = local.hour
+    if hour < 6:
+        return "overnight"
+    if local.weekday() >= 5:
+        return "weekend_day_evening"
+    if 9 <= hour < 18:
+        return "weekday_work"
+    return "weekday_shoulder_evening"
+
+
+def split_article_passages(article: pd.Series) -> list[str]:
+    values = [article.get("title"), article.get("subtitle")]
+    body = str(article.get("body") or "")
+    values.extend(re.split(r"\n\s*\n+", body))
+    return [re.sub(r"\s+", " ", str(value)).strip() for value in values if value and str(value).strip()]
+
+
+def article_similarity_top3(comment_vectors: np.ndarray, passage_vectors: np.ndarray) -> np.ndarray:
+    if passage_vectors.size == 0:
+        return np.full(len(comment_vectors), np.nan, dtype=np.float32)
+    similarities = comment_vectors @ passage_vectors.T
+    k = min(3, similarities.shape[1])
+    top = np.partition(similarities, similarities.shape[1] - k, axis=1)[:, -k:]
+    return top.mean(axis=1).astype(np.float32)
+
+
+def _novelty_exact(vectors: np.ndarray, timestamps: pd.Series, eligible: np.ndarray) -> np.ndarray:
+    novelty = np.full(len(vectors), np.nan, dtype=np.float32)
+    previous: list[int] = []
+    frame = pd.DataFrame({"timestamp": timestamps, "position": np.arange(len(vectors))})
+    for _, batch in frame.groupby("timestamp", sort=True, dropna=False):
+        positions = batch["position"].to_numpy()
+        query_positions = positions[eligible[positions]]
+        if previous and len(query_positions):
+            similarities = vectors[query_positions] @ vectors[np.asarray(previous)].T
+            novelty[query_positions] = 1.0 - similarities.max(axis=1)
+        previous.extend(int(pos) for pos in query_positions)
+    return novelty
+
+
+def _novelty_hnsw(vectors: np.ndarray, timestamps: pd.Series, eligible: np.ndarray) -> np.ndarray:
+    try:
+        import hnswlib
+    except ImportError as exc:
+        raise RuntimeError(
+            "Large-discussion novelty requires hnswlib; install requirements-analysis.txt"
+        ) from exc
+    novelty = np.full(len(vectors), np.nan, dtype=np.float32)
+    index = hnswlib.Index(space="cosine", dim=vectors.shape[1])
+    index.init_index(max_elements=int(eligible.sum()), ef_construction=200, M=32, random_seed=BASE_SEED)
+    index.set_ef(100)
+    added = 0
+    frame = pd.DataFrame({"timestamp": timestamps, "position": np.arange(len(vectors))})
+    for _, batch in frame.groupby("timestamp", sort=True, dropna=False):
+        positions = batch["position"].to_numpy()
+        query_positions = positions[eligible[positions]]
+        if added and len(query_positions):
+            _, distances = index.knn_query(vectors[query_positions], k=1)
+            novelty[query_positions] = distances[:, 0]
+        if len(query_positions):
+            index.add_items(vectors[query_positions], query_positions)
+            added += len(query_positions)
+    return novelty
+
+
+def temporal_novelty(
+    vectors: np.ndarray,
+    timestamps: pd.Series,
+    eligible: np.ndarray,
+    *,
+    exact_threshold: int,
+) -> np.ndarray:
+    if int(eligible.sum()) <= exact_threshold:
+        return _novelty_exact(vectors, timestamps, eligible)
+    return _novelty_hnsw(vectors, timestamps, eligible)
+
+
+def validate_approximate_novelty(
+    vectors: np.ndarray,
+    timestamps: pd.Series,
+    eligible: np.ndarray,
+    approximate: np.ndarray,
+    *,
+    seed: int,
+    sample_size: int = 100,
+) -> dict[str, Any]:
+    """Compare approximate distances with exact prior-neighbor distances."""
+    timestamp_values = pd.Series(timestamps).reset_index(drop=True)
+    candidates = np.flatnonzero(eligible & np.isfinite(approximate))
+    if not len(candidates):
+        return {"sample_size": 0, "mean_absolute_error": None, "max_absolute_error": None, "recall_within_1e_3": None}
+    rng = np.random.default_rng(seed)
+    sampled = rng.choice(candidates, size=min(sample_size, len(candidates)), replace=False)
+    errors: list[float] = []
+    for position in sampled:
+        previous = np.flatnonzero(
+            eligible & (timestamp_values < timestamp_values.iloc[position]).to_numpy()
+        )
+        if not len(previous):
+            continue
+        exact = 1.0 - float((vectors[position] @ vectors[previous].T).max())
+        errors.append(abs(exact - float(approximate[position])))
+    if not errors:
+        return {"sample_size": 0, "mean_absolute_error": None, "max_absolute_error": None, "recall_within_1e_3": None}
+    error_array = np.asarray(errors)
+    return {
+        "sample_size": len(errors),
+        "mean_absolute_error": float(error_array.mean()),
+        "max_absolute_error": float(error_array.max()),
+        "recall_within_1e_3": float((error_array <= 1e-3).mean()),
+    }
+
+
+def _read_dataset(table_root: Path, year: int, columns: list[str]) -> pd.DataFrame:
+    import pyarrow.dataset as ds
+
+    root = table_root / f"year={year}"
+    if not root.exists():
+        raise FileNotFoundError(root)
+    dataset = ds.dataset(root, format="parquet", partitioning=None)
+    available = set(dataset.schema.names)
+    missing = set(columns) - available
+    if missing:
+        raise ValueError(f"Missing columns under {root}: {sorted(missing)}")
+    return dataset.to_table(columns=columns).to_pandas()
+
+
+def _atomic_parquet(frame: pd.DataFrame, path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    pq.write_table(pa.Table.from_pandas(frame, preserve_index=False), temporary, compression="zstd")
+    os.replace(temporary, path)
+
+
+def _atomic_json(value: Any, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n")
+    os.replace(temporary, path)
+
+
+def _length_residual(frame: pd.DataFrame, outcome: str) -> tuple[np.ndarray, dict[str, Any]]:
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import SplineTransformer
+
+    valid = np.isfinite(frame[outcome]) & np.isfinite(frame["log_words"])
+    if valid.sum() < 20:
+        raise ValueError(f"Too few observations to length-adjust {outcome}")
+    model = make_pipeline(
+        SplineTransformer(n_knots=6, degree=3, include_bias=False), Ridge(alpha=1.0)
+    )
+    x = frame.loc[valid, ["log_words"]].to_numpy()
+    y = frame.loc[valid, outcome].to_numpy()
+    model.fit(x, y)
+    predicted = np.full(len(frame), np.nan)
+    predicted[valid] = model.predict(x)
+    residual = frame[outcome].to_numpy(dtype=float) - predicted
+    return residual, {"outcome": outcome, "n_knots": 6, "degree": 3, "ridge_alpha": 1.0}
+
+
+def _feature_registry() -> dict[str, Any]:
+    labels = {
+        "log_words": "Comment length (log words)",
+        "sentiment_positive": "Positive sentiment",
+        "sentiment_negative": "Negative sentiment",
+        "lexdiv_length_adjusted": "Length-adjusted lexical diversity",
+        "reading_level_length_adjusted": "Length-adjusted reading difficulty",
+        "url_present": "URL present",
+        "article_similarity_top3": "Article similarity (top-three passages)",
+        "novelty_prior_roots_model": "Novelty from earlier roots",
+        "novelty_prior_all_model": "Novelty from earlier comments",
+        "log_hours_since_article": "Hours since article publication",
+        "log_prior_roots": "Earlier roots",
+        "log_prior_comments": "Earlier comments",
+        "log_comments_prev_hour": "Comments in previous hour",
+        "vienna_overnight": "Overnight posting period",
+        "vienna_weekday_shoulder_evening": "Weekday shoulder/evening",
+        "vienna_weekend_day_evening": "Weekend daytime/evening",
+        "log_author_prior_30d_comments": "Author comments in prior 30 days",
+        "log_author_prior_30d_snapshot_upvotes": "Snapshot upvotes on prior comments",
+        "log_author_prior_30d_snapshot_downvotes": "Snapshot downvotes on prior comments",
+        "log_author_prior_comments_story": "Author's earlier comments in article",
+        "is_reply": "Reply rather than root",
+        "log_depth": "Reply depth",
+        "log_branch_prior_comments": "Earlier comments in branch",
+        "log_branch_comments_prev_hour": "Branch comments in previous hour",
+    }
+    return {
+        "version": 1,
+        "models": {
+            "root": {"features": ROOT_MODEL_FEATURES},
+            "all": {"features": ALL_MODEL_FEATURES},
+        },
+        "features": {
+            name: {
+                "label": labels[name],
+                "standardize": name not in BINARY_FEATURES,
+                "deferred": False,
+            }
+            for name in sorted(set(ROOT_MODEL_FEATURES + ALL_MODEL_FEATURES))
+        }
+        | {
+            name: {"label": label, "standardize": False, "deferred": True}
+            for name, label in {
+                "toxicity_probability": "Toxicity probability",
+                "engagement_probability": "Engaging-comment probability",
+                "fact_claim_probability": "Fact-claim probability",
+            }.items()
+        },
+        "categorical_reference": {"vienna_period": "weekday_work"},
+    }
+
+
+def _prepare_model_columns(frame: pd.DataFrame, scope: str) -> pd.DataFrame:
+    output = frame.copy()
+    output["relative_votes"] = output["votes_positive"] - output["votes_negative"]
+    for raw in (
+        "hours_since_article",
+        "prior_roots",
+        "prior_comments",
+        "comments_prev_hour",
+        "author_prior_30d_comments",
+        "author_prior_30d_snapshot_upvotes",
+        "author_prior_30d_snapshot_downvotes",
+        "author_prior_comments_story",
+        "depth",
+        "branch_prior_comments",
+        "branch_comments_prev_hour",
+    ):
+        output[f"log_{raw}"] = np.log1p(output[raw].clip(lower=0).astype(float))
+    output["is_reply"] = (~output["is_root"].astype(bool)).astype(int)
+    for period in ("overnight", "weekday_shoulder_evening", "weekend_day_evening"):
+        output[f"vienna_{period}"] = (output["vienna_period"] == period).astype(int)
+    novelty = "novelty_prior_roots" if scope == "root" else "novelty_prior_all"
+    finite = np.isfinite(output[novelty])
+    if not finite.any():
+        raise ValueError(f"No finite values for {novelty}")
+    output[f"{novelty}_model"] = output[novelty].fillna(output.loc[finite, novelty].mean())
+    return output
+
+
+def _make_choice_set(
+    features: pd.DataFrame,
+    raw_comments: pd.DataFrame,
+    *,
+    scope: str,
+    config: FeatureBuildConfig,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    if scope not in {"root", "all"}:
+        raise ValueError(scope)
+    scope_raw = raw_comments[raw_comments["is_root"].astype(bool)] if scope == "root" else raw_comments
+    scope_features = features[features["is_root"].astype(bool)] if scope == "root" else features
+    invalid_sticky_stories = set(
+        scope_raw.loc[
+            scope_raw["is_sticky"].astype(bool)
+            & (
+                ~scope_raw["lifecycle_status"].eq("Published")
+                |
+                scope_raw["effective_text"].fillna("").str.strip().eq("")
+                | scope_raw["created_at"].isna()
+                | scope_raw["comment_id"].fillna("").astype(str).str.strip().eq("")
+            ),
+            "story_id",
+        ].astype(str)
+    )
+    output = scope_features[~scope_features["story_id"].astype(str).isin(invalid_sticky_stories)].copy()
+    if config.require_page_publication_time:
+        validity = output.groupby("story_id").agg(
+            page_time=("published_at_source", lambda x: bool(x.eq("page").all())),
+            invalid_time=("invalid_posting_time", "any"),
+        )
+        valid_stories = validity.index[validity["page_time"] & ~validity["invalid_time"]]
+        output = output[output["story_id"].isin(valid_stories)]
+    if config.lookback_root is None and config.exclude_january_without_lookback:
+        output = output[~((output["article_year"] == config.year) & (output["article_month"] == 1))]
+
+    counts = output.groupby("story_id").agg(
+        n_candidates=("comment_id", "size"), n_picks=("is_sticky", "sum")
+    )
+    eligible = counts[(counts["n_picks"] > 0) & (counts["n_picks"] < counts["n_candidates"])]
+    output = output.merge(eligible, left_on="story_id", right_index=True, validate="many_to_one")
+    output = _prepare_model_columns(output, scope)
+    output["curator_selected"] = output["is_sticky"].astype(bool)
+    output, ties = assign_audience_labels(
+        output, draws=config.tie_draws, seed=config.seed
+    )
+    features_used = ROOT_MODEL_FEATURES if scope == "root" else ALL_MODEL_FEATURES
+    missingness = output[features_used].isna().sum()
+    if int(missingness.sum()):
+        raise ValueError(f"Missing model features in {scope}: {missingness[missingness > 0].to_dict()}")
+    if output.duplicated(["story_id", "comment_id"]).any():
+        raise ValueError(f"Duplicate candidate keys in {scope}")
+    output["candidate_scope"] = scope
+    keep = [
+        "story_id",
+        "comment_id",
+        "article_year",
+        "article_month",
+        "candidate_scope",
+        "n_candidates",
+        "n_picks",
+        "curator_selected",
+        "relative_votes",
+    ] + [f"audience_selected_draw_{draw:02d}" for draw in range(1, config.tie_draws + 1)]
+    raw_descriptive = [
+        "word_count",
+        "cttr",
+        "smog_de",
+        "sentiment_neutral",
+        "hours_since_article",
+        "prior_roots",
+        "prior_comments",
+        "comments_prev_hour",
+        "branch_prior_comments",
+        "branch_comments_prev_hour",
+        "author_prior_30d_comments",
+        "author_prior_30d_snapshot_upvotes",
+        "author_prior_30d_snapshot_downvotes",
+        "author_prior_comments_story",
+        "vienna_period",
+    ]
+    keep += [name for name in raw_descriptive + features_used if name not in keep]
+    summary = {
+        "scope": scope,
+        "candidate_rows": len(output),
+        "eligible_stories": int(output["story_id"].nunique()),
+        "sticky_comments": int(output["curator_selected"].sum()),
+        "invalid_sticky_stories_excluded": len(invalid_sticky_stories),
+        "ambiguous_vote_cutoffs": int(ties["ambiguous_cutoff"].sum()),
+    }
+    return output[keep].sort_values(["story_id", "comment_id"]), ties, summary
+
+
+def _load_encoders(config: FeatureBuildConfig) -> tuple[SentimentEncoder, TextEmbedder]:
+    if config.nlp_mode == "pilot":
+        return PilotLexiconSentiment(), PilotHashEmbedder()
+    return (
+        GermanSentimentEncoder(device=config.device, revision=config.sentiment_revision),
+        BGEM3Embedder(device=config.device, revision=config.embedding_revision),
+    )
+
+
+def build_analysis_features(
+    config: FeatureBuildConfig,
+    *,
+    sentiment_encoder: SentimentEncoder | None = None,
+    embedder: TextEmbedder | None = None,
+) -> dict[str, Any]:
+    """Run the resumable 2025 feature and choice-set build."""
+    qa_path = config.data_root / "qa_summary" / f"year={config.year}" / "summary.json"
+    if not qa_path.exists():
+        raise FileNotFoundError(qa_path)
+    qa = json.loads(qa_path.read_text())
+    validate_qa_summary(qa, allow_incomplete=config.allow_incomplete)
+    fingerprint = dataset_fingerprint(config.data_root, config.year)
+    config_payload = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in asdict(config).items()
+        if key not in {"overwrite", "output_root"}
+    }
+    build_signature = hashlib.sha256(
+        json.dumps(config_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    state_path = config.output_root / "build_state.json"
+    if state_path.exists():
+        previous = json.loads(state_path.read_text())
+        if previous.get("dataset_fingerprint") != fingerprint and not config.overwrite:
+            raise RuntimeError(
+                "Input collection changed since checkpoints were created; use a new output "
+                "directory or set overwrite=True"
+            )
+        if previous.get("build_signature") != build_signature and not config.overwrite:
+            raise RuntimeError(
+                "Feature-build configuration changed; use a new output directory or "
+                "set overwrite=True"
+            )
+    watermark = "INFERENCE" if config.inference_mode else "PILOT_NOT_FOR_INFERENCE"
+    state = {
+        "dataset_fingerprint": fingerprint,
+        "build_signature": build_signature,
+        "watermark": watermark,
+        "config": {key: str(value) if isinstance(value, Path) else value for key, value in asdict(config).items()},
+    }
+    _atomic_json(state, state_path)
+
+    comment_columns = [
+        "comment_id",
+        "story_id",
+        "parent_comment_id",
+        "root_comment_id",
+        "depth",
+        "is_root",
+        "created_at",
+        "effective_text",
+        "lifecycle_status",
+        "is_sticky",
+        "votes_positive",
+        "votes_negative",
+        "author_hash",
+        "year",
+        "month",
+    ]
+    article_columns = [
+        "story_id",
+        "year",
+        "month",
+        "published_at",
+        "published_at_source",
+        "title",
+        "subtitle",
+        "body",
+    ]
+    target_raw = _read_dataset(config.data_root / "comments", config.year, comment_columns)
+    articles = _read_dataset(config.data_root / "articles", config.year, article_columns)
+    if articles.duplicated("story_id").any():
+        raise ValueError("story_id is not unique in article data")
+    if config.max_stories is not None:
+        sticky_stories = sorted(
+            target_raw.loc[target_raw["is_sticky"].astype(bool), "story_id"].astype(str).unique()
+        )
+        other_stories = sorted(set(target_raw["story_id"].astype(str)) - set(sticky_stories))
+        selected_stories = (sticky_stories + other_stories)[: config.max_stories]
+        target_raw = target_raw[target_raw["story_id"].astype(str).isin(selected_stories)].copy()
+        articles = articles[articles["story_id"].astype(str).isin(selected_stories)].copy()
+    if target_raw.duplicated("comment_id").any():
+        raise ValueError("comment_id is not unique in source data")
+    target_raw["created_at"] = _as_utc(target_raw["created_at"])
+    target_raw["is_target"] = True
+
+    history_source = target_raw.copy()
+    if config.lookback_root is not None:
+        lookback = _read_dataset(config.lookback_root / "comments", config.year - 1, comment_columns)
+        lookback["created_at"] = _as_utc(lookback["created_at"])
+        lookback["is_target"] = False
+        history_source = pd.concat([lookback, target_raw], ignore_index=True, sort=False)
+
+    candidate_mask = (
+        target_raw["lifecycle_status"].eq("Published")
+        & target_raw["effective_text"].fillna("").str.strip().ne("")
+        & target_raw["created_at"].notna()
+    )
+    candidate_ids = set(target_raw.loc[candidate_mask, "comment_id"].astype(str))
+    discussion_source = target_raw[target_raw["created_at"].notna()].copy()
+    discussion_all = compute_discussion_history(discussion_source)
+    discussion = discussion_all[
+        discussion_all["comment_id"].astype(str).isin(candidate_ids)
+    ].copy()
+    # Activity counts include every recorded posting with a timestamp, including
+    # later-deleted tombstones. Text/NLP candidate eligibility is applied only
+    # after these posting-time histories are computed.
+    author_source = history_source[history_source["created_at"].notna()].copy()
+    author = compute_author_history(
+        author_source,
+        target_mask=author_source["is_target"].astype(bool),
+    )
+    author_columns = [
+        "comment_id",
+        "author_prior_30d_comments",
+        "author_prior_30d_snapshot_upvotes",
+        "author_prior_30d_snapshot_downvotes",
+    ]
+    base = discussion.merge(
+        author.loc[
+            author["is_target"] & author["comment_id"].astype(str).isin(candidate_ids),
+            author_columns,
+        ],
+        on="comment_id",
+        validate="one_to_one",
+    )
+    article_data = articles.rename(columns={"year": "article_year", "month": "article_month"})
+    base = base.merge(article_data, on="story_id", validate="many_to_one")
+    base["published_at"] = _as_utc(base["published_at"])
+    base["hours_since_article"] = (
+        base["created_at"] - base["published_at"]
+    ).dt.total_seconds() / 3600
+    base["invalid_posting_time"] = base["hours_since_article"].isna() | (base["hours_since_article"] < 0)
+    base["vienna_period"] = base["created_at"].map(vienna_period)
+    base["word_count"] = base["effective_text"].map(word_count)
+    base["log_words"] = np.log1p(base["word_count"])
+    base["cttr"] = base["effective_text"].map(cttr)
+    base["smog_de"] = base["effective_text"].map(smog_de)
+    base["url_present"] = base["effective_text"].str.contains(URL_RE).astype(int)
+
+    if sentiment_encoder is None or embedder is None:
+        default_sentiment, default_embedder = _load_encoders(config)
+        sentiment_encoder = sentiment_encoder or default_sentiment
+        embedder = embedder or default_embedder
+    if config.inference_mode and (
+        "PILOT_ONLY" in sentiment_encoder.model_id or "PILOT_ONLY" in embedder.model_id
+    ):
+        raise ValueError("Pilot NLP adapters cannot be used for inference")
+
+    checkpoint_root = (
+        config.output_root
+        / "scalar_features"
+        / f"build={build_signature[:8]}-{fingerprint[:8]}"
+        / f"year={config.year}"
+    )
+    article_lookup = article_data.set_index("story_id")
+    novelty_diagnostics: list[dict[str, Any]] = []
+    novelty_part_root = (
+        config.output_root
+        / "novelty_validation_parts"
+        / f"build={build_signature[:8]}-{fingerprint[:8]}"
+    )
+    for story_id, story in base.groupby("story_id", sort=True):
+        month = int(story["article_month"].iloc[0])
+        destination = checkpoint_root / f"month={month:02d}" / f"{story_id}.parquet"
+        diagnostic_path = novelty_part_root / f"{story_id}.json"
+        if destination.exists() and not config.overwrite:
+            if diagnostic_path.exists():
+                novelty_diagnostics.extend(json.loads(diagnostic_path.read_text()))
+            continue
+        story = story.sort_values(["created_at", "comment_id"]).copy()
+        texts = story["effective_text"].astype(str).tolist()
+        sentiments = sentiment_encoder.predict(texts, config.sentiment_batch_size)
+        if sentiments.shape != (len(story), 3):
+            raise ValueError("Sentiment encoder returned an unexpected shape")
+        story[["sentiment_positive", "sentiment_negative", "sentiment_neutral"]] = sentiments
+        vectors = embedder.encode(texts, config.embedding_batch_size)
+        if vectors.shape[0] != len(story):
+            raise ValueError("Embedder returned an unexpected row count")
+        norms = np.linalg.norm(vectors, axis=1)
+        if not np.allclose(norms, 1, atol=1e-3):
+            raise ValueError("Comment embeddings must be L2-normalized")
+        article = article_lookup.loc[story_id]
+        passages = split_article_passages(article)
+        passage_vectors = (
+            embedder.encode(passages, config.embedding_batch_size)
+            if passages
+            else np.empty((0, vectors.shape[1]), dtype=np.float32)
+        )
+        story["article_similarity_top3"] = article_similarity_top3(vectors, passage_vectors)
+        all_eligible = np.ones(len(story), dtype=bool)
+        root_eligible = story["is_root"].to_numpy(dtype=bool)
+        story["novelty_prior_all"] = temporal_novelty(
+            vectors,
+            story["created_at"],
+            all_eligible,
+            exact_threshold=config.exact_novelty_threshold,
+        )
+        story["novelty_prior_roots"] = temporal_novelty(
+            vectors,
+            story["created_at"],
+            root_eligible,
+            exact_threshold=config.exact_novelty_threshold,
+        )
+        story_diagnostics: list[dict[str, Any]] = []
+        for label, eligible, values in (
+            ("all", all_eligible, story["novelty_prior_all"].to_numpy()),
+            ("root", root_eligible, story["novelty_prior_roots"].to_numpy()),
+        ):
+            if int(eligible.sum()) > config.exact_novelty_threshold:
+                diagnostic = validate_approximate_novelty(
+                    vectors,
+                    story["created_at"],
+                    eligible,
+                    values,
+                    seed=config.seed + (0 if label == "all" else 1),
+                )
+                diagnostic.update({"story_id": str(story_id), "candidate_scope": label})
+                story_diagnostics.append(diagnostic)
+                if (
+                    config.inference_mode
+                    and diagnostic["sample_size"]
+                    and diagnostic["recall_within_1e_3"] < 0.95
+                ):
+                    raise RuntimeError(
+                        f"HNSW novelty validation failed for {story_id}/{label}: {diagnostic}"
+                    )
+        _atomic_json(story_diagnostics, diagnostic_path)
+        novelty_diagnostics.extend(story_diagnostics)
+        story["nlp_watermark"] = watermark
+        _atomic_parquet(story, destination)
+
+    import pyarrow.dataset as ds
+
+    scalar = ds.dataset(checkpoint_root, format="parquet", partitioning=None).to_table().to_pandas()
+    scalar["lexdiv_length_adjusted"], lex_meta = _length_residual(scalar, "cttr")
+    scalar["reading_level_length_adjusted"], reading_meta = _length_residual(scalar, "smog_de")
+
+    root, root_ties, root_summary = _make_choice_set(
+        scalar, target_raw, scope="root", config=config
+    )
+    all_comments, all_ties, all_summary = _make_choice_set(
+        scalar, target_raw, scope="all", config=config
+    )
+    _atomic_parquet(root, config.output_root / "choice_set_root.parquet")
+    _atomic_parquet(all_comments, config.output_root / "choice_set_all.parquet")
+    _atomic_parquet(root_ties.assign(candidate_scope="root"), config.output_root / "tie_diagnostics_root.parquet")
+    _atomic_parquet(all_ties.assign(candidate_scope="all"), config.output_root / "tie_diagnostics_all.parquet")
+    registry = _feature_registry()
+    registry["length_adjustment"] = [lex_meta, reading_meta]
+    registry["nlp"] = {
+        "sentiment_model": sentiment_encoder.model_id,
+        "sentiment_revision": getattr(sentiment_encoder, "resolved_revision", "unresolved"),
+        "embedding_model": embedder.model_id,
+        "embedding_revision": getattr(embedder, "resolved_revision", "unresolved"),
+        "watermark": watermark,
+    }
+    _atomic_json(registry, config.output_root / "feature_manifest.json")
+    _atomic_json(
+        {
+            "method": "HNSW cosine distance checked against exact prior neighbors",
+            "required_recall_within_1e_3": 0.95,
+            "stories": novelty_diagnostics,
+        },
+        config.output_root / "novelty_validation.json",
+    )
+    summary = {
+        "watermark": watermark,
+        "qa": {
+            "passed": qa.get("passed"),
+            "allow_incomplete": qa.get("allow_incomplete"),
+            "nonterminal_stories": qa.get("nonterminal_stories"),
+            "status_counts": qa.get("status_counts"),
+        },
+        "source": {
+            "comments": len(target_raw),
+            "articles": len(articles),
+            "dataset_fingerprint": fingerprint,
+        },
+        "root": root_summary,
+        "all": all_summary,
+        "models": registry["nlp"],
+        "environment": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "device": select_torch_device(config.device),
+            "packages": _analysis_package_versions(),
+        },
+    }
+    _atomic_json(summary, config.output_root / "provenance_manifest.json")
+    return summary

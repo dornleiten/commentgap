@@ -1,0 +1,13 @@
+statistic,value
+all_comments,1203395
+all_articles,5874
+all_root_comments,383601
+articles_with_root_pins,1511
+eligible_root_comments,248021
+eligible_articles,1510
+eligible_root_pins,5971
+nonroot_pins_excluded,8
+uninformative_all_roots_selected_articles,1
+stacked_rows,496042
+ambiguous_audience_top_k_cutoff_articles,123
+mean_article_selection_rate,0.0478787341808614

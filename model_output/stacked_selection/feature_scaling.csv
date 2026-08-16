@@ -1,0 +1,10 @@
+raw_variable,transformed_term,mean,sd
+sentiment_prob_pos,z_positive_sentiment,0.0875768898396026,0.244309002562622
+sentiment_prob_neg,z_negative_sentiment,0.430665194728796,0.454987695604041
+lexdiv_cttr,z_lexical_diversity,2.62820527854323,1.0850473402008
+SMOG_readability,z_reading_difficulty,6.48339993363123,4.34350860965397
+cosine_1,z_topical_similarity,0.0497708328554727,0.052735676656418
+log1p(num_words),z_log_words,3.2603490616047,0.840195382833177
+log1p(num_punct),z_log_punctuation,1.84150951584785,0.793343942582665
+log1p(user_follower),z_log_followers,1.69005909748084,1.36980942847239
+log1p(hours_since_article),z_log_posting_hours,1.55385569321447,1.23330953459026

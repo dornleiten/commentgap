@@ -15,7 +15,12 @@ from .config import ScrapeConfig
 from .http import HttpClient, HttpFailure
 from .manifest import Manifest
 from .parsing import DiscoveredStory, parse_article, parse_sitemap
-from .privacy import AuthorPseudonymizer
+from .privacy import (
+    PSEUDONYMIZATION_SCHEME,
+    AuthorPseudonymizer,
+    ensure_hash_key_compatible,
+    hash_key_registration_required,
+)
 from .progress import crawl_progress_line, format_duration, forum_progress_line
 from .storage import ParquetStore
 from .transform import flatten_postings
@@ -94,10 +99,18 @@ def select_stratified_pilot(
                 index / len(candidates) * 100,
             )
 
-    month_targets = {
-        month: sum(index % 12 + 1 == month for index in range(limit))
-        for month in range(1, 13)
-    }
+    available_months = sorted({int(item["month"]) for item in assessed})
+    month_targets = (
+        {
+            month: sum(
+                available_months[index % len(available_months)] == month
+                for index in range(limit)
+            )
+            for month in available_months
+        }
+        if available_months
+        else {}
+    )
     band_targets = {
         band: sum(PILOT_SIZE_BANDS[index % len(PILOT_SIZE_BANDS)] == band for index in range(limit))
         for band in PILOT_SIZE_BANDS
@@ -167,11 +180,106 @@ def build_http(config: ScrapeConfig) -> HttpClient:
     )
 
 
+def _walk_raw_postings(roots: list[dict[str, Any]]):
+    stack = list(reversed(roots))
+    while stack:
+        posting = stack.pop()
+        yield posting
+        replies = [
+            reply for reply in (posting.get("replies") or []) if isinstance(reply, dict)
+        ]
+        stack.extend(reversed(replies))
+
+
+def _verify_legacy_hash_key(
+    root: Path,
+    *,
+    api: ForumApi,
+    pseudonymizer: AuthorPseudonymizer,
+    max_forums: int = 12,
+) -> None:
+    """Verify an old un-fingerprinted key against current public posting identities."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise RuntimeError("legacy hash-key verification requires PyArrow") from exc
+
+    checked_forums = 0
+    mismatches = 0
+    comment_paths = sorted(
+        (root / "comments").glob("year=*/month=*/*.parquet"), reverse=True
+    )
+    for path in comment_paths:
+        if checked_forums >= max_forums:
+            break
+        try:
+            table = pq.read_table(path, columns=["story_id", "comment_id", "author_hash"])
+        except Exception as exc:
+            LOG.warning("could not inspect %s for hash-key verification: %s", path, exc)
+            continue
+        stored = {
+            str(row["comment_id"]): str(row["author_hash"])
+            for row in table.to_pylist()
+            if row.get("comment_id") and row.get("author_hash")
+        }
+        if not stored or table.num_rows == 0:
+            continue
+        story_id = str(table.column("story_id")[0].as_py())
+        try:
+            info = api.get_forum_info(context_uri(story_id))
+            if not info or not info.get("id"):
+                continue
+            page = api.get_threads_page(str(info["id"]))
+        except HttpFailure as exc:
+            LOG.warning(
+                "could not query story %s for hash-key verification: %s", story_id, exc
+            )
+            continue
+        checked_forums += 1
+        roots = [
+            *(posting for posting in (info.get("stickyPostings") or []) if isinstance(posting, dict)),
+            *(
+                edge["node"]
+                for edge in (page.get("edges") or [])
+                if isinstance(edge, dict) and isinstance(edge.get("node"), dict)
+            ),
+        ]
+        for posting in _walk_raw_postings(roots):
+            existing_hash = stored.get(str(posting.get("id") or ""))
+            if not existing_hash:
+                continue
+            candidates = pseudonymizer.pseudonymize_candidates(posting)
+            if existing_hash in candidates:
+                LOG.info(
+                    "verified COMMENTGAP_HASH_KEY against existing story %s", story_id
+                )
+                return
+            if candidates:
+                mismatches += 1
+                if mismatches >= 3:
+                    raise ValueError(
+                        "COMMENTGAP_HASH_KEY does not reproduce existing author hashes; "
+                        "no data was collected. Restore the exact original 2025 key."
+                    )
+    detail = (
+        f"queried {checked_forums} existing forums but found no stable matching identity"
+        if checked_forums
+        else "could not query a suitable existing forum"
+    )
+    raise ValueError(
+        "the legacy hash-key check was inconclusive ("
+        + detail
+        + "). Verify that COMMENTGAP_HASH_KEY is the exact original 2025 key, then "
+        "re-run once with --confirm-existing-hash-key"
+    )
+
+
 def discover(config: ScrapeConfig, *, http: HttpClient | None = None) -> dict[str, int]:
     client = http or build_http(config)
     by_id: dict[str, DiscoveredStory] = {}
     monthly_counts: dict[str, int] = {}
-    for month in range(1, 13):
+    months = config.months
+    for position, month in enumerate(months, start=1):
         url = SITEMAP_TEMPLATE.format(year=config.year, month=month)
         LOG.info("reading sitemap %s", url)
         stories = parse_sitemap(client.get_text(url), config.year, month)
@@ -179,9 +287,10 @@ def discover(config: ScrapeConfig, *, http: HttpClient | None = None) -> dict[st
         for story in stories:
             by_id[story.story_id] = story
         LOG.info(
-            "sitemap progress: %d/12 (%.1f%%) | month=%02d | month stories=%s | unique stories=%s",
-            month,
-            month / 12 * 100,
+            "sitemap progress: %d/%d (%.1f%%) | month=%02d | month stories=%s | unique stories=%s",
+            position,
+            len(months),
+            position / len(months) * 100,
             month,
             f"{len(stories):,}",
             f"{len(by_id):,}",
@@ -189,7 +298,10 @@ def discover(config: ScrapeConfig, *, http: HttpClient | None = None) -> dict[st
 
     with Manifest(config.manifest_path) as manifest:
         manifest.upsert_discovered(by_id.values())
-        ParquetStore(config.output_dir).export_manifest(manifest.rows(config.year), config.year)
+        scoped_rows = manifest.rows(config.year, config.month)
+        ParquetStore(config.output_dir).export_manifest(
+            scoped_rows, config.year, config.month
+        )
     summary = {"unique_stories": len(by_id), **monthly_counts}
     LOG.info("discovered %d unique stories", len(by_id))
     return summary
@@ -543,6 +655,7 @@ def crawl(
     selection_seed: int = 2025,
     stratified_pilot: bool = False,
     pilot_candidate_pool: int = 500,
+    confirm_existing_hash_key: bool = False,
     http: HttpClient | None = None,
 ) -> dict[str, int]:
     if stratified_pilot and limit is None:
@@ -554,8 +667,25 @@ def crawl(
     client = http or build_http(config)
     api = ForumApi(client, reply_depth=config.reply_query_depth)
     pseudonymizer = AuthorPseudonymizer(hash_key)
+    if (
+        hash_key_registration_required(config.output_dir)
+        and not confirm_existing_hash_key
+    ):
+        _verify_legacy_hash_key(
+            config.output_dir,
+            api=api,
+            pseudonymizer=pseudonymizer,
+        )
+        confirm_existing_hash_key = True
+    # Register or verify the dataset-level key before collection output writes.
+    ensure_hash_key_compatible(
+        config.output_dir,
+        hash_key,
+        confirm_existing=confirm_existing_hash_key,
+    )
     store = ParquetStore(config.output_dir)
-    metadata_path = config.output_dir / "collection_metadata.json"
+    metadata_path = config.collection_metadata_path
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
     existing_metadata: dict[str, Any] = {}
     if metadata_path.exists():
         try:
@@ -567,12 +697,20 @@ def crawl(
         **existing_metadata,
         "schema_version": 3,
         "year": config.year,
-        "scope": "All comments visible at collection time on articles published in the selected year",
+        "month": config.month,
+        "scope": (
+            "All comments visible at collection time on articles published in "
+            f"{config.year}-{config.month:02d}"
+            if config.month is not None
+            else "All comments visible at collection time on articles published in the selected year"
+        ),
         "snapshot_warning": (
             "Votes, deletions, sticky state, and author follower counts reflect collection time, "
             "not the end of the publication year."
         ),
         "forum_endpoint": GRAPHQL_ENDPOINT,
+        "pseudonymization_scheme": PSEUDONYMIZATION_SCHEME,
+        "hash_key_fingerprint_file": "privacy_metadata.json",
         "reply_query_depth": config.reply_query_depth,
         "minimum_request_interval_seconds": config.request_interval,
         "count_discrepancy_policy": (
@@ -600,6 +738,7 @@ def crawl(
         candidate_limit = pilot_candidate_pool if stratified_pilot else limit
         stories = manifest.stories_for_crawl(
             config.year,
+            month=config.month,
             retry_failed=retry_failed,
             only_failed=only_failed,
             limit=candidate_limit,
@@ -650,10 +789,10 @@ def crawl(
                     results,
                 ),
             )
-        rows = manifest.rows(config.year)
-        final_status_counts = manifest.status_counts(config.year)
+        rows = manifest.rows(config.year, config.month)
+        final_status_counts = manifest.status_counts(config.year, config.month)
         if rows:
-            store.export_manifest(rows, config.year)
+            store.export_manifest(rows, config.year, config.month)
     metadata["last_crawl_finished_at"] = utc_now()
     metadata["last_crawl_results"] = results
     metadata["status_counts_after_last_crawl"] = final_status_counts

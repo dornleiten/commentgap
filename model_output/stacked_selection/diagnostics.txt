@@ -1,0 +1,15 @@
+Stacked audience/curator selection model
+Input: data/comment_data_general_091022_untilarticle5874_final_redacted.csv
+Primary tie seed: 20260813
+Tie realizations fitted: 10
+Eligible discussions: 1510
+Eligible root comments: 248021
+Stacked rows: 496042
+Article-selector strata: 3020
+Model concordance: 0.799922008039171
+Robust score test p-value: 3.97760013228942e-228
+Audience selection: top k final relative-vote roots, seeded tie-breaking.
+Curator selection: k pinned roots from the identical candidate set.
+Inference: conditional logit with article x selector strata; SEs clustered by article.
+Probability contrasts: equal-discussion-weighted reference changes based on p0=k/N.
+Interpretation is associational: final votes are affected by exposure and existing ranking.

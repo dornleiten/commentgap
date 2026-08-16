@@ -259,11 +259,15 @@ class ParquetStore:
         path = self.publish_prepared_comments(story_id, year, month)
         return path, unique, published, deleted
 
-    def export_manifest(self, rows: list[dict[str, Any]], year: int) -> Path:
+    def export_manifest(
+        self, rows: list[dict[str, Any]], year: int, month: int | None = None
+    ) -> Path:
         if not rows:
             raise ValueError("cannot export an empty manifest")
         pa, pq = _modules()
         path = self.root / "crawl_manifest" / f"year={year}"
+        if month is not None:
+            path = path / f"month={month:02d}"
         path.mkdir(parents=True, exist_ok=True)
         destination = path / "manifest.parquet"
         table = pa.Table.from_pylist(rows)

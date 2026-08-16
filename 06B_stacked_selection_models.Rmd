@@ -1,0 +1,417 @@
+---
+title: "Stacked curator–audience selection models (2025)"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+# Objective
+
+Fit two common-scale conditional-logit models: one whose candidates are root
+comments and one whose candidates are all published comments. Each comment is
+stacked once for the audience selector and once for the curator selector.
+Article-by-selector strata provide the article controls; standard errors are
+clustered by article.
+
+```{r setup, message=FALSE, warning=FALSE}
+required_packages <- c(
+  "arrow", "data.table", "jsonlite", "survival", "MASS", "knitr"
+)
+missing_packages <- required_packages[!vapply(
+  required_packages, requireNamespace, logical(1), quietly = TRUE
+)]
+if (length(missing_packages)) {
+  stop(
+    "Restore the R environment before knitting. Missing: ",
+    paste(missing_packages, collapse = ", ")
+  )
+}
+library(data.table)
+library(survival)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Configuration and shared feature contract
+
+```{r configuration}
+feature_root <- Sys.getenv(
+  "COMMENTGAP_FEATURE_ROOT",
+  "model_output/selection_2025/features"
+)
+output_root <- Sys.getenv(
+  "COMMENTGAP_REGRESSION_ROOT",
+  "model_output/selection_2025/regression"
+)
+tie_draws_requested <- as.integer(Sys.getenv("COMMENTGAP_TIE_DRAWS", "10"))
+probability_draws <- as.integer(Sys.getenv("COMMENTGAP_PROBABILITY_DRAWS", "5000"))
+base_seed <- as.integer(Sys.getenv("COMMENTGAP_MODEL_SEED", "20260813"))
+
+if (tie_draws_requested < 1L) stop("COMMENTGAP_TIE_DRAWS must be positive")
+if (probability_draws < 100L) stop("COMMENTGAP_PROBABILITY_DRAWS must be at least 100")
+dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
+
+manifest_path <- file.path(feature_root, "feature_manifest.json")
+provenance_path <- file.path(feature_root, "provenance_manifest.json")
+if (!file.exists(manifest_path)) stop("Missing feature manifest: ", manifest_path)
+if (!file.exists(provenance_path)) stop("Missing provenance manifest: ", provenance_path)
+feature_manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
+provenance <- jsonlite::fromJSON(provenance_path, simplifyVector = FALSE)
+cat("Feature watermark:", provenance$watermark, "\n")
+```
+
+# Model helpers
+
+```{r helpers}
+safe_scale <- function(x, name) {
+  x <- as.numeric(x)
+  center <- mean(x)
+  spread <- stats::sd(x)
+  if (!is.finite(spread) || spread <= 0) {
+    stop("Cannot standardize feature with no variation: ", name)
+  }
+  list(value = (x - center) / spread, mean = center, sd = spread)
+}
+
+interaction_name <- function(fit, feature) {
+  candidates <- c(paste0(feature, ":curator"), paste0("curator:", feature))
+  found <- candidates[candidates %in% names(stats::coef(fit))]
+  if (length(found) != 1L) stop("Cannot identify interaction for ", feature)
+  found[[1L]]
+}
+
+build_stacked <- function(choice_set, features, draw) {
+  label <- sprintf("audience_selected_draw_%02d", draw)
+  if (!label %in% names(choice_set)) stop("Missing tie-draw label: ", label)
+  keep <- c("story_id", "comment_id", "n_candidates", "n_picks", features)
+
+  audience <- copy(choice_set[, ..keep])
+  audience[, `:=`(
+    selector = "audience",
+    curator = 0L,
+    selected = as.integer(choice_set[[label]])
+  )]
+  curator_rows <- copy(choice_set[, ..keep])
+  curator_rows[, `:=`(
+    selector = "curator",
+    curator = 1L,
+    selected = as.integer(choice_set$curator_selected)
+  )]
+  stacked <- rbindlist(list(audience, curator_rows), use.names = TRUE)
+  stacked[, stratum := paste(story_id, selector, sep = "::")]
+  setorder(stacked, stratum, comment_id)
+
+  checks <- stacked[, .(
+    selected_n = sum(selected),
+    expected_n = first(n_picks),
+    candidates_n = .N
+  ), by = stratum]
+  if (checks[, any(selected_n != expected_n)]) {
+    stop("At least one selector query does not contain exactly k selections")
+  }
+  if (checks[, any(selected_n <= 0L | selected_n >= candidates_n)]) {
+    stop("At least one selector query lacks outcome variation")
+  }
+  stacked
+}
+
+fit_stacked <- function(choice_set, features, formula, draw) {
+  stacked <- build_stacked(choice_set, features, draw)
+  cat("Fitting tie draw", draw, "on", format(nrow(stacked), big.mark = ","), "rows\n")
+  fit_warnings <- character()
+  fit <- withCallingHandlers(
+    survival::clogit(
+      formula,
+      data = stacked,
+      method = "efron",
+      model = FALSE,
+      x = FALSE,
+      y = FALSE
+    ),
+    warning = function(condition) {
+      fit_warnings <<- c(fit_warnings, conditionMessage(condition))
+      invokeRestart("muffleWarning")
+    }
+  )
+  attr(fit, "fit_warnings") <- unique(fit_warnings)
+  if (anyNA(stats::coef(fit))) stop("Model contains unidentified coefficients")
+  convergence_warnings <- grep(
+    "infinite|did not converge|ran out of iterations",
+    fit_warnings,
+    value = TRUE,
+    ignore.case = TRUE
+  )
+  if (length(convergence_warnings) && identical(provenance$watermark, "INFERENCE")) {
+    stop(
+      "Inference model did not converge: ",
+      paste(unique(convergence_warnings), collapse = " | ")
+    )
+  }
+  fit
+}
+
+selector_summary <- function(fit, features, labels, standardize) {
+  covariance <- stats::vcov(fit)
+  rows <- lapply(features, function(feature) {
+    interaction <- interaction_name(fit, feature)
+    beta <- stats::coef(fit)[[feature]]
+    gamma <- stats::coef(fit)[[interaction]]
+    audience_se <- sqrt(covariance[feature, feature])
+    difference_se <- sqrt(covariance[interaction, interaction])
+    curator_se <- sqrt(
+      covariance[feature, feature] + covariance[interaction, interaction] +
+        2 * covariance[feature, interaction]
+    )
+    interval <- function(estimate, se) {
+      c(estimate - stats::qnorm(0.975) * se, estimate + stats::qnorm(0.975) * se)
+    }
+    audience_ci <- interval(beta, audience_se)
+    curator_ci <- interval(beta + gamma, curator_se)
+    difference_ci <- interval(gamma, difference_se)
+    data.table(
+      term = feature,
+      feature = labels[[feature]],
+      unit = if (standardize[[feature]]) "One standard deviation" else "Absent to present",
+      audience_log_odds = unname(beta),
+      audience_se = audience_se,
+      audience_conf_low = audience_ci[[1L]],
+      audience_conf_high = audience_ci[[2L]],
+      audience_odds_ratio = exp(beta),
+      curator_log_odds = unname(beta + gamma),
+      curator_se = curator_se,
+      curator_conf_low = curator_ci[[1L]],
+      curator_conf_high = curator_ci[[2L]],
+      curator_odds_ratio = exp(beta + gamma),
+      curator_minus_audience_log_odds = unname(gamma),
+      difference_se = difference_se,
+      difference_conf_low = difference_ci[[1L]],
+      difference_conf_high = difference_ci[[2L]],
+      difference_p_value = 2 * stats::pnorm(-abs(gamma / difference_se))
+    )
+  })
+  output <- rbindlist(rows)
+  output[, difference_q_value_bh := stats::p.adjust(difference_p_value, method = "BH")]
+  output
+}
+
+probability_summary <- function(
+    fit, features, labels, standardize, article_rates, draws, seed) {
+  covariance <- stats::vcov(fit)
+  p0 <- article_rates$n_picks / article_rates$n_candidates
+  probability_change <- function(beta) {
+    mean(stats::plogis(stats::qlogis(p0) + beta) - p0)
+  }
+  rows <- lapply(seq_along(features), function(index) {
+    feature <- features[[index]]
+    interaction <- interaction_name(fit, feature)
+    names_pair <- c(feature, interaction)
+    estimates <- stats::coef(fit)[names_pair]
+    covariance_pair <- covariance[names_pair, names_pair, drop = FALSE]
+    set.seed(seed + index * 100L)
+    simulated <- MASS::mvrnorm(draws, mu = estimates, Sigma = covariance_pair)
+    audience_draws <- apply(simulated, 1L, function(x) probability_change(x[[1L]]))
+    curator_draws <- apply(simulated, 1L, function(x) probability_change(sum(x)))
+    difference_draws <- curator_draws - audience_draws
+    interval <- function(x) unname(stats::quantile(x, c(0.025, 0.975)))
+    audience_ci <- interval(audience_draws)
+    curator_ci <- interval(curator_draws)
+    difference_ci <- interval(difference_draws)
+    data.table(
+      term = feature,
+      feature = labels[[feature]],
+      unit = if (standardize[[feature]]) "One standard deviation" else "Absent to present",
+      reference_probability_mean = mean(p0),
+      audience_change_pp = 100 * probability_change(estimates[[1L]]),
+      audience_conf_low_pp = 100 * audience_ci[[1L]],
+      audience_conf_high_pp = 100 * audience_ci[[2L]],
+      curator_change_pp = 100 * probability_change(sum(estimates)),
+      curator_conf_low_pp = 100 * curator_ci[[1L]],
+      curator_conf_high_pp = 100 * curator_ci[[2L]],
+      curator_minus_audience_pp = 100 * (
+        probability_change(sum(estimates)) - probability_change(estimates[[1L]])
+      ),
+      difference_conf_low_pp = 100 * difference_ci[[1L]],
+      difference_conf_high_pp = 100 * difference_ci[[2L]]
+    )
+  })
+  rbindlist(rows)
+}
+```
+
+# Fit one candidate scope
+
+```{r run-scope}
+run_scope <- function(scope) {
+  cat("\n---", toupper(scope), "CANDIDATE MODEL ---\n")
+  input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
+  if (!file.exists(input_path)) stop("Missing choice set: ", input_path)
+  choice_set <- as.data.table(arrow::read_parquet(input_path))
+  features <- unlist(feature_manifest$models[[scope]]$features, use.names = FALSE)
+  missing <- setdiff(
+    c("story_id", "comment_id", "n_candidates", "n_picks", "curator_selected", features),
+    names(choice_set)
+  )
+  if (length(missing)) stop("Missing columns in ", scope, ": ", paste(missing, collapse = ", "))
+  if (choice_set[, anyDuplicated(paste(story_id, comment_id))]) {
+    stop("Candidate keys are not unique in ", scope)
+  }
+
+  labels <- setNames(
+    vapply(features, function(feature) feature_manifest$features[[feature]]$label, character(1)),
+    features
+  )
+  standardize <- setNames(
+    vapply(features, function(feature) isTRUE(feature_manifest$features[[feature]]$standardize), logical(1)),
+    features
+  )
+  scaling <- rbindlist(lapply(features, function(feature) {
+    if (!standardize[[feature]]) {
+      return(data.table(term = feature, mean = NA_real_, sd = NA_real_, standardized = FALSE))
+    }
+    scaled <- safe_scale(choice_set[[feature]], feature)
+    set(choice_set, j = feature, value = scaled$value)
+    data.table(term = feature, mean = scaled$mean, sd = scaled$sd, standardized = TRUE)
+  }))
+  if (choice_set[, anyNA(.SD), .SDcols = features]) stop("Missing values remain after scaling")
+
+  right_hand_side <- c(
+    features,
+    paste0("curator:", features),
+    "strata(stratum)",
+    "cluster(story_id)"
+  )
+  model_formula <- stats::as.formula(
+    paste("selected ~", paste(right_hand_side, collapse = " + "))
+  )
+  primary <- fit_stacked(choice_set, features, model_formula, 1L)
+  covariance <- stats::vcov(primary)
+  coefficients <- data.table(
+    term = names(stats::coef(primary)),
+    estimate = unname(stats::coef(primary)),
+    std_error_article_clustered = sqrt(diag(covariance))
+  )
+  coefficients[, `:=`(
+    conf_low = estimate - stats::qnorm(0.975) * std_error_article_clustered,
+    conf_high = estimate + stats::qnorm(0.975) * std_error_article_clustered,
+    p_value = 2 * stats::pnorm(-abs(estimate / std_error_article_clustered))
+  )]
+  associations <- selector_summary(primary, features, labels, standardize)
+  article_rates <- unique(choice_set[, .(story_id, n_candidates, n_picks)])
+  probabilities <- probability_summary(
+    primary, features, labels, standardize, article_rates,
+    probability_draws, base_seed
+  )
+
+  available_draws <- length(grep("^audience_selected_draw_[0-9]+$", names(choice_set)))
+  tie_draws <- min(tie_draws_requested, available_draws)
+  sensitivity <- rbindlist(lapply(seq_len(tie_draws), function(draw) {
+    fit <- if (draw == 1L) primary else fit_stacked(
+      choice_set, features, model_formula, draw
+    )
+    output <- data.table(
+      draw = draw,
+      term = features,
+      curator_minus_audience_log_odds = vapply(
+        features,
+        function(feature) unname(stats::coef(fit)[[interaction_name(fit, feature)]]),
+        numeric(1)
+      )
+    )
+    if (draw > 1L) rm(fit)
+    output
+  }))
+  sensitivity_summary <- sensitivity[, .(
+    draws = .N,
+    estimate_median = stats::median(curator_minus_audience_log_odds),
+    estimate_min = min(curator_minus_audience_log_odds),
+    estimate_max = max(curator_minus_audience_log_odds),
+    estimate_sd = if (.N > 1L) stats::sd(curator_minus_audience_log_odds) else 0,
+    sign_changes_across_draws = min(curator_minus_audience_log_odds) < 0 &
+      max(curator_minus_audience_log_odds) > 0
+  ), by = term]
+  sensitivity_summary[, feature := labels[term]]
+
+  summary <- data.table(
+    statistic = c(
+      "candidate_scope", "eligible_articles", "candidate_comments",
+      "curator_selections", "stacked_rows", "tie_draws_fitted",
+      "article_selector_strata", "watermark"
+    ),
+    value = c(
+      scope,
+      uniqueN(choice_set$story_id),
+      nrow(choice_set),
+      sum(choice_set$curator_selected),
+      2L * nrow(choice_set),
+      tie_draws,
+      2L * uniqueN(choice_set$story_id),
+      provenance$watermark
+    )
+  )
+
+  scope_output <- file.path(output_root, scope)
+  dir.create(scope_output, recursive = TRUE, showWarnings = FALSE)
+  fwrite(scaling, file.path(scope_output, "feature_scaling.csv"))
+  fwrite(coefficients, file.path(scope_output, "model_coefficients.csv"))
+  fwrite(associations, file.path(scope_output, "selector_associations.csv"))
+  fwrite(probabilities, file.path(scope_output, "probability_contrasts.csv"))
+  fwrite(sensitivity, file.path(scope_output, "tie_sensitivity_draws.csv"))
+  fwrite(sensitivity_summary, file.path(scope_output, "tie_sensitivity_summary.csv"))
+  fwrite(summary, file.path(scope_output, "sample_summary.csv"))
+  environment(primary$terms) <- baseenv()
+  saveRDS(primary, file.path(scope_output, "stacked_selection_model.rds"))
+  writeLines(
+    c(
+      paste("Candidate scope:", scope),
+      paste("Feature watermark:", provenance$watermark),
+      paste("Eligible articles:", uniqueN(choice_set$story_id)),
+      paste("Candidate comments:", nrow(choice_set)),
+      paste("Tie draws fitted:", tie_draws),
+      "Article controls: article-by-selector conditional-logit strata.",
+      "Uncertainty: standard errors clustered by article.",
+      "Audience outcome: top-k final relative-vote selection.",
+      "Interpretation: retrospective within-discussion associations, not causal effects.",
+      if (length(attr(primary, "fit_warnings"))) {
+        paste("Fit warnings:", paste(attr(primary, "fit_warnings"), collapse = " | "))
+      } else {
+        "Fit warnings: none"
+      }
+    ),
+    file.path(scope_output, "diagnostics.txt")
+  )
+  list(scope = scope, associations = associations, probabilities = probabilities, summary = summary)
+}
+
+results <- lapply(c("root", "all"), run_scope)
+```
+
+# Compact results
+
+```{r results, echo=FALSE}
+for (result in results) {
+  cat("\n##", if (result$scope == "root") "Root candidates" else "All comments", "\n\n")
+  print(knitr::kable(result$summary, caption = "Sample accounting"))
+  print(knitr::kable(
+    result$associations[, .(
+      feature,
+      audience_log_odds,
+      curator_log_odds,
+      curator_minus_audience_log_odds,
+      difference_conf_low,
+      difference_conf_high,
+      difference_q_value_bh
+    )],
+    digits = 4,
+    caption = "Selector-specific associations on a common selection scale"
+  ))
+}
+```
+
+# Interpretation limits
+
+The audience label is based on final collection-time vote totals and therefore
+reflects exposure, position, social influence, and retrospective survival as
+well as preference. Author-history vote variables are also collection-snapshot
+reputation measures. Curators include journalists, community-management staff,
+and volunteer guides. The models estimate associations only within discussions
+where at least one usable sticky selection was observed.

@@ -10,6 +10,7 @@ class ScrapeConfig:
     output_dir: Path
     user_agent: str
     contact: str
+    month: int | None = None
     request_interval: float = 1.0
     timeout: float = 30.0
     max_retries: int = 5
@@ -19,6 +20,8 @@ class ScrapeConfig:
     def __post_init__(self) -> None:
         if not 1997 <= self.year <= 2100:
             raise ValueError("year must be between 1997 and 2100")
+        if self.month is not None and not 1 <= self.month <= 12:
+            raise ValueError("month must be between 1 and 12")
         if self.request_interval < 1.0:
             raise ValueError("request_interval must be at least one second")
         if not self.user_agent.strip():
@@ -37,3 +40,14 @@ class ScrapeConfig:
     @property
     def manifest_path(self) -> Path:
         return self.output_dir / "crawl_manifest.sqlite3"
+
+    @property
+    def months(self) -> tuple[int, ...]:
+        return (self.month,) if self.month is not None else tuple(range(1, 13))
+
+    @property
+    def collection_metadata_path(self) -> Path:
+        path = self.output_dir / "collection_metadata" / f"year={self.year}"
+        if self.month is not None:
+            path = path / f"month={self.month:02d}"
+        return path / "metadata.json"

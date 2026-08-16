@@ -1,0 +1,11 @@
+term,feature,unit,transformation
+z_positive_sentiment,Positive sentiment,One standard deviation,standardized
+z_negative_sentiment,Negative sentiment,One standard deviation,standardized
+z_lexical_diversity,Lexical diversity,One standard deviation,standardized
+z_reading_difficulty,Reading difficulty (SMOG),One standard deviation,standardized
+z_topical_similarity,Topical similarity,One standard deviation,standardized
+z_log_words,Comment length,One standard deviation,log1p then standardized
+z_log_punctuation,Punctuation,One standard deviation,log1p then standardized
+second_person,Second-person pronoun,Absent to present,binary
+z_log_followers,Author followers,One standard deviation,log1p then standardized
+z_log_posting_hours,Posting time after article,One standard deviation,log1p then standardized

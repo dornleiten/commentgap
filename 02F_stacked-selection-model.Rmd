@@ -1,0 +1,616 @@
+---
+title: "Stacked Audience–Curator Selection Model"
+subtitle: "Paper 1 analysis"
+date: "2026-08-13"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    df_print: paged
+---
+
+# Purpose
+
+This analysis compares audience and editorial/community-curator preferences on
+the same outcome scale. Each eligible root comment appears twice: once in an
+audience choice set and once in a curator choice set. In an article with (k)
+eligible Editors' Picks, curators select the (k) pinned roots and the audience
+selects the (k) roots with the highest final relative-vote totals.
+
+A conditional logistic model stratified by article and selector compares
+comments only within the same discussion and selection process.
+Selector-by-feature interactions directly estimate curator–audience
+differences. Standard errors are clustered by article because both selector
+choice sets and all comments from a discussion remain dependent.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  cache = FALSE
+)
+suppressPackageStartupMessages({
+  library(data.table)
+  library(survival)
+})
+```
+
+# Configuration
+
+The environment variables `COMMENTGAP_TIE_DRAWS` and
+`COMMENTGAP_PROBABILITY_DRAWS` control the number of tie sensitivity fits and
+probability-interval simulations. Their defaults keep an interactive knit
+quick; the submission analysis uses 10 tie realizations and 5,000 probability
+draws.
+
+```{r configuration}
+
+input_file <- "data/comment_data_general_091022_untilarticle5874_final_redacted.csv"
+output_dir <- "model_output/stacked_selection"
+base_seed <- 20260813L
+tie_draws <- as.integer(Sys.getenv("COMMENTGAP_TIE_DRAWS", "1"))
+probability_draws <- as.integer(Sys.getenv("COMMENTGAP_PROBABILITY_DRAWS", "5000"))
+
+if (is.na(tie_draws) || tie_draws < 1L) {
+  stop("COMMENTGAP_TIE_DRAWS must be a positive integer")
+}
+if (is.na(probability_draws) || probability_draws < 100L) {
+  stop("COMMENTGAP_PROBABILITY_DRAWS must be at least 100")
+}
+if (!file.exists(input_file)) stop("Missing input file: ", input_file)
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+required_columns <- c(
+  "comment_id", "article", "is_root_comment", "pinned_f",
+  "votes_rel", "sentiment_prob_pos", "sentiment_prob_neg",
+  "lexdiv_cttr", "SMOG_readability", "cosine_1", "num_words",
+  "num_punct", "second_person", "user_follower", "hours_since_article"
+)
+```
+
+# Data and eligible choice sets
+
+Only root comments in discussions containing at least one root-level Editors'
+Pick enter the comparison. Non-root pins are recorded as anomalies and removed
+so that curator and audience selections use identical eligible sets.
+
+```{r load-and-filter-data}
+
+cat("Reading analysis columns from", input_file, "\n")
+comments <- fread(input_file, select = required_columns)
+missing_columns <- setdiff(required_columns, names(comments))
+if (length(missing_columns) > 0L) {
+  stop("Missing required columns: ", paste(missing_columns, collapse = ", "))
+}
+
+if (anyDuplicated(comments$comment_id)) stop("comment_id is not unique")
+if (anyNA(comments$article) || anyNA(comments$comment_id)) {
+  stop("article and comment_id must not be missing")
+}
+
+comments[, pinned_f := as.logical(pinned_f)]
+comments[, is_root_comment := as.logical(is_root_comment)]
+comments[, second_person := as.integer(as.logical(second_person))]
+
+nonroot_pins <- comments[pinned_f == TRUE & is_root_comment == FALSE, .N]
+all_root_comments <- comments[is_root_comment == TRUE]
+pin_articles <- all_root_comments[pinned_f == TRUE, unique(article)]
+roots <- all_root_comments[article %chin% pin_articles]
+roots[, `:=`(
+  n_candidates = .N,
+  n_picks = sum(pinned_f)
+), by = article]
+
+# Conditional choice strata require at least one selected and one unselected
+# candidate. One observed discussion selects every eligible root and therefore
+# contains no information about relative selection.
+uninformative_articles <- roots[n_picks >= n_candidates, unique(article)]
+roots <- roots[n_picks > 0L & n_picks < n_candidates]
+
+if (anyNA(roots[, ..required_columns])) {
+  na_counts <- vapply(roots[, ..required_columns], anyNA, logical(1))
+  stop(
+    "Missing values in model inputs: ",
+    paste(names(na_counts)[na_counts], collapse = ", ")
+  )
+}
+```
+
+# Predictor transformations
+
+Predictors are limited to comment-intrinsic or approximately posting-time
+available attributes. Final votes, pin status, final discussion size, and
+downstream reply-tree outcomes are not used as predictors. Log word count is
+included to distinguish lexical-diversity and SMOG associations from comment
+length.
+
+```{r transform-predictors}
+
+safe_z <- function(x, name) {
+  x <- as.numeric(x)
+  s <- sd(x)
+  if (!is.finite(s) || s <= 0) stop("Cannot standardize ", name)
+  (x - mean(x)) / s
+}
+
+# Posting-time-available or comment-intrinsic predictors only. Final votes,
+# pin status, final discussion size, and reply-tree outcomes are deliberately
+# excluded as predictors. log(num_words) adjusts the textual measures for the
+# strong association between comment length, lexical diversity, and SMOG.
+roots[, z_positive_sentiment := safe_z(sentiment_prob_pos, "sentiment_prob_pos")]
+roots[, z_negative_sentiment := safe_z(sentiment_prob_neg, "sentiment_prob_neg")]
+roots[, z_lexical_diversity := safe_z(lexdiv_cttr, "lexdiv_cttr")]
+roots[, z_reading_difficulty := safe_z(SMOG_readability, "SMOG_readability")]
+roots[, z_topical_similarity := safe_z(cosine_1, "cosine_1")]
+roots[, z_log_words := safe_z(log1p(num_words), "log1p(num_words)")]
+roots[, z_log_punctuation := safe_z(log1p(num_punct), "log1p(num_punct)")]
+roots[, z_log_followers := safe_z(log1p(user_follower), "log1p(user_follower)")]
+roots[, z_log_posting_hours := safe_z(log1p(hours_since_article), "log1p(hours_since_article)")]
+```
+
+```{r feature-metadata}
+
+feature_info <- data.table(
+  term = c(
+    "z_positive_sentiment", "z_negative_sentiment",
+    "z_lexical_diversity", "z_reading_difficulty",
+    "z_topical_similarity", "z_log_words", "z_log_punctuation",
+    "second_person", "z_log_followers", "z_log_posting_hours"
+  ),
+  feature = c(
+    "Positive sentiment", "Negative sentiment", "Lexical diversity",
+    "Reading difficulty (SMOG)", "Topical similarity", "Comment length",
+    "Punctuation", "Second-person pronoun", "Author followers",
+    "Posting time after article"
+  ),
+  unit = c(rep("One standard deviation", 7L), "Absent to present",
+           rep("One standard deviation", 2L)),
+  transformation = c(
+    "standardized", "standardized", "standardized", "standardized",
+    "standardized", "log1p then standardized", "log1p then standardized",
+    "binary", "log1p then standardized", "log1p then standardized"
+  )
+)
+feature_terms <- feature_info$term
+
+scaling_table <- rbindlist(list(
+  data.table(raw_variable = "sentiment_prob_pos", transformed_term = "z_positive_sentiment", mean = mean(roots$sentiment_prob_pos), sd = sd(roots$sentiment_prob_pos)),
+  data.table(raw_variable = "sentiment_prob_neg", transformed_term = "z_negative_sentiment", mean = mean(roots$sentiment_prob_neg), sd = sd(roots$sentiment_prob_neg)),
+  data.table(raw_variable = "lexdiv_cttr", transformed_term = "z_lexical_diversity", mean = mean(roots$lexdiv_cttr), sd = sd(roots$lexdiv_cttr)),
+  data.table(raw_variable = "SMOG_readability", transformed_term = "z_reading_difficulty", mean = mean(roots$SMOG_readability), sd = sd(roots$SMOG_readability)),
+  data.table(raw_variable = "cosine_1", transformed_term = "z_topical_similarity", mean = mean(roots$cosine_1), sd = sd(roots$cosine_1)),
+  data.table(raw_variable = "log1p(num_words)", transformed_term = "z_log_words", mean = mean(log1p(roots$num_words)), sd = sd(log1p(roots$num_words))),
+  data.table(raw_variable = "log1p(num_punct)", transformed_term = "z_log_punctuation", mean = mean(log1p(roots$num_punct)), sd = sd(log1p(roots$num_punct))),
+  data.table(raw_variable = "log1p(user_follower)", transformed_term = "z_log_followers", mean = mean(log1p(roots$user_follower)), sd = sd(log1p(roots$user_follower))),
+  data.table(raw_variable = "log1p(hours_since_article)", transformed_term = "z_log_posting_hours", mean = mean(log1p(roots$hours_since_article)), sd = sd(log1p(roots$hours_since_article)))
+))
+```
+
+# Construct matched selections
+
+Within vote totals tied at the audience top-(k) boundary, a seeded random key
+selects the required number of comments. Sorting by comment ID before drawing
+the key makes each realization independent of input row order. The sensitivity
+section repeats the model under additional seeds.
+
+```{r selection-functions}
+
+build_audience_selection <- function(root_data, seed) {
+  out <- copy(root_data)
+
+  # A seeded random key is used only within equal-vote groups. Sorting by
+  # comment_id before drawing makes the realization invariant to input order.
+  setorder(out, article, comment_id)
+  set.seed(seed)
+  out[, tie_key := runif(.N)]
+  setorder(out, article, -votes_rel, tie_key)
+  out[, audience_selected := seq_len(.N) <= first(n_picks), by = article]
+  setorder(out, article, comment_id)
+
+  if (any(out[, sum(audience_selected) != first(n_picks), by = article]$V1)) {
+    stop("Audience top-k construction did not select exactly k comments")
+  }
+  out
+}
+
+tie_diagnostics <- roots[, {
+  cutoff <- sort(votes_rel, decreasing = TRUE)[first(n_picks)]
+  above <- sum(votes_rel > cutoff)
+  tied <- sum(votes_rel == cutoff)
+  slots <- first(n_picks) - above
+  list(
+    n_candidates = first(n_candidates),
+    n_picks = first(n_picks),
+    cutoff_votes_rel = cutoff,
+    n_above_cutoff = above,
+    n_tied_at_cutoff = tied,
+    slots_within_cutoff_tie = slots,
+    cutoff_inclusion_probability = slots / tied,
+    ambiguous_cutoff = tied > slots
+  )
+}, by = article]
+
+build_stacked_data <- function(root_data, seed) {
+  selected_roots <- build_audience_selection(root_data, seed)
+  keep <- c("comment_id", "article", "n_candidates", "n_picks", feature_terms)
+
+  audience <- selected_roots[, ..keep]
+  audience[, `:=`(
+    selector = "audience",
+    curator = 0L,
+    selected = as.integer(selected_roots$audience_selected)
+  )]
+
+  curator <- selected_roots[, ..keep]
+  curator[, `:=`(
+    selector = "curator",
+    curator = 1L,
+    selected = as.integer(selected_roots$pinned_f)
+  )]
+
+  stacked <- rbindlist(list(audience, curator), use.names = TRUE)
+  stacked[, stratum := interaction(article, selector, drop = TRUE)]
+  setorder(stacked, article, selector, comment_id)
+
+  stratum_checks <- stacked[, .(
+    selected_n = sum(selected),
+    expected_n = first(n_picks),
+    candidates_n = .N
+  ), by = .(article, selector)]
+  if (stratum_checks[, any(selected_n != expected_n)]) {
+    stop("At least one selector stratum does not contain exactly k selections")
+  }
+  if (stratum_checks[, any(selected_n <= 0L | selected_n >= candidates_n)]) {
+    stop("At least one selector stratum lacks outcome variation")
+  }
+  stacked
+}
+```
+
+# Conditional logistic model
+
+The audience coefficients describe associations with audience top-(k)
+selection. Each `curator:feature` interaction is the curator-minus-audience
+difference. Article-by-selector strata absorb discussion-specific selection
+rates and all other characteristics shared within each choice set.
+
+```{r fit-primary-model}
+
+model_rhs <- c(
+  feature_terms,
+  paste0("curator:", feature_terms),
+  "strata(stratum)",
+  "cluster(article)"
+)
+model_formula <- as.formula(paste("selected ~", paste(model_rhs, collapse = " + ")))
+
+fit_one_draw <- function(seed, keep_data = FALSE) {
+  stacked <- build_stacked_data(roots, seed)
+  cat("Fitting tie seed", seed, "on", nrow(stacked), "stacked rows\n")
+  fit <- clogit(
+    model_formula,
+    data = stacked,
+    method = "efron",
+    model = FALSE,
+    x = FALSE,
+    y = FALSE
+  )
+  if (anyNA(coef(fit))) stop("Model contains unidentified coefficients")
+  if (keep_data) list(fit = fit, data = stacked) else fit
+}
+
+primary <- fit_one_draw(base_seed, keep_data = TRUE)
+primary_model <- primary$fit
+stacked_data <- primary$data
+rm(primary)
+```
+
+# Selector-specific associations
+
+```{r summarize-associations}
+
+coefficient_table <- data.table(
+  term = names(coef(primary_model)),
+  estimate = unname(coef(primary_model)),
+  std_error_article_clustered = sqrt(diag(vcov(primary_model)))
+)
+coefficient_table[, `:=`(
+  conf_low = estimate - qnorm(0.975) * std_error_article_clustered,
+  conf_high = estimate + qnorm(0.975) * std_error_article_clustered,
+  z = estimate / std_error_article_clustered
+)]
+coefficient_table[, p_value := 2 * pnorm(-abs(z))]
+
+summarise_feature <- function(term, label, unit) {
+  beta_name <- term
+  # R canonicalizes an interaction written curator:x as x:curator.
+  difference_name <- paste0(term, ":curator")
+  coefficient_names <- names(coef(primary_model))
+  if (!(beta_name %in% coefficient_names) || !(difference_name %in% coefficient_names)) {
+    stop("Expected model term is absent: ", term)
+  }
+
+  b <- coef(primary_model)[beta_name]
+  g <- coef(primary_model)[difference_name]
+  v <- vcov(primary_model)
+  audience_se <- sqrt(v[beta_name, beta_name])
+  difference_se <- sqrt(v[difference_name, difference_name])
+  curator_se <- sqrt(
+    v[beta_name, beta_name] + v[difference_name, difference_name] +
+      2 * v[beta_name, difference_name]
+  )
+
+  interval <- function(est, se) c(est - qnorm(0.975) * se, est + qnorm(0.975) * se)
+  audience_ci <- interval(b, audience_se)
+  curator_ci <- interval(b + g, curator_se)
+  difference_ci <- interval(g, difference_se)
+
+  data.table(
+    term = term,
+    feature = label,
+    unit = unit,
+    audience_log_odds = unname(b),
+    audience_se = audience_se,
+    audience_conf_low = audience_ci[1],
+    audience_conf_high = audience_ci[2],
+    audience_odds_ratio = exp(b),
+    curator_log_odds = unname(b + g),
+    curator_se = curator_se,
+    curator_conf_low = curator_ci[1],
+    curator_conf_high = curator_ci[2],
+    curator_odds_ratio = exp(b + g),
+    curator_minus_audience_log_odds = unname(g),
+    difference_se = difference_se,
+    difference_conf_low = difference_ci[1],
+    difference_conf_high = difference_ci[2],
+    difference_p_value = 2 * pnorm(-abs(g / difference_se))
+  )
+}
+
+selector_associations <- rbindlist(Map(
+  summarise_feature,
+  feature_info$term,
+  feature_info$feature,
+  feature_info$unit
+))
+selector_associations[, difference_q_value_bh := p.adjust(
+  difference_p_value,
+  method = "BH"
+)]
+```
+
+# Probability-scale reference contrasts
+
+For interpretation, each selector-specific slope is translated into the change
+from an article's observed selection prevalence, (p_0=k/N), after a one-unit
+feature increase. Continuous predictors are standardized, so their unit is one
+standard deviation. These are equal-discussion-weighted reference contrasts,
+not claims about causal effects or individual latent preferences.
+
+```{r probability-contrasts}
+
+# Translate the selector-specific slopes to a common, transparent probability
+# reference. For each discussion, p0=k/N is its observed selection prevalence.
+# The reported contrast is the equal-discussion-weighted change from p0 after a
+# one-unit feature increase. Continuous features are standardized, so this is a
+# one-SD contrast. Confidence intervals simulate the joint pair of audience and
+# curator-difference coefficients using the article-clustered covariance.
+article_rates <- unique(roots[, .(article, n_candidates, n_picks)])
+article_rates[, p0 := n_picks / n_candidates]
+
+probability_change <- function(beta, p0) {
+  mean(plogis(qlogis(p0) + beta) - p0)
+}
+
+probability_summary <- function(term, label, unit, draws = probability_draws) {
+  beta_name <- term
+  difference_name <- paste0(term, ":curator")
+  estimates <- coef(primary_model)[c(beta_name, difference_name)]
+  covariance <- vcov(primary_model)[c(beta_name, difference_name), c(beta_name, difference_name), drop = FALSE]
+
+  set.seed(base_seed + match(term, feature_terms) * 100L)
+  simulated <- MASS::mvrnorm(draws, mu = estimates, Sigma = covariance)
+
+  audience_point <- probability_change(estimates[1], article_rates$p0)
+  curator_point <- probability_change(sum(estimates), article_rates$p0)
+  difference_point <- curator_point - audience_point
+
+  audience_draws <- apply(simulated, 1L, function(x) probability_change(x[1], article_rates$p0))
+  curator_draws <- apply(simulated, 1L, function(x) probability_change(sum(x), article_rates$p0))
+  difference_draws <- curator_draws - audience_draws
+  interval <- function(x) unname(quantile(x, c(0.025, 0.975), na.rm = TRUE))
+
+  audience_ci <- interval(audience_draws)
+  curator_ci <- interval(curator_draws)
+  difference_ci <- interval(difference_draws)
+
+  data.table(
+    term = term,
+    feature = label,
+    unit = unit,
+    reference_probability_mean = mean(article_rates$p0),
+    audience_probability_change = audience_point,
+    audience_conf_low = audience_ci[1],
+    audience_conf_high = audience_ci[2],
+    curator_probability_change = curator_point,
+    curator_conf_low = curator_ci[1],
+    curator_conf_high = curator_ci[2],
+    curator_minus_audience_change = difference_point,
+    difference_conf_low = difference_ci[1],
+    difference_conf_high = difference_ci[2]
+  )
+}
+
+probability_contrasts <- rbindlist(Map(
+  probability_summary,
+  feature_info$term,
+  feature_info$feature,
+  feature_info$unit
+))
+probability_contrasts[, `:=`(
+  audience_change_pp = 100 * audience_probability_change,
+  curator_change_pp = 100 * curator_probability_change,
+  curator_minus_audience_pp = 100 * curator_minus_audience_change,
+  difference_conf_low_pp = 100 * difference_conf_low,
+  difference_conf_high_pp = 100 * difference_conf_high
+)]
+```
+
+# Vote-tie sensitivity
+
+```{r tie-sensitivity}
+
+tie_sensitivity <- data.table()
+tie_sensitivity_summary <- data.table()
+if (tie_draws > 1L) {
+  tie_results <- vector("list", tie_draws)
+  for (draw in seq_len(tie_draws)) {
+    seed <- base_seed + draw - 1L
+    fit <- if (draw == 1L) primary_model else fit_one_draw(seed)
+    tie_results[[draw]] <- data.table(
+      draw = draw,
+      seed = seed,
+      term = feature_terms,
+      curator_minus_audience_log_odds = unname(coef(fit)[paste0(feature_terms, ":curator")])
+    )
+    if (draw > 1L) rm(fit)
+  }
+  tie_sensitivity <- rbindlist(tie_results)
+  tie_sensitivity_summary <- tie_sensitivity[, .(
+    draws = .N,
+    estimate_median = median(curator_minus_audience_log_odds),
+    estimate_min = min(curator_minus_audience_log_odds),
+    estimate_max = max(curator_minus_audience_log_odds),
+    estimate_sd = sd(curator_minus_audience_log_odds),
+    sign_changes_across_draws = min(curator_minus_audience_log_odds) < 0 &
+      max(curator_minus_audience_log_odds) > 0
+  ), by = term]
+  tie_sensitivity_summary <- merge(
+    feature_info[, .(term, feature)],
+    tie_sensitivity_summary,
+    by = "term",
+    all.y = TRUE,
+    sort = FALSE
+  )
+}
+```
+
+# Sample accounting and exports
+
+```{r sample-summary}
+
+sample_summary <- data.table(
+  statistic = c(
+    "all_comments", "all_articles", "all_root_comments",
+    "articles_with_root_pins", "eligible_root_comments",
+    "eligible_articles", "eligible_root_pins", "nonroot_pins_excluded",
+    "uninformative_all_roots_selected_articles", "stacked_rows",
+    "ambiguous_audience_top_k_cutoff_articles", "mean_article_selection_rate"
+  ),
+  value = c(
+    nrow(comments), uniqueN(comments$article), nrow(all_root_comments),
+    length(pin_articles), nrow(roots), uniqueN(roots$article), sum(roots$pinned_f),
+    nonroot_pins, length(uninformative_articles), nrow(stacked_data),
+    tie_diagnostics[ambiguous_cutoff == TRUE, .N], mean(article_rates$p0)
+  )
+)
+```
+
+```{r export-results, include=FALSE}
+
+fwrite(feature_info, file.path(output_dir, "feature_definitions.csv"))
+fwrite(scaling_table, file.path(output_dir, "feature_scaling.csv"))
+fwrite(tie_diagnostics, file.path(output_dir, "audience_top_k_tie_diagnostics.csv"))
+fwrite(sample_summary, file.path(output_dir, "sample_summary.csv"))
+fwrite(coefficient_table, file.path(output_dir, "model_coefficients.csv"))
+fwrite(selector_associations, file.path(output_dir, "selector_associations.csv"))
+fwrite(probability_contrasts, file.path(output_dir, "probability_contrasts.csv"))
+if (nrow(tie_sensitivity) > 0L) {
+  fwrite(tie_sensitivity, file.path(output_dir, "tie_sensitivity_draws.csv"))
+  fwrite(tie_sensitivity_summary, file.path(output_dir, "tie_sensitivity_summary.csv"))
+}
+
+# Strip the call environment before serialization so the model artifact does
+# not capture the half-million-row stacked working dataset.
+environment(primary_model$terms) <- baseenv()
+saveRDS(primary_model, file.path(output_dir, "stacked_selection_model.rds"))
+
+diagnostic_lines <- c(
+  "Stacked audience/curator selection model",
+  paste("Input:", input_file),
+  paste("Primary tie seed:", base_seed),
+  paste("Tie realizations fitted:", tie_draws),
+  paste("Eligible discussions:", uniqueN(roots$article)),
+  paste("Eligible root comments:", nrow(roots)),
+  paste("Stacked rows:", nrow(stacked_data)),
+  paste("Article-selector strata:", uniqueN(stacked_data$stratum)),
+  paste("Model concordance:", unname(summary(primary_model)$concordance[1])),
+  paste("Robust score test p-value:", summary(primary_model)$robscore[3]),
+  "Audience selection: top k final relative-vote roots, seeded tie-breaking.",
+  "Curator selection: k pinned roots from the identical candidate set.",
+  "Inference: conditional logit with article x selector strata; SEs clustered by article.",
+  "Probability contrasts: equal-discussion-weighted reference changes based on p0=k/N.",
+  "Interpretation is associational: final votes are affected by exposure and existing ranking."
+)
+writeLines(diagnostic_lines, file.path(output_dir, "diagnostics.txt"))
+```
+
+# Results
+
+The main inferential quantity is the curator-minus-audience interaction.
+Positive values indicate that a characteristic is more strongly associated
+with curator selection; negative values indicate a stronger audience
+association. Statistical significance alone should not determine substantive
+interpretation, so the probability-scale contrasts are reported alongside the
+log-odds estimates.
+
+```{r display-results, echo=FALSE}
+
+interaction_display <- selector_associations[, .(
+  feature,
+  `Curator − audience log-odds` = curator_minus_audience_log_odds,
+  `95% CI low` = difference_conf_low,
+  `95% CI high` = difference_conf_high,
+  `BH q-value` = difference_q_value_bh
+)]
+
+probability_display <- probability_contrasts[, .(
+  feature,
+  `Audience change (pp)` = audience_change_pp,
+  `Curator change (pp)` = curator_change_pp,
+  `Curator − audience (pp)` = curator_minus_audience_pp,
+  `95% CI low (pp)` = difference_conf_low_pp,
+  `95% CI high (pp)` = difference_conf_high_pp
+)]
+
+knitr::kable(sample_summary, caption = "Analysis sample accounting", digits = 3)
+knitr::kable(
+  interaction_display,
+  caption = "Curator–audience differences on the common selection scale",
+  digits = 4
+)
+knitr::kable(
+  probability_display,
+  caption = "Equal-discussion-weighted reference probability contrasts",
+  digits = 3
+)
+
+if (nrow(tie_sensitivity_summary) > 0L) {
+  knitr::kable(
+    tie_sensitivity_summary,
+    caption = "Sensitivity across seeded top-k tie realizations",
+    digits = 4
+  )
+}
+```
+
+# Interpretation limits
+
+The audience outcome is based on final relative-vote totals, not a direct
+measure of latent preference. Voting can be influenced by posting time,
+position, existing ranking, and curator pinning. Likewise, the model estimates
+associations within curator-active discussions and should not be generalized
+to all discussions or interpreted causally. The `curator` label includes
+journalists, community-management staff, and volunteer community guides.

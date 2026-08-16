@@ -204,6 +204,12 @@ class StorageValidationTests(unittest.TestCase):
             self.assertEqual(summary["raw_author_identifier_columns"], [])
             self.assertEqual(summary["comments_without_forum_rows"], 0)
             self.assertEqual(summary["unexpected_forum_count_mismatches"], 0)
+            monthly_summary = validate_dataset(root, 2025, month=1)
+            self.assertTrue(monthly_summary["passed"], json.dumps(monthly_summary, indent=2))
+            self.assertEqual(monthly_summary["month"], 1)
+            self.assertTrue(
+                (root / "qa_summary/year=2025/month=01/summary.json").exists()
+            )
             comments_path, articles_path = export_legacy(root, 2025)
             self.assertTrue(comments_path.exists())
             self.assertTrue(articles_path.exists())

@@ -19,8 +19,39 @@ def _duckdb():
     return duckdb
 
 
-def _glob(root: Path, table: str, year: int) -> str:
-    return str(root / table / f"year={year}" / "month=*" / "*.parquet").replace("'", "''")
+def _glob(root: Path, table: str, year: int, month: int | None = None) -> str:
+    month_partition = f"month={month:02d}" if month is not None else "month=*"
+    return str(root / table / f"year={year}" / month_partition / "*.parquet").replace(
+        "'", "''"
+    )
+
+
+def _has_parquet(root: Path, table: str, year: int, month: int | None) -> bool:
+    year_path = root / table / f"year={year}"
+    pattern = f"month={month:02d}/*.parquet" if month is not None else "month=*/*.parquet"
+    return any(year_path.glob(pattern))
+
+
+def _collection_metadata(root: Path, year: int, month: int | None) -> dict[str, Any]:
+    candidates = []
+    if month is not None:
+        candidates.append(
+            root
+            / "collection_metadata"
+            / f"year={year}"
+            / f"month={month:02d}"
+            / "metadata.json"
+        )
+    candidates.append(root / "collection_metadata" / f"year={year}" / "metadata.json")
+    candidates.append(root / "collection_metadata.json")
+    for path in candidates:
+        if not path.exists():
+            continue
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        if int(metadata.get("year") or year) != year:
+            continue
+        return metadata
+    return {}
 
 
 def validate_row_invariants(rows: list[dict[str, Any]]) -> list[str]:
@@ -40,10 +71,18 @@ def validate_row_invariants(rows: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
-def validate_dataset(root: Path, year: int, *, allow_incomplete: bool = False) -> dict[str, Any]:
+def validate_dataset(
+    root: Path,
+    year: int,
+    *,
+    month: int | None = None,
+    allow_incomplete: bool = False,
+) -> dict[str, Any]:
+    if month is not None and not 1 <= month <= 12:
+        raise ValueError("month must be between 1 and 12")
     with Manifest(root / "crawl_manifest.sqlite3") as manifest:
-        manifest_rows = manifest.rows(year)
-        status_counts = manifest.status_counts(year)
+        manifest_rows = manifest.rows(year, month)
+        status_counts = manifest.status_counts(year, month)
 
     terminal = {
         "completed",
@@ -58,14 +97,15 @@ def validate_dataset(root: Path, year: int, *, allow_incomplete: bool = False) -
     )
     monthly_manifest: dict[str, dict[str, int]] = {}
     for row in manifest_rows:
-        month = f"{int(row['month']):02d}"
-        bucket = monthly_manifest.setdefault(month, {"discovered": 0})
+        month_key = f"{int(row['month']):02d}"
+        bucket = monthly_manifest.setdefault(month_key, {"discovered": 0})
         bucket["discovered"] += 1
         status = str(row["status"])
         bucket[status] = bucket.get(status, 0) + 1
     terminal_count = len(manifest_rows) - nonterminal
     summary: dict[str, Any] = {
         "year": year,
+        "month": month,
         "validated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "discovered_stories": len(manifest_rows),
         "status_counts": status_counts,
@@ -78,16 +118,14 @@ def validate_dataset(root: Path, year: int, *, allow_incomplete: bool = False) -
         "allow_incomplete": allow_incomplete,
     }
 
-    comments_glob = _glob(root, "comments", year)
-    forums_glob = _glob(root, "forums", year)
-    articles_glob = _glob(root, "articles", year)
-    forum_pages_glob = _glob(root, "forum_pages", year)
-    has_comments = bool(list((root / "comments" / f"year={year}").glob("month=*/*.parquet")))
-    has_forums = bool(list((root / "forums" / f"year={year}").glob("month=*/*.parquet")))
-    has_articles = bool(list((root / "articles" / f"year={year}").glob("month=*/*.parquet")))
-    has_forum_pages = bool(
-        list((root / "forum_pages" / f"year={year}").glob("month=*/*.parquet"))
-    )
+    comments_glob = _glob(root, "comments", year, month)
+    forums_glob = _glob(root, "forums", year, month)
+    articles_glob = _glob(root, "articles", year, month)
+    forum_pages_glob = _glob(root, "forum_pages", year, month)
+    has_comments = _has_parquet(root, "comments", year, month)
+    has_forums = _has_parquet(root, "forums", year, month)
+    has_articles = _has_parquet(root, "articles", year, month)
+    has_forum_pages = _has_parquet(root, "forum_pages", year, month)
 
     duckdb = _duckdb()
     connection = duckdb.connect()
@@ -308,12 +346,7 @@ def validate_dataset(root: Path, year: int, *, allow_incomplete: bool = False) -
             summary["raw_author_identifier_columns"] = sorted(
                 column_names & forbidden_author_columns
             )
-            metadata_path = root / "collection_metadata.json"
-            metadata = (
-                json.loads(metadata_path.read_text(encoding="utf-8"))
-                if metadata_path.exists()
-                else {}
-            )
+            metadata = _collection_metadata(root, year, month)
             reply_depth = int(metadata.get("reply_query_depth") or 32)
             summary["reply_query_depth"] = reply_depth
             summary["reply_depth_limit_rows"] = connection.execute(
@@ -613,7 +646,7 @@ def validate_dataset(root: Path, year: int, *, allow_incomplete: bool = False) -
         summary["reproduced_count_discrepancy_forums"] = 0
         summary["changed_count_discrepancy_on_retry_forums"] = 0
         summary["count_discrepancy_forums_not_recrawled"] = 0
-    summary["passed"] = all(
+    summary["passed"] = bool(manifest_rows) and all(
         summary[key] == 0
         for key in (
             "duplicate_comment_ids",
@@ -639,6 +672,8 @@ def validate_dataset(root: Path, year: int, *, allow_incomplete: bool = False) -
     ) and status_counts.get("failed", 0) == 0
 
     qa_dir = root / "qa_summary" / f"year={year}"
+    if month is not None:
+        qa_dir = qa_dir / f"month={month:02d}"
     qa_dir.mkdir(parents=True, exist_ok=True)
     json_path = qa_dir / "summary.json"
     temporary = json_path.with_suffix(".json.tmp")

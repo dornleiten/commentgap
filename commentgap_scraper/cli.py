@@ -18,8 +18,16 @@ def _default_output(year: int) -> Path:
     return Path("data") / f"scrape_{year}"
 
 
-def _add_year_output(parser: argparse.ArgumentParser) -> None:
+def _add_year_output(parser: argparse.ArgumentParser, *, allow_month: bool = False) -> None:
     parser.add_argument("--year", type=int, default=2025)
+    if allow_month:
+        parser.add_argument(
+            "--month",
+            type=int,
+            choices=range(1, 13),
+            metavar="1-12",
+            help="Restrict the operation to one publication month",
+        )
     parser.add_argument(
         "--output",
         type=Path,
@@ -57,16 +65,24 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     discover_parser = subparsers.add_parser("discover", help="Discover stories from monthly sitemaps")
-    _add_year_output(discover_parser)
+    _add_year_output(discover_parser, allow_month=True)
     _add_network(discover_parser)
 
     crawl_parser = subparsers.add_parser("crawl", help="Collect articles, forums, and comments")
-    _add_year_output(crawl_parser)
+    _add_year_output(crawl_parser, allow_month=True)
     _add_network(crawl_parser)
     crawl_parser.add_argument(
         "--hash-key-env",
         default="COMMENTGAP_HASH_KEY",
         help="Environment variable containing the HMAC key",
+    )
+    crawl_parser.add_argument(
+        "--confirm-existing-hash-key",
+        action="store_true",
+        help=(
+            "Override an inconclusive automatic legacy-key check by confirming that "
+            "the supplied key is the original key used by the existing dataset"
+        ),
     )
     crawl_parser.add_argument("--limit", type=int, help="Process at most this many stories")
     crawl_parser.add_argument(
@@ -129,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     validate_parser = subparsers.add_parser("validate", help="Validate completeness and invariants")
-    _add_year_output(validate_parser)
+    _add_year_output(validate_parser, allow_month=True)
     validate_parser.add_argument(
         "--allow-incomplete",
         action="store_true",
@@ -162,6 +178,7 @@ def _config(args: argparse.Namespace) -> ScrapeConfig:
         output_dir=_output(args),
         user_agent=args.user_agent,
         contact=args.contact,
+        month=getattr(args, "month", None),
         request_interval=args.request_interval,
         timeout=args.timeout,
         max_retries=args.max_retries,
@@ -197,12 +214,16 @@ def main(argv: list[str] | None = None) -> int:
                 selection_seed=args.selection_seed,
                 stratified_pilot=args.selection == "stratified-pilot",
                 pilot_candidate_pool=args.pilot_candidate_pool,
+                confirm_existing_hash_key=args.confirm_existing_hash_key,
             )
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0 if result.get("failed", 0) == 0 else 2
         if args.command == "validate":
             result = validate_dataset(
-                _output(args), args.year, allow_incomplete=args.allow_incomplete
+                _output(args),
+                args.year,
+                month=args.month,
+                allow_incomplete=args.allow_incomplete,
             )
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0 if result["passed"] else 2

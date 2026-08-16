@@ -228,7 +228,9 @@ class CrawlerDiscrepancyTests(unittest.TestCase):
             self.assertEqual(summary["forum_page_aggregate_mismatches"], 0)
 
             metadata = json.loads(
-                (root / "collection_metadata.json").read_text(encoding="utf-8")
+                (
+                    root / "collection_metadata/year=2025/metadata.json"
+                ).read_text(encoding="utf-8")
             )
             self.assertEqual(metadata["schema_version"], 3)
             self.assertIn("last_crawl_finished_at", metadata)

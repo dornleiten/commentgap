@@ -7,6 +7,29 @@ from commentgap_scraper.parsing import DiscoveredStory
 
 
 class ManifestTests(unittest.TestCase):
+    def test_month_scope_filters_selection_rows_and_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.sqlite3"
+            stories = [
+                DiscoveredStory(
+                    f"30000000000{month:02d}",
+                    2024,
+                    month,
+                    f"https://example/story/{month}",
+                    None,
+                )
+                for month in (11, 12)
+            ]
+            with Manifest(path) as manifest:
+                manifest.upsert_discovered(stories)
+                manifest.mark_terminal(stories[0].story_id, "no_postings", "finish")
+                selected = manifest.stories_for_crawl(2024, month=12)
+                rows = manifest.rows(2024, 12)
+                counts = manifest.status_counts(2024, 12)
+            self.assertEqual([row["story_id"] for row in selected], [stories[1].story_id])
+            self.assertEqual([row["story_id"] for row in rows], [stories[1].story_id])
+            self.assertEqual(counts, {"pending": 1})
+
     def test_monthly_random_selection_is_seeded_and_month_balanced(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.sqlite3"

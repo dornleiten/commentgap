@@ -1,0 +1,18 @@
+# Tested cross-platform analysis environment (Python 3.11+)
+duckdb==1.5.5
+pyarrow==25.0.1
+numpy==2.4.2
+pandas==3.0.1
+scipy==1.17.0
+scikit-learn==1.8.0
+xgboost==3.2.0
+torch==2.10.0
+transformers==5.2.0
+sentence-transformers==5.2.2
+hnswlib==0.8.0
+pyphen==0.17.2
+regex==2026.1.15
+matplotlib==3.10.8
+seaborn==0.13.2
+ipykernel==7.2.0
+jupyterlab==4.5.4

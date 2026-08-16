@@ -69,11 +69,41 @@ commentgap-scrape crawl --year 2025 --retry-failed
 commentgap-scrape export-legacy --year 2025
 ```
 
+To add comments attached to articles published in December 2024 to the same dataset,
+use the same output directory and, critically, the exact original 2025 hash key:
+
+```bash
+commentgap-scrape discover --year 2024 --month 12 --output data/scrape_2025
+
+# The first run verifies the key against existing public 2025 forum records,
+# then registers a non-secret fingerprint; the key itself is never stored.
+commentgap-scrape crawl --year 2024 --month 12 --output data/scrape_2025
+
+commentgap-scrape validate --year 2024 --month 12 --output data/scrape_2025
+```
+
+The first v0.4.0 crawl tries to reproduce existing hashes using current public forum
+records and stops if the supplied key demonstrably differs. If changing or inaccessible
+forum records make that check inconclusive, it asks for the one-time
+`--confirm-existing-hash-key` flag; use that override only after independently checking
+that the exact original 2025 key is set. Older outputs deliberately retain no raw
+author identifiers, so an entirely offline retrospective check is impossible. After
+registration, the crawler checks every supplied key against `privacy_metadata.json`
+before writing collection output and refuses a mismatch. The same HMAC scheme and key
+then produce join-compatible `author_hash` values in the 2024 and 2025 partitions.
+
+The month refers to the article publication month, not the comment creation month.
+Comments added to those December 2024 articles during 2025 or later are also present
+in this retrospective snapshot. For a strictly pre-2025 author-activity feature,
+filter comment `created_at` to before `2025-01-01T00:00:00` in Europe/Vienna.
+
 Use repeated `--story-id ID` arguments to target known fixtures or unusual forums.
 Outputs default to `data/scrape_2025/`, which is ignored by Git. The main tables are
 partitioned Parquet datasets named `articles`, `forums`, `forum_pages`, and `comments`; the SQLite
 manifest and page-level staging files make interrupted crawls resumable. Validation
-writes both JSON and Parquet summaries under `qa_summary`.
+writes both JSON and Parquet summaries under `qa_summary`. Month-scoped validation is
+stored below `qa_summary/year=YYYY/month=MM`; collection metadata is likewise scoped
+by year/month so adding 2024 does not overwrite the completed 2025 metadata.
 
 `stratified-pilot` first inspects the forum counters of a bounded, seeded candidate
 pool, then balances the selected stories across months and the bands no forum, no
@@ -138,3 +168,53 @@ that case, `published_at` uses the sitemap's `lastmod` value and
 also reflect an article update, analyses that depend on exact publication time should
 filter or sensitivity-check this field. The original sitemap value is retained in
 `sitemap_lastmod` for auditability.
+
+## Four-model 2025 preference analysis
+
+The `06` workflow compares curator and audience top-k selections on two
+candidate sets. It fits a root-only and an all-comment stacked conditional-logit
+model, plus matching article-grouped XGBoost rankers:
+
+1. `06A_build_model_features.ipynb` creates resumable scalar features and
+   matched choice sets from the normalized Parquet collection.
+2. `06B_stacked_selection_models.Rmd` fits both conditional-logit regressions
+   with article-by-selector strata and article-clustered standard errors.
+3. `06C_xgboost_rankers.ipynb` performs separate tuning, five-fold
+   article-grouped OOF evaluation, and final full-data fits for both scopes.
+4. `06D_model_tables_plots.ipynb` exports CSV/LaTeX tables and SVG/PDF figures.
+
+Install the tested Python environment and restore the R environment before a
+production run:
+
+```bash
+python -m pip install -r requirements-analysis.txt
+python -m pip install -e .
+Rscript -e 'if (!requireNamespace("renv", quietly=TRUE)) install.packages("renv"); renv::restore()'
+```
+
+The default notebook settings are inference-safe: feature extraction refuses
+an incomplete crawl or pilot NLP. A small pipeline check on the current partial
+collection must be explicitly watermarked, for example:
+
+```bash
+export COMMENTGAP_INFERENCE_MODE=0
+export COMMENTGAP_ALLOW_INCOMPLETE=1
+export COMMENTGAP_NLP_MODE=pilot
+export COMMENTGAP_MAX_STORIES=40
+export COMMENTGAP_EXCLUDE_JANUARY_WITHOUT_LOOKBACK=0
+```
+
+Never use those pilot outputs in a paper. For inference, unset all five pilot
+variables, complete and validate the crawl, and provide
+`COMMENTGAP_LOOKBACK_ROOT` pointing to a consistently pseudonymized December
+2024 collection. Without that lookback, January 2025 is excluded from the
+author-history models. `COMMENTGAP_DEVICE=auto` uses CUDA for production NLP on
+a compatible Linux installation and otherwise uses MPS/CPU as supported;
+XGBoost uses CUDA when its installed build supports it and CPU histograms on
+macOS.
+
+Outputs are written below `model_output/selection_2025/`. Only
+`oof_scores_wide.parquet` is eligible for predictive-performance claims or the
+Paper 2 ranking-policy evaluation. Predictions from
+`final_deployable_model.json` are full-data scores and must not be presented as
+held-out results.
