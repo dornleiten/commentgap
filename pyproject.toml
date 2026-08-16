@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 commentgap-scrape = "commentgap_scraper.cli:main"
+commentgap-embed = "commentgap_analysis.embedding_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["commentgap_scraper*", "commentgap_analysis*"]

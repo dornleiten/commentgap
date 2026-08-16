@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -13,9 +15,32 @@ from commentgap_analysis.features import (
     validate_qa_summary,
     vienna_period,
 )
+from commentgap_analysis.nlp import select_torch_device
 
 
 class AnalysisFeatureTests(unittest.TestCase):
+    def test_explicit_accelerator_request_is_validated(self):
+        unavailable = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: False),
+            backends=SimpleNamespace(
+                mps=SimpleNamespace(is_available=lambda: False)
+            ),
+        )
+        with patch.dict("sys.modules", {"torch": unavailable}):
+            with self.assertRaisesRegex(RuntimeError, "CUDA was requested"):
+                select_torch_device("cuda")
+            with self.assertRaisesRegex(RuntimeError, "MPS was requested"):
+                select_torch_device("mps")
+        available = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True),
+            backends=SimpleNamespace(
+                mps=SimpleNamespace(is_available=lambda: False)
+            ),
+        )
+        with patch.dict("sys.modules", {"torch": available}):
+            self.assertEqual(select_torch_device("cuda"), "cuda")
+        self.assertEqual(select_torch_device("cpu"), "cpu")
+
     def test_strict_discussion_and_branch_history(self):
         frame = pd.DataFrame(
             [

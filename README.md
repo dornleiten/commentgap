@@ -218,3 +218,93 @@ Outputs are written below `model_output/selection_2025/`. Only
 Paper 2 ranking-policy evaluation. Predictions from
 `final_deployable_model.json` are full-data scores and must not be presented as
 held-out results.
+
+### Reusable embedding store
+
+Create normalized comment and article-passage vectors independently of the
+feature notebook with the installed command or its repository-local script.
+By default the builder discovers every year present in both the `articles` and
+`comments` datasets, currently December 2024 and all of 2025:
+
+```bash
+# Mac mini (Apple GPU)
+commentgap-embed --device mps --batch-size 128 --storage-dtype float16
+
+# Linux workstation (NVIDIA GPU)
+python scripts/build_embeddings.py --device cuda --batch-size 128
+```
+
+The default checkpoint is `BAAI/bge-m3`. Any model supported by Sentence
+Transformers can be selected explicitly; a model swap creates a separate,
+model-versioned output namespace and cannot overwrite or mix with BGE-M3:
+
+```bash
+commentgap-embed \
+  --model-id ORGANIZATION/MODEL \
+  --revision COMMIT_OR_TAG \
+  --device cuda
+```
+
+Pin `--revision` for paper results. Some checkpoints require a particular prompt
+or asymmetric query/document treatment; consult that model's documentation before
+assuming its vectors are directly comparable. The manifest records the requested
+and resolved revision, maximum length, prompt, dimensions, source-data fingerprint,
+packages, and device.
+
+Outputs live under
+`model_output/selection_2025/embeddings/model=.../build=.../`, partitioned into
+`comments` and `article_passages`. Every Parquet row has a stable comment or passage
+key, a source-text SHA-256 checksum, and a normalized fixed-size `float32` vector.
+Raw comment text is not duplicated into this derived store. One Parquet checkpoint
+is written per story; restarting the same model/data build skips finished stories.
+Use `--allow-incomplete` or `--max-stories` only for explicitly watermarked pilot
+stores.
+
+An explicit `--device cuda` or `--device mps` request is validated before the
+corpus run. The command prints both requested and resolved devices and stops with
+an actionable error rather than silently falling back to CPU. Progress output is
+printed every 25 articles by default, including percentage, newly embedded comment
+and passage counts, elapsed time, throughput, and ETA. Adjust the interval with
+`--progress-every-stories N`.
+
+Embeddings are computed as normalized float32 vectors regardless of storage type.
+`--storage-dtype float16` only casts the checkpointed vectors, roughly halving disk
+space and later read bandwidth; it does not make transformer inference use float16.
+
+Before committing GPU time, run the exact tokenizer-length audit on any CPU-only
+machine. This loads the tokenizer but not BGE-M3 model weights and does not use a GPU:
+
+```bash
+python scripts/build_embeddings.py --diagnostics-only --max-length 512
+```
+
+The audit scans every selected year and writes `token_length_summary.json` with
+separate comment and article-passage counts, percentages over the limit, p50/p95/p99,
+and maxima. `truncated_records.parquet` contains only record type, year/month, stable
+keys, token length, and a source-text SHA-256 checksum—never raw text. The normal
+embedding run requires this audit and reuses a matching cached report. Its cache key
+includes the tokenizer revision, source fingerprint, years, maximum length, and any
+story limit.
+
+CUDA and MPS embedding runs use adaptive batching by default. A recoverable
+accelerator out-of-memory error clears the device cache, halves the batch, and retries
+the same records without terminating the process or writing a partial article. After
+25 successful calls that actually fill the current batch, it doubles cautiously
+toward `--max-batch-size`; the ceiling defaults to the requested initial
+`--batch-size`. For explicit upward probing, use for example:
+
+```bash
+python scripts/build_embeddings.py --device cuda \
+  --batch-size 64 --max-batch-size 256 --min-batch-size 4
+```
+
+The progress output shows the current batch, and every increase/decrease is logged
+and retained in the final manifest. Disable this behavior with
+`--no-adaptive-batching`. Non-memory failures and OOM at the configured minimum still
+stop the run; completed per-article checkpoints remain resumable.
+
+Use repeated `--year` flags only when intentionally restricting a build, for
+example `--year 2024 --year 2025`. Omitting `--year` is the safer default because
+newly added year partitions are then included automatically. Annual QA summaries
+are validated when present; a year collected only for selected months can use its
+month-scoped QA summaries.

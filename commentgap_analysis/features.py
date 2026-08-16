@@ -20,10 +20,10 @@ import numpy as np
 import pandas as pd
 
 from .nlp import (
-    BGEM3Embedder,
     GermanSentimentEncoder,
     PilotHashEmbedder,
     PilotLexiconSentiment,
+    SentenceTransformerEmbedder,
     SentimentEncoder,
     TextEmbedder,
     select_torch_device,
@@ -92,7 +92,10 @@ class FeatureBuildConfig:
     nlp_mode: str = "real"
     device: str = "auto"
     sentiment_revision: str | None = None
+    embedding_model_id: str = "BAAI/bge-m3"
     embedding_revision: str | None = None
+    embedding_max_length: int = 512
+    embedding_prompt_name: str | None = None
     sentiment_batch_size: int = 32
     embedding_batch_size: int = 64
     tie_draws: int = DEFAULT_TIE_DRAWS
@@ -110,6 +113,10 @@ class FeatureBuildConfig:
             object.__setattr__(self, "lookback_root", Path(self.lookback_root))
         if self.nlp_mode not in {"real", "pilot"}:
             raise ValueError("nlp_mode must be 'real' or 'pilot'")
+        if not self.embedding_model_id.strip():
+            raise ValueError("embedding_model_id cannot be empty")
+        if self.embedding_max_length < 1:
+            raise ValueError("embedding_max_length must be positive")
         if self.inference_mode and (self.allow_incomplete or self.nlp_mode != "real"):
             raise ValueError("Inference mode requires complete data and production NLP")
         if self.inference_mode and self.max_stories is not None:
@@ -777,7 +784,13 @@ def _load_encoders(config: FeatureBuildConfig) -> tuple[SentimentEncoder, TextEm
         return PilotLexiconSentiment(), PilotHashEmbedder()
     return (
         GermanSentimentEncoder(device=config.device, revision=config.sentiment_revision),
-        BGEM3Embedder(device=config.device, revision=config.embedding_revision),
+        SentenceTransformerEmbedder(
+            model_id=config.embedding_model_id,
+            device=config.device,
+            revision=config.embedding_revision,
+            max_length=config.embedding_max_length,
+            prompt_name=config.embedding_prompt_name,
+        ),
     )
 
 

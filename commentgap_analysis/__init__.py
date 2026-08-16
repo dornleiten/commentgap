@@ -10,6 +10,7 @@ from .features import (
     compute_discussion_history,
     validate_qa_summary,
 )
+from .embeddings import EmbeddingBuildConfig, build_embedding_store
 
 __all__ = [
     "ALL_MODEL_FEATURES",
@@ -20,4 +21,6 @@ __all__ = [
     "compute_author_history",
     "compute_discussion_history",
     "validate_qa_summary",
+    "EmbeddingBuildConfig",
+    "build_embedding_store",
 ]

@@ -29,18 +29,46 @@ class TextEmbedder(Protocol):
         """Return L2-normalized sentence vectors."""
 
 
+class TokenLengthInspector(Protocol):
+    model_id: str
+
+    def token_lengths(self, texts: list[str], batch_size: int) -> np.ndarray:
+        """Return untruncated token counts including special tokens."""
+
+
 def select_torch_device(requested: str = "auto") -> str:
-    if requested != "auto":
-        return requested
+    if requested not in {"auto", "cuda", "mps", "cpu"}:
+        raise ValueError(f"Unsupported torch device: {requested!r}")
+    if requested == "cpu":
+        return "cpu"
     try:
         import torch
 
-        if torch.cuda.is_available():
+        cuda_available = bool(torch.cuda.is_available())
+        mps_backend = getattr(torch.backends, "mps", None)
+        mps_available = bool(mps_backend and mps_backend.is_available())
+        if requested == "cuda":
+            if not cuda_available:
+                raise RuntimeError(
+                    "CUDA was requested, but torch.cuda.is_available() is false. "
+                    "Install a CUDA-enabled PyTorch build and verify the NVIDIA driver."
+                )
             return "cuda"
-        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        if requested == "mps":
+            if not mps_available:
+                raise RuntimeError(
+                    "MPS was requested, but torch.backends.mps.is_available() is false."
+                )
+            return "mps"
+        if cuda_available:
+            return "cuda"
+        if mps_available:
             return "mps"
     except ImportError:
-        pass
+        if requested != "auto":
+            raise RuntimeError(
+                f"{requested.upper()} was requested, but PyTorch is not installed."
+            ) from None
     return "cpu"
 
 
@@ -128,18 +156,26 @@ class GermanSentimentEncoder:
 
 
 @dataclass
-class BGEM3Embedder:
-    model_id: str = "BAAI/bge-m3"
+class SentenceTransformerEmbedder:
+    """Normalized dense embeddings from any Sentence Transformers checkpoint.
+
+    Keeping the model identifier, revision, maximum sequence length, and optional
+    prompt in this adapter makes embedding-model swaps explicit and auditable.
+    """
+
+    model_id: str
     revision: str | None = None
     device: str = "auto"
     max_length: int = 512
+    prompt_name: str | None = None
 
     def __post_init__(self) -> None:
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise RuntimeError(
-                "BGE-M3 requires sentence-transformers; install requirements-analysis.txt"
+                "Dense embeddings require sentence-transformers; "
+                "install requirements-analysis.txt"
             ) from exc
         self.device = select_torch_device(self.device)
         kwargs = {"revision": self.revision} if self.revision else {}
@@ -151,6 +187,7 @@ class BGEM3Embedder:
         )
 
     def encode(self, texts: list[str], batch_size: int = 64) -> np.ndarray:
+        encode_kwargs = {"prompt_name": self.prompt_name} if self.prompt_name else {}
         return np.asarray(
             self._model.encode(
                 texts,
@@ -158,9 +195,64 @@ class BGEM3Embedder:
                 normalize_embeddings=True,
                 show_progress_bar=False,
                 convert_to_numpy=True,
+                **encode_kwargs,
             ),
             dtype=np.float32,
         )
+
+    def token_lengths(self, texts: list[str], batch_size: int = 2048) -> np.ndarray:
+        return _token_lengths(self._model.tokenizer, texts, batch_size)
+
+
+@dataclass
+class BGEM3Embedder(SentenceTransformerEmbedder):
+    """Backward-compatible default used by the 2025 feature workflow."""
+
+    model_id: str = "BAAI/bge-m3"
+
+
+def _token_lengths(tokenizer, texts: list[str], batch_size: int) -> np.ndarray:
+    lengths: list[int] = []
+    for start in range(0, len(texts), batch_size):
+        encoded = tokenizer(
+            texts[start : start + batch_size],
+            add_special_tokens=True,
+            truncation=False,
+            padding=False,
+            return_length=True,
+            verbose=False,
+        )
+        batch_lengths = encoded.get("length")
+        if batch_lengths is None:
+            batch_lengths = [len(ids) for ids in encoded["input_ids"]]
+        lengths.extend(int(value) for value in batch_lengths)
+    return np.asarray(lengths, dtype=np.int32)
+
+
+@dataclass
+class TransformerTokenLengthInspector:
+    """Tokenizer-only inspector; it never loads model weights or uses a GPU."""
+
+    model_id: str
+    revision: str | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            from transformers import AutoTokenizer
+        except ImportError as exc:
+            raise RuntimeError(
+                "Token diagnostics require transformers; install requirements-analysis.txt"
+            ) from exc
+        kwargs = {"revision": self.revision} if self.revision else {}
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id, **kwargs)
+        self.resolved_revision = (
+            getattr(self._tokenizer, "init_kwargs", {}).get("_commit_hash")
+            or self.revision
+            or "main_unresolved"
+        )
+
+    def token_lengths(self, texts: list[str], batch_size: int = 2048) -> np.ndarray:
+        return _token_lengths(self._tokenizer, texts, batch_size)
 
 
 @dataclass
