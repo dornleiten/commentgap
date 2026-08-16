@@ -16,6 +16,7 @@ from commentgap_analysis.embeddings import (
     build_embedding_store,
     build_token_length_diagnostics,
 )
+from commentgap_analysis.nlp import DEFAULT_EMBEDDING_MODEL_REVISION
 
 
 class FakeEmbedder:
@@ -55,6 +56,12 @@ class CapacityLimitedEmbedder:
 
 
 class EmbeddingStoreTests(unittest.TestCase):
+    def test_default_bge_model_is_permanently_commit_pinned(self):
+        self.assertEqual(
+            EmbeddingBuildConfig().revision,
+            DEFAULT_EMBEDDING_MODEL_REVISION,
+        )
+
     def test_adaptive_batching_backs_off_and_cautiously_recovers(self):
         embedder = CapacityLimitedEmbedder(capacity=2)
         adaptive = AdaptiveBatchEncoder(

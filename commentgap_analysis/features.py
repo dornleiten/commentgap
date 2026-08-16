@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 
 from .nlp import (
+    DEFAULT_EMBEDDING_MODEL_ID,
+    DEFAULT_EMBEDDING_MODEL_REVISION,
     GermanSentimentEncoder,
     PilotHashEmbedder,
     PilotLexiconSentiment,
@@ -92,7 +94,7 @@ class FeatureBuildConfig:
     nlp_mode: str = "real"
     device: str = "auto"
     sentiment_revision: str | None = None
-    embedding_model_id: str = "BAAI/bge-m3"
+    embedding_model_id: str = DEFAULT_EMBEDDING_MODEL_ID
     embedding_revision: str | None = None
     embedding_max_length: int = 512
     embedding_prompt_name: str | None = None
@@ -113,6 +115,13 @@ class FeatureBuildConfig:
             object.__setattr__(self, "lookback_root", Path(self.lookback_root))
         if self.nlp_mode not in {"real", "pilot"}:
             raise ValueError("nlp_mode must be 'real' or 'pilot'")
+        if (
+            self.embedding_model_id == DEFAULT_EMBEDDING_MODEL_ID
+            and self.embedding_revision is None
+        ):
+            object.__setattr__(
+                self, "embedding_revision", DEFAULT_EMBEDDING_MODEL_REVISION
+            )
         if not self.embedding_model_id.strip():
             raise ValueError("embedding_model_id cannot be empty")
         if self.embedding_max_length < 1:

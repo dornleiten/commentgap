@@ -10,9 +10,44 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import re
 from typing import Protocol
 
 import numpy as np
+
+
+HF_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+DEFAULT_EMBEDDING_MODEL_ID = "BAAI/bge-m3"
+DEFAULT_EMBEDDING_MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
+
+
+def resolve_hf_model_revision(model_id: str, revision: str | None = None) -> str:
+    """Resolve a Hub branch/tag/default revision to an immutable commit SHA."""
+    if revision and HF_COMMIT_RE.fullmatch(revision):
+        return revision.lower()
+    try:
+        from huggingface_hub import HfApi
+
+        info = HfApi().model_info(model_id, revision=revision)
+    except Exception as exc:
+        requested = revision or "the repository default branch"
+        raise RuntimeError(
+            f"Could not resolve {model_id!r} at {requested!r} to an immutable Hugging "
+            "Face commit. Check network access/HF_TOKEN, or pass an exact 40-character "
+            "commit with --revision."
+        ) from exc
+    commit = str(getattr(info, "sha", "") or "")
+    if not HF_COMMIT_RE.fullmatch(commit):
+        raise RuntimeError(
+            f"Hugging Face returned no valid immutable commit SHA for {model_id!r}: "
+            f"{commit!r}"
+        )
+    print(
+        f"Pinned Hugging Face revision: model={model_id} "
+        f"requested={revision or 'default'} commit={commit.lower()}",
+        flush=True,
+    )
+    return commit.lower()
 
 
 class SentimentEncoder(Protocol):
@@ -178,13 +213,10 @@ class SentenceTransformerEmbedder:
                 "install requirements-analysis.txt"
             ) from exc
         self.device = select_torch_device(self.device)
-        kwargs = {"revision": self.revision} if self.revision else {}
+        self.resolved_revision = resolve_hf_model_revision(self.model_id, self.revision)
+        kwargs = {"revision": self.resolved_revision}
         self._model = SentenceTransformer(self.model_id, device=self.device, **kwargs)
         self._model.max_seq_length = self.max_length
-        tokenizer_kwargs = getattr(getattr(self._model, "tokenizer", None), "init_kwargs", {})
-        self.resolved_revision = (
-            tokenizer_kwargs.get("_commit_hash") or self.revision or "main_unresolved"
-        )
 
     def encode(self, texts: list[str], batch_size: int = 64) -> np.ndarray:
         encode_kwargs = {"prompt_name": self.prompt_name} if self.prompt_name else {}
@@ -208,7 +240,8 @@ class SentenceTransformerEmbedder:
 class BGEM3Embedder(SentenceTransformerEmbedder):
     """Backward-compatible default used by the 2025 feature workflow."""
 
-    model_id: str = "BAAI/bge-m3"
+    model_id: str = DEFAULT_EMBEDDING_MODEL_ID
+    revision: str | None = DEFAULT_EMBEDDING_MODEL_REVISION
 
 
 def _token_lengths(tokenizer, texts: list[str], batch_size: int) -> np.ndarray:
@@ -243,13 +276,9 @@ class TransformerTokenLengthInspector:
             raise RuntimeError(
                 "Token diagnostics require transformers; install requirements-analysis.txt"
             ) from exc
-        kwargs = {"revision": self.revision} if self.revision else {}
+        self.resolved_revision = resolve_hf_model_revision(self.model_id, self.revision)
+        kwargs = {"revision": self.resolved_revision}
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_id, **kwargs)
-        self.resolved_revision = (
-            getattr(self._tokenizer, "init_kwargs", {}).get("_commit_hash")
-            or self.revision
-            or "main_unresolved"
-        )
 
     def token_lengths(self, texts: list[str], batch_size: int = 2048) -> np.ndarray:
         return _token_lengths(self._tokenizer, texts, batch_size)

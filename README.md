@@ -251,6 +251,14 @@ assuming its vectors are directly comparable. The manifest records the requested
 and resolved revision, maximum length, prompt, dimensions, source-data fingerprint,
 packages, and device.
 
+The default `BAAI/bge-m3` model is pinned to immutable commit
+`5617a9f61b028005a4858fdac845db406aefb181`. When another model is selected and
+`--revision` is omitted, the builder queries the Hugging Face Hub for that model's
+current default-branch commit and then loads tokenizer and weights using the resolved
+40-character SHA. Branch names and tags passed through `--revision` are likewise
+resolved before loading; an already exact commit is used directly. Failure to
+resolve an immutable commit stops the run rather than emitting `main_unresolved`.
+
 Outputs live under
 `model_output/selection_2025/embeddings/model=.../build=.../`, partitioned into
 `comments` and `article_passages`. Every Parquet row has a stable comment or passage

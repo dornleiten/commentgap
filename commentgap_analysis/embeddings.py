@@ -25,6 +25,8 @@ from .features import (
     validate_qa_summary,
 )
 from .nlp import (
+    DEFAULT_EMBEDDING_MODEL_ID,
+    DEFAULT_EMBEDDING_MODEL_REVISION,
     SentenceTransformerEmbedder,
     TextEmbedder,
     TokenLengthInspector,
@@ -40,7 +42,7 @@ class EmbeddingBuildConfig:
     data_root: Path = Path("data/scrape_2025")
     output_root: Path = Path("model_output/selection_2025/embeddings")
     years: tuple[int, ...] | None = None
-    model_id: str = "BAAI/bge-m3"
+    model_id: str = DEFAULT_EMBEDDING_MODEL_ID
     revision: str | None = None
     device: str = "auto"
     batch_size: int = 64
@@ -65,6 +67,8 @@ class EmbeddingBuildConfig:
             if not normalized_years:
                 raise ValueError("years cannot be empty")
             object.__setattr__(self, "years", normalized_years)
+        if self.model_id == DEFAULT_EMBEDDING_MODEL_ID and self.revision is None:
+            object.__setattr__(self, "revision", DEFAULT_EMBEDDING_MODEL_REVISION)
         if not self.model_id.strip():
             raise ValueError("model_id cannot be empty")
         if self.batch_size < 1:

@@ -15,10 +15,28 @@ from commentgap_analysis.features import (
     validate_qa_summary,
     vienna_period,
 )
-from commentgap_analysis.nlp import select_torch_device
+from commentgap_analysis.nlp import resolve_hf_model_revision, select_torch_device
 
 
 class AnalysisFeatureTests(unittest.TestCase):
+    def test_hugging_face_revisions_are_resolved_to_immutable_commits(self):
+        commit = "a" * 40
+        with patch(
+            "huggingface_hub.HfApi.model_info",
+            return_value=SimpleNamespace(sha=commit),
+        ) as model_info:
+            self.assertEqual(resolve_hf_model_revision("org/model"), commit)
+            model_info.assert_called_once_with("org/model", revision=None)
+        with patch("huggingface_hub.HfApi.model_info") as model_info:
+            self.assertEqual(resolve_hf_model_revision("org/model", commit.upper()), commit)
+            model_info.assert_not_called()
+        with patch(
+            "huggingface_hub.HfApi.model_info",
+            return_value=SimpleNamespace(sha="not-a-commit"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no valid immutable commit"):
+                resolve_hf_model_revision("org/model", "main")
+
     def test_explicit_accelerator_request_is_validated(self):
         unavailable = SimpleNamespace(
             cuda=SimpleNamespace(is_available=lambda: False),
