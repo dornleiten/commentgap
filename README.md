@@ -262,7 +262,8 @@ resolve an immutable commit stops the run rather than emitting `main_unresolved`
 Outputs live under
 `model_output/selection_2025/embeddings/model=.../build=.../`, partitioned into
 `comments` and `article_passages`. Every Parquet row has a stable comment or passage
-key, a source-text SHA-256 checksum, and a normalized fixed-size `float32` vector.
+key, a source-text SHA-256 checksum, and a normalized fixed-size vector in the
+configured storage dtype (`float32` by default or `float16` when requested).
 Raw comment text is not duplicated into this derived store. One Parquet checkpoint
 is written per story; restarting the same model/data build skips finished stories.
 Use `--allow-incomplete` or `--max-stories` only for explicitly watermarked pilot
@@ -316,3 +317,41 @@ example `--year 2024 --year 2025`. Omitting `--year` is the safer default becaus
 newly added year partitions are then included automatically. Annual QA summaries
 are validated when present; a year collected only for selected months can use its
 month-scoped QA summaries.
+
+### Precomputed semantic similarities
+
+After the complete embedding store finishes, calculate the three scalar semantic
+features required by the preference models without loading BGE-M3 again:
+
+```bash
+python scripts/build_similarity_features.py \
+  --model-id BAAI/bge-m3 \
+  --revision 5617a9f61b028005a4858fdac845db406aefb181 \
+  --year 2025 \
+  --exact-novelty-threshold 5000 \
+  --progress-every-stories 100
+```
+
+The resolver ignores watermarked smoke-test embedding stores and selects the one
+compatible `COMPLETE_SOURCE` build. If more than one compatible full store exists,
+pass its exact directory with `--embedding-store PATH`.
+
+The command writes one resumable scalar checkpoint per story below
+`model_output/selection_2025/similarities/`. It computes only:
+
+* mean cosine similarity to the three closest article passages;
+* novelty relative to strictly earlier comments; and
+* root-comment novelty relative to strictly earlier roots.
+
+For discussions with at most 5,000 eligible comments, one exact cosine matrix is
+reused for both novelty definitions. Larger scopes use deterministic incremental
+HNSW and are checked against exact strict-prior neighbours. The current collection
+has eight 2025 discussions above 5,000 eligible comments; four also exceed 5,000
+roots. The December 2024 lookback is embedded for reuse, but its similarity scores
+are not calculated by default because they are not inputs to the 2025 models.
+
+`06A_build_model_features.ipynb` resolves the completed similarity store and joins
+these scalars using `story_id, comment_id`. It never reruns the embedding model or
+recalculates cosine similarities. Set `COMMENTGAP_SIMILARITY_STORE` only when an
+explicit build directory is needed; otherwise the compatible store is discovered
+below `COMMENTGAP_SIMILARITY_ROOT`.

@@ -23,11 +23,8 @@ from .nlp import (
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_EMBEDDING_MODEL_REVISION,
     GermanSentimentEncoder,
-    PilotHashEmbedder,
     PilotLexiconSentiment,
-    SentenceTransformerEmbedder,
     SentimentEncoder,
-    TextEmbedder,
     select_torch_device,
 )
 
@@ -87,6 +84,8 @@ BINARY_FEATURES = {
 class FeatureBuildConfig:
     data_root: Path = Path("data/scrape_2025")
     output_root: Path = Path("model_output/selection_2025/features")
+    similarity_root: Path = Path("model_output/selection_2025/similarities")
+    similarity_store: Path | None = None
     year: int = 2025
     lookback_root: Path | None = None
     allow_incomplete: bool = False
@@ -96,13 +95,9 @@ class FeatureBuildConfig:
     sentiment_revision: str | None = None
     embedding_model_id: str = DEFAULT_EMBEDDING_MODEL_ID
     embedding_revision: str | None = None
-    embedding_max_length: int = 512
-    embedding_prompt_name: str | None = None
     sentiment_batch_size: int = 32
-    embedding_batch_size: int = 64
     tie_draws: int = DEFAULT_TIE_DRAWS
     seed: int = BASE_SEED
-    exact_novelty_threshold: int = 5_000
     require_page_publication_time: bool = True
     exclude_january_without_lookback: bool = True
     overwrite: bool = False
@@ -111,6 +106,9 @@ class FeatureBuildConfig:
     def __post_init__(self) -> None:
         object.__setattr__(self, "data_root", Path(self.data_root))
         object.__setattr__(self, "output_root", Path(self.output_root))
+        object.__setattr__(self, "similarity_root", Path(self.similarity_root))
+        if self.similarity_store is not None:
+            object.__setattr__(self, "similarity_store", Path(self.similarity_store))
         if self.lookback_root is not None:
             object.__setattr__(self, "lookback_root", Path(self.lookback_root))
         if self.nlp_mode not in {"real", "pilot"}:
@@ -124,8 +122,6 @@ class FeatureBuildConfig:
             )
         if not self.embedding_model_id.strip():
             raise ValueError("embedding_model_id cannot be empty")
-        if self.embedding_max_length < 1:
-            raise ValueError("embedding_max_length must be positive")
         if self.inference_mode and (self.allow_incomplete or self.nlp_mode != "real"):
             raise ValueError("Inference mode requires complete data and production NLP")
         if self.inference_mode and self.max_stories is not None:
@@ -468,13 +464,25 @@ def split_article_passages(article: pd.Series) -> list[str]:
     return [re.sub(r"\s+", " ", str(value)).strip() for value in values if value and str(value).strip()]
 
 
-def article_similarity_top3(comment_vectors: np.ndarray, passage_vectors: np.ndarray) -> np.ndarray:
+def article_similarity_top3(
+    comment_vectors: np.ndarray,
+    passage_vectors: np.ndarray,
+    *,
+    block_size: int = 4_096,
+) -> np.ndarray:
+    """Mean top-three passage cosine, calculated once in bounded row blocks."""
     if passage_vectors.size == 0:
         return np.full(len(comment_vectors), np.nan, dtype=np.float32)
-    similarities = comment_vectors @ passage_vectors.T
-    k = min(3, similarities.shape[1])
-    top = np.partition(similarities, similarities.shape[1] - k, axis=1)[:, -k:]
-    return top.mean(axis=1).astype(np.float32)
+    if block_size < 1:
+        raise ValueError("block_size must be positive")
+    k = min(3, len(passage_vectors))
+    output = np.empty(len(comment_vectors), dtype=np.float32)
+    for start in range(0, len(comment_vectors), block_size):
+        stop = min(start + block_size, len(comment_vectors))
+        similarities = comment_vectors[start:stop] @ passage_vectors.T
+        top = np.partition(similarities, similarities.shape[1] - k, axis=1)[:, -k:]
+        output[start:stop] = top.mean(axis=1)
+    return output
 
 
 def _novelty_exact(vectors: np.ndarray, timestamps: pd.Series, eligible: np.ndarray) -> np.ndarray:
@@ -788,39 +796,49 @@ def _make_choice_set(
     return output[keep].sort_values(["story_id", "comment_id"]), ties, summary
 
 
-def _load_encoders(config: FeatureBuildConfig) -> tuple[SentimentEncoder, TextEmbedder]:
+def _load_sentiment_encoder(config: FeatureBuildConfig) -> SentimentEncoder:
     if config.nlp_mode == "pilot":
-        return PilotLexiconSentiment(), PilotHashEmbedder()
-    return (
-        GermanSentimentEncoder(device=config.device, revision=config.sentiment_revision),
-        SentenceTransformerEmbedder(
-            model_id=config.embedding_model_id,
-            device=config.device,
-            revision=config.embedding_revision,
-            max_length=config.embedding_max_length,
-            prompt_name=config.embedding_prompt_name,
-        ),
-    )
+        return PilotLexiconSentiment()
+    return GermanSentimentEncoder(device=config.device, revision=config.sentiment_revision)
 
 
 def build_analysis_features(
     config: FeatureBuildConfig,
     *,
     sentiment_encoder: SentimentEncoder | None = None,
-    embedder: TextEmbedder | None = None,
 ) -> dict[str, Any]:
-    """Run the resumable 2025 feature and choice-set build."""
+    """Run the resumable feature build using precomputed semantic scalars."""
     qa_path = config.data_root / "qa_summary" / f"year={config.year}" / "summary.json"
     if not qa_path.exists():
         raise FileNotFoundError(qa_path)
     qa = json.loads(qa_path.read_text())
     validate_qa_summary(qa, allow_incomplete=config.allow_incomplete)
+    from .similarities import resolve_similarity_store
+
+    requested_similarity_store = config.similarity_store or config.similarity_root
+    similarity_store, similarity_manifest = resolve_similarity_store(
+        requested_similarity_store,
+        model_id=config.embedding_model_id,
+        revision=config.embedding_revision,
+        year=config.year,
+        require_complete_source=config.inference_mode,
+    )
     fingerprint = dataset_fingerprint(config.data_root, config.year)
+    expected_similarity_fingerprint = similarity_manifest.get(
+        "target_dataset_fingerprints", {}
+    ).get(str(config.year))
+    if expected_similarity_fingerprint != fingerprint:
+        raise RuntimeError(
+            "The precomputed similarity store does not match the current source "
+            f"collection for {config.year}."
+        )
     config_payload = {
         key: str(value) if isinstance(value, Path) else value
         for key, value in asdict(config).items()
         if key not in {"overwrite", "output_root"}
     }
+    config_payload["resolved_similarity_store"] = str(similarity_store)
+    config_payload["similarity_build_signature"] = similarity_manifest["build_signature"]
     build_signature = hashlib.sha256(
         json.dumps(config_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
@@ -944,14 +962,10 @@ def build_analysis_features(
     base["smog_de"] = base["effective_text"].map(smog_de)
     base["url_present"] = base["effective_text"].str.contains(URL_RE).astype(int)
 
-    if sentiment_encoder is None or embedder is None:
-        default_sentiment, default_embedder = _load_encoders(config)
-        sentiment_encoder = sentiment_encoder or default_sentiment
-        embedder = embedder or default_embedder
-    if config.inference_mode and (
-        "PILOT_ONLY" in sentiment_encoder.model_id or "PILOT_ONLY" in embedder.model_id
-    ):
-        raise ValueError("Pilot NLP adapters cannot be used for inference")
+    if sentiment_encoder is None:
+        sentiment_encoder = _load_sentiment_encoder(config)
+    if config.inference_mode and "PILOT_ONLY" in sentiment_encoder.model_id:
+        raise ValueError("Pilot sentiment adapters cannot be used for inference")
 
     checkpoint_root = (
         config.output_root
@@ -959,20 +973,10 @@ def build_analysis_features(
         / f"build={build_signature[:8]}-{fingerprint[:8]}"
         / f"year={config.year}"
     )
-    article_lookup = article_data.set_index("story_id")
-    novelty_diagnostics: list[dict[str, Any]] = []
-    novelty_part_root = (
-        config.output_root
-        / "novelty_validation_parts"
-        / f"build={build_signature[:8]}-{fingerprint[:8]}"
-    )
     for story_id, story in base.groupby("story_id", sort=True):
         month = int(story["article_month"].iloc[0])
         destination = checkpoint_root / f"month={month:02d}" / f"{story_id}.parquet"
-        diagnostic_path = novelty_part_root / f"{story_id}.json"
         if destination.exists() and not config.overwrite:
-            if diagnostic_path.exists():
-                novelty_diagnostics.extend(json.loads(diagnostic_path.read_text()))
             continue
         story = story.sort_values(["created_at", "comment_id"]).copy()
         texts = story["effective_text"].astype(str).tolist()
@@ -980,59 +984,38 @@ def build_analysis_features(
         if sentiments.shape != (len(story), 3):
             raise ValueError("Sentiment encoder returned an unexpected shape")
         story[["sentiment_positive", "sentiment_negative", "sentiment_neutral"]] = sentiments
-        vectors = embedder.encode(texts, config.embedding_batch_size)
-        if vectors.shape[0] != len(story):
-            raise ValueError("Embedder returned an unexpected row count")
-        norms = np.linalg.norm(vectors, axis=1)
-        if not np.allclose(norms, 1, atol=1e-3):
-            raise ValueError("Comment embeddings must be L2-normalized")
-        article = article_lookup.loc[story_id]
-        passages = split_article_passages(article)
-        passage_vectors = (
-            embedder.encode(passages, config.embedding_batch_size)
-            if passages
-            else np.empty((0, vectors.shape[1]), dtype=np.float32)
+        similarity_path = (
+            similarity_store
+            / "scalars"
+            / f"year={config.year}"
+            / f"month={month:02d}"
+            / f"{story_id}.parquet"
         )
-        story["article_similarity_top3"] = article_similarity_top3(vectors, passage_vectors)
-        all_eligible = np.ones(len(story), dtype=bool)
-        root_eligible = story["is_root"].to_numpy(dtype=bool)
-        story["novelty_prior_all"] = temporal_novelty(
-            vectors,
-            story["created_at"],
-            all_eligible,
-            exact_threshold=config.exact_novelty_threshold,
+        if not similarity_path.exists():
+            raise FileNotFoundError(
+                f"Missing precomputed semantic scalars for story {story_id}: {similarity_path}"
+            )
+        semantic_columns = [
+            "story_id",
+            "comment_id",
+            "article_similarity_top3",
+            "novelty_prior_all",
+            "novelty_prior_roots",
+        ]
+        semantic = pd.read_parquet(similarity_path, columns=semantic_columns)
+        if semantic.duplicated(["story_id", "comment_id"]).any():
+            raise ValueError(f"Duplicate semantic-similarity keys in {similarity_path}")
+        before = len(story)
+        story = story.merge(
+            semantic,
+            on=["story_id", "comment_id"],
+            how="left",
+            validate="one_to_one",
+            indicator="_semantic_join",
         )
-        story["novelty_prior_roots"] = temporal_novelty(
-            vectors,
-            story["created_at"],
-            root_eligible,
-            exact_threshold=config.exact_novelty_threshold,
-        )
-        story_diagnostics: list[dict[str, Any]] = []
-        for label, eligible, values in (
-            ("all", all_eligible, story["novelty_prior_all"].to_numpy()),
-            ("root", root_eligible, story["novelty_prior_roots"].to_numpy()),
-        ):
-            if int(eligible.sum()) > config.exact_novelty_threshold:
-                diagnostic = validate_approximate_novelty(
-                    vectors,
-                    story["created_at"],
-                    eligible,
-                    values,
-                    seed=config.seed + (0 if label == "all" else 1),
-                )
-                diagnostic.update({"story_id": str(story_id), "candidate_scope": label})
-                story_diagnostics.append(diagnostic)
-                if (
-                    config.inference_mode
-                    and diagnostic["sample_size"]
-                    and diagnostic["recall_within_1e_3"] < 0.95
-                ):
-                    raise RuntimeError(
-                        f"HNSW novelty validation failed for {story_id}/{label}: {diagnostic}"
-                    )
-        _atomic_json(story_diagnostics, diagnostic_path)
-        novelty_diagnostics.extend(story_diagnostics)
+        if len(story) != before or not story["_semantic_join"].eq("both").all():
+            raise ValueError(f"Incomplete semantic-similarity join for story {story_id}")
+        story = story.drop(columns="_semantic_join")
         story["nlp_watermark"] = watermark
         _atomic_parquet(story, destination)
 
@@ -1057,17 +1040,18 @@ def build_analysis_features(
     registry["nlp"] = {
         "sentiment_model": sentiment_encoder.model_id,
         "sentiment_revision": getattr(sentiment_encoder, "resolved_revision", "unresolved"),
-        "embedding_model": embedder.model_id,
-        "embedding_revision": getattr(embedder, "resolved_revision", "unresolved"),
+        "embedding_model": similarity_manifest["embedding_model"]["model_id"],
+        "embedding_revision": similarity_manifest["embedding_model"]["resolved_revision"],
+        "similarity_store": str(similarity_store),
+        "similarity_build_signature": similarity_manifest["build_signature"],
         "watermark": watermark,
     }
     _atomic_json(registry, config.output_root / "feature_manifest.json")
+    similarity_validation = similarity_store / "novelty_validation.json"
+    if not similarity_validation.exists():
+        raise FileNotFoundError(similarity_validation)
     _atomic_json(
-        {
-            "method": "HNSW cosine distance checked against exact prior neighbors",
-            "required_recall_within_1e_3": 0.95,
-            "stories": novelty_diagnostics,
-        },
+        json.loads(similarity_validation.read_text()),
         config.output_root / "novelty_validation.json",
     )
     summary = {
@@ -1082,6 +1066,8 @@ def build_analysis_features(
             "comments": len(target_raw),
             "articles": len(articles),
             "dataset_fingerprint": fingerprint,
+            "similarity_store": str(similarity_store),
+            "similarity_build_signature": similarity_manifest["build_signature"],
         },
         "root": root_summary,
         "all": all_summary,

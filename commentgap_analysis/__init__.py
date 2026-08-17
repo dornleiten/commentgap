@@ -11,6 +11,7 @@ from .features import (
     validate_qa_summary,
 )
 from .embeddings import EmbeddingBuildConfig, build_embedding_store
+from .similarities import SimilarityBuildConfig, build_similarity_store
 
 __all__ = [
     "ALL_MODEL_FEATURES",
@@ -23,4 +24,6 @@ __all__ = [
     "validate_qa_summary",
     "EmbeddingBuildConfig",
     "build_embedding_store",
+    "SimilarityBuildConfig",
+    "build_similarity_store",
 ]
