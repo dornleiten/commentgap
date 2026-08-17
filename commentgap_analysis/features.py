@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import time
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -102,6 +103,8 @@ class FeatureBuildConfig:
     exclude_january_without_lookback: bool = True
     overwrite: bool = False
     max_stories: int | None = None
+    progress_every_rows: int = 250_000
+    progress_every_stories: int = 100
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "data_root", Path(self.data_root))
@@ -128,6 +131,43 @@ class FeatureBuildConfig:
             raise ValueError("Inference mode cannot limit the number of stories")
         if self.tie_draws < 1:
             raise ValueError("tie_draws must be positive")
+        if self.progress_every_rows < 1:
+            raise ValueError("progress_every_rows must be positive")
+        if self.progress_every_stories < 1:
+            raise ValueError("progress_every_stories must be positive")
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def _progress_line(
+    label: str,
+    completed: int,
+    total: int,
+    started: float,
+    *,
+    unit: str = "rows",
+    detail: str = "",
+) -> None:
+    elapsed = time.monotonic() - started
+    rate = completed / elapsed if elapsed and completed else 0.0
+    eta = (total - completed) / rate if rate else 0.0
+    suffix = f" | {detail}" if detail else ""
+    print(
+        f"{label}: {completed:,}/{total:,} {unit} "
+        f"({100 * completed / total if total else 100:.1f}%) | "
+        f"elapsed={_format_duration(elapsed)} eta={_format_duration(eta)} "
+        f"rate={rate:,.1f} {unit}/s{suffix}",
+        flush=True,
+    )
 
 
 def validate_qa_summary(summary: dict[str, Any], allow_incomplete: bool = False) -> None:
@@ -270,7 +310,11 @@ def _as_utc(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, utc=True, errors="coerce")
 
 
-def compute_discussion_history(comments: pd.DataFrame) -> pd.DataFrame:
+def compute_discussion_history(
+    comments: pd.DataFrame,
+    *,
+    progress_every_rows: int | None = None,
+) -> pd.DataFrame:
     """Compute strictly prior discussion and branch activity without tie leakage."""
     required = {
         "comment_id",
@@ -295,6 +339,9 @@ def compute_discussion_history(comments: pd.DataFrame) -> pd.DataFrame:
     ):
         output[name] = np.int64(0)
 
+    started = time.monotonic()
+    processed = 0
+    next_report = progress_every_rows or 0
     for _, story_indices in output.groupby("story_id", sort=False).groups.items():
         story = output.loc[story_indices].sort_values(["created_at", "comment_id"])
         roots_before = 0
@@ -331,6 +378,10 @@ def compute_discussion_history(comments: pd.DataFrame) -> pd.DataFrame:
                 branch_recent[branch].append(timestamp)
                 if author:
                     author_counts[author] += 1
+        processed += len(story)
+        if progress_every_rows and (processed >= next_report or processed == len(output)):
+            _progress_line("Discussion history", processed, len(output), started)
+            next_report = processed + progress_every_rows
     return output
 
 
@@ -339,6 +390,7 @@ def compute_author_history(
     *,
     target_mask: pd.Series | None = None,
     window_days: int = 30,
+    progress_every_rows: int | None = None,
 ) -> pd.DataFrame:
     """Compute prior cross-article history using collection-snapshot vote totals."""
     required = {
@@ -368,6 +420,9 @@ def compute_author_history(
     )
     ordered = output.sort_values(["created_at", "comment_id"])
     window = pd.Timedelta(days=window_days)
+    started = time.monotonic()
+    processed = 0
+    next_report = progress_every_rows or 0
     for timestamp, batch in ordered.groupby("created_at", sort=True, dropna=False):
         if pd.isna(timestamp):
             continue
@@ -407,6 +462,10 @@ def compute_author_history(
             by_story[author][story][0] += 1
             by_story[author][story][1] += up
             by_story[author][story][2] += down
+        processed += len(batch)
+        if progress_every_rows and (processed >= next_report or processed == len(output)):
+            _progress_line("Author history", processed, len(output), started)
+            next_report = processed + progress_every_rows
     return output
 
 
@@ -808,6 +867,13 @@ def build_analysis_features(
     sentiment_encoder: SentimentEncoder | None = None,
 ) -> dict[str, Any]:
     """Run the resumable feature build using precomputed semantic scalars."""
+    build_started = time.monotonic()
+    print(
+        "Feature preflight: "
+        f"year={config.year} requested_device={config.device} "
+        f"inference_mode={config.inference_mode} nlp_mode={config.nlp_mode}",
+        flush=True,
+    )
     qa_path = config.data_root / "qa_summary" / f"year={config.year}" / "summary.json"
     if not qa_path.exists():
         raise FileNotFoundError(qa_path)
@@ -857,6 +923,7 @@ def build_analysis_features(
             )
     watermark = "INFERENCE" if config.inference_mode else "PILOT_NOT_FOR_INFERENCE"
     state = {
+        "status": "running",
         "dataset_fingerprint": fingerprint,
         "build_signature": build_signature,
         "watermark": watermark,
@@ -891,8 +958,16 @@ def build_analysis_features(
         "subtitle",
         "body",
     ]
+    stage_started = time.monotonic()
+    print("Feature stage: loading source comments and articles", flush=True)
     target_raw = _read_dataset(config.data_root / "comments", config.year, comment_columns)
     articles = _read_dataset(config.data_root / "articles", config.year, article_columns)
+    print(
+        "Feature stage complete: source load | "
+        f"comments={len(target_raw):,} articles={len(articles):,} "
+        f"elapsed={_format_duration(time.monotonic() - stage_started)}",
+        flush=True,
+    )
     if articles.duplicated("story_id").any():
         raise ValueError("story_id is not unique in article data")
     if config.max_stories is not None:
@@ -922,7 +997,11 @@ def build_analysis_features(
     )
     candidate_ids = set(target_raw.loc[candidate_mask, "comment_id"].astype(str))
     discussion_source = target_raw[target_raw["created_at"].notna()].copy()
-    discussion_all = compute_discussion_history(discussion_source)
+    print("Feature stage: calculating strictly-prior discussion activity", flush=True)
+    discussion_all = compute_discussion_history(
+        discussion_source,
+        progress_every_rows=config.progress_every_rows,
+    )
     discussion = discussion_all[
         discussion_all["comment_id"].astype(str).isin(candidate_ids)
     ].copy()
@@ -930,9 +1009,11 @@ def build_analysis_features(
     # later-deleted tombstones. Text/NLP candidate eligibility is applied only
     # after these posting-time histories are computed.
     author_source = history_source[history_source["created_at"].notna()].copy()
+    print("Feature stage: calculating 30-day author history", flush=True)
     author = compute_author_history(
         author_source,
         target_mask=author_source["is_target"].astype(bool),
+        progress_every_rows=config.progress_every_rows,
     )
     author_columns = [
         "comment_id",
@@ -956,16 +1037,34 @@ def build_analysis_features(
     ).dt.total_seconds() / 3600
     base["invalid_posting_time"] = base["hours_since_article"].isna() | (base["hours_since_article"] < 0)
     base["vienna_period"] = base["created_at"].map(vienna_period)
+    print(
+        f"Feature stage: calculating local text measures for {len(base):,} candidates",
+        flush=True,
+    )
+    stage_started = time.monotonic()
     base["word_count"] = base["effective_text"].map(word_count)
     base["log_words"] = np.log1p(base["word_count"])
     base["cttr"] = base["effective_text"].map(cttr)
     base["smog_de"] = base["effective_text"].map(smog_de)
     base["url_present"] = base["effective_text"].str.contains(URL_RE).astype(int)
+    print(
+        "Feature stage complete: local text measures | "
+        f"elapsed={_format_duration(time.monotonic() - stage_started)}",
+        flush=True,
+    )
 
     if sentiment_encoder is None:
         sentiment_encoder = _load_sentiment_encoder(config)
     if config.inference_mode and "PILOT_ONLY" in sentiment_encoder.model_id:
         raise ValueError("Pilot sentiment adapters cannot be used for inference")
+    print(
+        "Feature NLP preflight: "
+        f"model={sentiment_encoder.model_id} "
+        f"revision={getattr(sentiment_encoder, 'resolved_revision', 'unresolved')} "
+        f"device={getattr(sentiment_encoder, 'device', select_torch_device(config.device))} "
+        f"batch={config.sentiment_batch_size}",
+        flush=True,
+    )
 
     checkpoint_root = (
         config.output_root
@@ -973,10 +1072,38 @@ def build_analysis_features(
         / f"build={build_signature[:8]}-{fingerprint[:8]}"
         / f"year={config.year}"
     )
-    for story_id, story in base.groupby("story_id", sort=True):
+    grouped_stories = base.groupby("story_id", sort=True)
+    total_stories = grouped_stories.ngroups
+    total_candidates = len(base)
+    processed_candidates = 0
+    new_candidates = 0
+    written_stories = 0
+    skipped_stories = 0
+    stage_started = time.monotonic()
+    print(
+        "Feature stage: sentiment, semantic joins, and scalar checkpoints | "
+        f"stories={total_stories:,} candidates={total_candidates:,}",
+        flush=True,
+    )
+    for story_index, (story_id, story) in enumerate(grouped_stories, start=1):
         month = int(story["article_month"].iloc[0])
         destination = checkpoint_root / f"month={month:02d}" / f"{story_id}.parquet"
         if destination.exists() and not config.overwrite:
+            skipped_stories += 1
+            processed_candidates += len(story)
+            if story_index % config.progress_every_stories == 0 or story_index == total_stories:
+                _progress_line(
+                    "Scalar features",
+                    story_index,
+                    total_stories,
+                    stage_started,
+                    unit="stories",
+                    detail=(
+                        f"candidates={processed_candidates:,}/{total_candidates:,} "
+                        f"new_rows={new_candidates:,} written={written_stories:,} "
+                        f"skipped={skipped_stories:,}"
+                    ),
+                )
             continue
         story = story.sort_values(["created_at", "comment_id"]).copy()
         texts = story["effective_text"].astype(str).tolist()
@@ -1018,13 +1145,38 @@ def build_analysis_features(
         story = story.drop(columns="_semantic_join")
         story["nlp_watermark"] = watermark
         _atomic_parquet(story, destination)
+        written_stories += 1
+        processed_candidates += len(story)
+        new_candidates += len(story)
+        if story_index % config.progress_every_stories == 0 or story_index == total_stories:
+            _progress_line(
+                "Scalar features",
+                story_index,
+                total_stories,
+                stage_started,
+                unit="stories",
+                detail=(
+                    f"candidates={processed_candidates:,}/{total_candidates:,} "
+                    f"new_rows={new_candidates:,} written={written_stories:,} "
+                    f"skipped={skipped_stories:,}"
+                ),
+            )
 
     import pyarrow.dataset as ds
 
+    print("Feature stage: assembling scalar dataset and length adjustments", flush=True)
+    stage_started = time.monotonic()
     scalar = ds.dataset(checkpoint_root, format="parquet", partitioning=None).to_table().to_pandas()
     scalar["lexdiv_length_adjusted"], lex_meta = _length_residual(scalar, "cttr")
     scalar["reading_level_length_adjusted"], reading_meta = _length_residual(scalar, "smog_de")
+    print(
+        "Feature stage complete: scalar assembly | "
+        f"rows={len(scalar):,} elapsed={_format_duration(time.monotonic() - stage_started)}",
+        flush=True,
+    )
 
+    print("Feature stage: constructing root and all-comment choice sets", flush=True)
+    stage_started = time.monotonic()
     root, root_ties, root_summary = _make_choice_set(
         scalar, target_raw, scope="root", config=config
     )
@@ -1035,6 +1187,12 @@ def build_analysis_features(
     _atomic_parquet(all_comments, config.output_root / "choice_set_all.parquet")
     _atomic_parquet(root_ties.assign(candidate_scope="root"), config.output_root / "tie_diagnostics_root.parquet")
     _atomic_parquet(all_ties.assign(candidate_scope="all"), config.output_root / "tie_diagnostics_all.parquet")
+    print(
+        "Feature stage complete: choice sets | "
+        f"root_rows={len(root):,} all_rows={len(all_comments):,} "
+        f"elapsed={_format_duration(time.monotonic() - stage_started)}",
+        flush=True,
+    )
     registry = _feature_registry()
     registry["length_adjustment"] = [lex_meta, reading_meta]
     registry["nlp"] = {
@@ -1078,6 +1236,25 @@ def build_analysis_features(
             "device": select_torch_device(config.device),
             "packages": _analysis_package_versions(),
         },
+        "execution": {
+            "elapsed_seconds": time.monotonic() - build_started,
+            "new_story_checkpoints": written_stories,
+            "skipped_story_checkpoints": skipped_stories,
+        },
     }
     _atomic_json(summary, config.output_root / "provenance_manifest.json")
+    _atomic_json(
+        {
+            **state,
+            "status": "complete",
+            "manifest": str(config.output_root / "provenance_manifest.json"),
+        },
+        state_path,
+    )
+    print(
+        "Feature build complete: "
+        f"elapsed={_format_duration(time.monotonic() - build_started)} "
+        f"output={config.output_root}",
+        flush=True,
+    )
     return summary
