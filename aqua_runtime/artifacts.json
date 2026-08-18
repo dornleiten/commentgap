@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "repository": "https://github.com/mabehrendt/AQuA",
+    "commit": "637914dcd62491766ff478dc21632813780d005d"
+  },
+  "base_model": {
+    "model_id": "bert-base-multilingual-cased",
+    "revision": "3f076fdb1ab68d5b2880cb87a0886f315b8146f8"
+  },
+  "parity": {
+    "status": "pending",
+    "fixture_sha256": null,
+    "note": "Run and freeze upstream parity in the isolated legacy environment before a production-watermarked build."
+  },
+  "ordinal_class_mapping": {
+    "LABEL_0": 0,
+    "LABEL_1": 1,
+    "LABEL_2": 2,
+    "LABEL_3": 3
+  },
+  "adapter_files": {
+    "addknowledge": {
+      "adapter_config.json": "3544ebb67f202cbd978fad3549b8a8cd88d8ea96c307198227229b2ae4ecc90c",
+      "head_config.json": "f161ddc7ca4ff017682eb34aa6690c04e5146a04a44bf6815a97b7ac9f0236f9",
+      "pytorch_adapter.bin": "7f2c1dda9e514f058566ab28d8c5e049289d9e9aa1f1e869b2685046390955ed",
+      "pytorch_model_head.bin": "6f46d9de405f8bb618bfb28ef494df394e9c4a86a09ed17c3a31cc55c827fdef"
+    },
+    "address": {
+      "adapter_config.json": "9c920fdc79be1c66c425ccec0873b7d95b521788a236222220c0c0888bb690e6",
+      "head_config.json": "cb1917832ae3c6daf1fe2e80944c7440fffab236ec8f6a48b81c4fdadd2ff14d",
+      "pytorch_adapter.bin": "b2cd60337743e60f73ea00080604b9139349656173f5a3db32b08e83de3b0ae1",
+      "pytorch_model_head.bin": "dce81390fa28691481cda9161815a89f91f1656cfe520af66b83729bd1282990"
+    },
+    "discrimination": {
+      "adapter_config.json": "489798dbfb78b0511cc544846c6bac0c5d24c3cd23353c0b86b88a868a83c35a",
+      "head_config.json": "f1b3bcf87129b48a91ae10e1ca5d3f175271a9aaa1c8d7f60e1f9caf88ae267a",
+      "pytorch_adapter.bin": "f4612a50e6ed22f58289477ff252a74b6bee6f152151e2596ca0a7e8d498f782",
+      "pytorch_model_head.bin": "9af32db2216d38793f14285040c69a424b02fc541bcf1891cbc64c85762ffa23"
+    },
+    "fact": {
+      "adapter_config.json": "06363708a724be14cebb197b18fa2e8c816e3f6a1062a7fa3c03c8e708d41e9c",
+      "head_config.json": "2e408d74a99725ea2eb6591f32f6a3383b1383ac1eec0f134f443a26d62c580f",
+      "pytorch_adapter.bin": "0fe01aade031e033bb0d6d32523b5a86bcdf0af87538e68919307b3e00d693d0",
+      "pytorch_model_head.bin": "c587e21eb81362cd184c40ffa70fa0a1c5877f922f2cf48fdeb4c7a82ff113f7"
+    },
+    "insult": {
+      "adapter_config.json": "4947fd75da73e8654424eff8fbe5310f051c72da869ec9a134e8e4217181e4a5",
+      "head_config.json": "56a33c8c8d2060de477802a5aa6c08d63b8b53edd077601c795a6a04e92f5f47",
+      "pytorch_adapter.bin": "0396f05d4dfbb79cf930a8e01129e172d4dd9d99a5c3f520b485da13039f16e2",
+      "pytorch_model_head.bin": "c600ab2b243dc56840814d638dff1da9d37766c6b952b8dfea37adb797e244ec"
+    },
+    "justification": {
+      "adapter_config.json": "ece288c7ec8facaf602e6130e6b7ee9bf792626818254b4f98a95576aa539732",
+      "head_config.json": "63c0cb8b8f332da8626aae49e855dc6d6cea6ce3e89f21b8b8cd59b30d256aa4",
+      "pytorch_adapter.bin": "648fcf73f052d09247bf8599f8de5e95810c248dc1c204791e9e36d1b8bd099d",
+      "pytorch_model_head.bin": "3f28bfa7502ce439bda13a91f8fcebd2d5da2f7f7bfcf938dec34959c8afcd48"
+    },
+    "opinion": {
+      "adapter_config.json": "37ed8f3f807e1b1f60ff66abfee874f7059e0747ca314ff7fd8a9d9e2c6a3d0b",
+      "head_config.json": "aaf1a44f52ce4165772c075917e9145b45b57815075aea36c42e870d9a29852e",
+      "pytorch_adapter.bin": "d0990201b6e103f8894b417965ef8f3552d3b0973d6f2d036c30f842d003df36",
+      "pytorch_model_head.bin": "c9eda5e0d2862a17533f7b59fb731292efc8f121eb6c5aba1ebda9cf162307b0"
+    },
+    "question": {
+      "adapter_config.json": "f721606142f02e6d0297a1de215b8c5d76cd1aaa45018c60f7c0941ff1fe02ff",
+      "head_config.json": "cd9505e69aec29b994408c3bf9a93bcb1495e6f128d66f33b0f9cc385db80129",
+      "pytorch_adapter.bin": "8326a3de03186d0e57aecb255ec00e7b0c76ce8a2cae61ef868286b6af3c2d4b",
+      "pytorch_model_head.bin": "907f123931e3915c832171575939f61397d863363373900a3f4897425faaa0a5"
+    },
+    "refcontents": {
+      "adapter_config.json": "01c1765a0335b8bf8ac6719807625568333fcdfeda2e82639c0c693d2569f504",
+      "head_config.json": "6e2e1f666421a05685791a707cb03a3642d10c300a474ada5e0535b2502c2735",
+      "pytorch_adapter.bin": "c8b290cad2326ca9bfc6b1809ece60135cb4dd98c30eae3b762e3c2a4dd2f5ba",
+      "pytorch_model_head.bin": "8594e5f5154ea7c5f355988a749b3ceecc3165caf44dbc32872d97e176dba776"
+    },
+    "refformat": {
+      "adapter_config.json": "0a1c8c2a49da308c3d81b09781cd1267faa58efe65df8159116fec753b94b9d3",
+      "head_config.json": "bc9758a59646e8e0d3ba1b57a91c39783987d70516e13f9372a38d0fd7b4f2a8",
+      "pytorch_adapter.bin": "fc5679f8c2b9dc02e2e67f84060df08db690901abde38a0809baee6373d83406",
+      "pytorch_model_head.bin": "24b01aa2473d83b397388010bb5c0e726fb5a6997e0632243a86a7c4d57bd367"
+    },
+    "refmedium": {
+      "adapter_config.json": "0adba5be96c68d2e94219d80f03fc4bd97f015d6d2bb17a9743cb35fe64b4746",
+      "head_config.json": "571cb5c2fe3f089cae802f907dc110cbb2e20da256f88e81fda99785adb0a5a2",
+      "pytorch_adapter.bin": "a87f9dc9bd24286b7d2f8163ba9d872d5f5951677c3c58ec9aee86f6d6e4a5f2",
+      "pytorch_model_head.bin": "9e53fd66f64823d3cce1153529f589202f0e1cd4f403cc68a1937cac1e225b71"
+    },
+    "refpersonal": {
+      "adapter_config.json": "da89ec912f54d8a24a6ea9f32570c1dbf1d5a3b4d9c8a662f7e34167356e4b6a",
+      "head_config.json": "80a6b03e2da67b0a71a0adcf52677e4f6e99c2ed0f4eaec9a183d3390cec1d0d",
+      "pytorch_adapter.bin": "d795b6f7190cdbacfbe964479224a51b9e5f1fbb932c4bbf22bf4b73180cc094",
+      "pytorch_model_head.bin": "50cc3c8c9a67671e0929cc6a7b181063f5cef8d4fbd1de82ac3704ca2214ebdc"
+    },
+    "refusers": {
+      "adapter_config.json": "d5fa4dc0f8e6ddf1ca596d42953ad03b5fb1401a5fc7d10fbbe08805e3d1922c",
+      "head_config.json": "eca66a25c179126d502824bc47510eb5c66617efd4b539f4e5344cc93fb0bb90",
+      "pytorch_adapter.bin": "55a9964c5c32a9eb83b119932dce0f4241f7bd5ccc47600308ca7792f4bfd82d",
+      "pytorch_model_head.bin": "fa4139cdcc5bc72a9b6930ef56e157142a12b16034955547d7ef467a96e01b62"
+    },
+    "relevance": {
+      "adapter_config.json": "468d62d8d3081f770ab67feb67c5bba423be82abb96ba83d72ae4f12a91dd151",
+      "head_config.json": "5a21e69190c0d0f14f42902b681f60e50b5ae115d37325273278ff3af9f27ccc",
+      "pytorch_adapter.bin": "ef1735ce39cf3963fb558032fab4803056b7cc630da2d95f02cd8496d4e94aed",
+      "pytorch_model_head.bin": "dcd2315a9c2920496f346c53173e218c96589512f060a26d9d6b9d11ba6acb49"
+    },
+    "respect": {
+      "adapter_config.json": "e74a9eeba292cde602a02b653bd7b810da0b8bd528c5b45f038702465d73fbb2",
+      "head_config.json": "d95d929a290695f0c0ea40a48c7b4fa0ff451ecfb48835bf13198cd46be1af7f",
+      "pytorch_adapter.bin": "3d7e57d00fede8d6ac1fcbe43ae996bab4f0813410427d4defbd30a0ad82a5f0",
+      "pytorch_model_head.bin": "b34032f3dc48a072580cebf45f2c72a101a93685bdc29bbd843cbe30f788e6e0"
+    },
+    "sarcasm": {
+      "adapter_config.json": "00125402b72a9dea42fda754fe20c80643366114e452b7e13c4125aa475e6595",
+      "head_config.json": "f632893303bd5927b219a4ece7c386cf6205e9a4883d174c90878964267e84c0",
+      "pytorch_adapter.bin": "94b58152ac4cedab2f1b28c6710b951bebb5c7bbac5742dc69d0485300afd91f",
+      "pytorch_model_head.bin": "2cf8b86d0d1772e580eb6a0c5a14eba353edd8dc9d36dc48b3305827c3d02c50"
+    },
+    "screaming": {
+      "adapter_config.json": "535efb39d46d583936489b56f067fdf68a1aa8b59d390c7230914764c541aac5",
+      "head_config.json": "2c472c4b2481585e3137dbc1df20afa33b645882f0b32dc0cb9f802e38844f42",
+      "pytorch_adapter.bin": "627c482d1bed50c9d022e99cad169b83790d4b4802277e30cd88e95258fa20f3",
+      "pytorch_model_head.bin": "8d7598600382f4b3f5dfbbe0b9fa316fcd4c14663e2e8336bfcf6c84dcb3d9ef"
+    },
+    "solproposal": {
+      "adapter_config.json": "dab6ae4f67f82124e47e006aaa7a0dcc48aa25c8ab33558172f580ef44d4d047",
+      "head_config.json": "d7554efed2517c8a6f11ef40c5e63509acfd33118c2281a823174fd0b691c271",
+      "pytorch_adapter.bin": "680477c705dd1d3335bbac90d96ca77332e99a9ad4b96a49674fd1e81ebd66d4",
+      "pytorch_model_head.bin": "3a2230f9ec5e6839acb6f3d5d9b6990f94a8045e0912a7a5a6841a91ae0c9980"
+    },
+    "storytelling": {
+      "adapter_config.json": "8374954c7d8c78d117984f61fba42e801d4fb6ca32318a287344d7c54d9227df",
+      "head_config.json": "1f68b63bd3186ac9c5e004cdb8d23af4fcc3f99cac516f7b4e89747cb67a181b",
+      "pytorch_adapter.bin": "a65784c8ab024cd54e1cfa0a7535af57b82d46898b5bee7b2a4f550c543ef00d",
+      "pytorch_model_head.bin": "9d2e9ff451ebae5206c6b678418d83e3c4ac48a593d59c82d957270f0161eb7f"
+    },
+    "vulgar": {
+      "adapter_config.json": "15effd51a32bd207eb9f7773f0ed11be75ee8214b72f6ab9f0870220e61e7cae",
+      "head_config.json": "e568e26956cc3048974aae9086a983045ae58bdeaea1bb0fa149d8b464d46102",
+      "pytorch_adapter.bin": "17b02da9fa6d0efef1946e0502dbfc3c8093dbbaa352ff6c5e6baffcb7f38d7d",
+      "pytorch_model_head.bin": "a15c377d05f5d8163b9e86d1703d4be86211525acdbb4b1b0c279cedd5b0ae8e"
+    }
+  }
+}

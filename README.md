@@ -213,6 +213,77 @@ a compatible Linux installation and otherwise uses MPS/CPU as supported;
 XGBoost uses CUDA when its installed build supports it and CPU histograms on
 macOS.
 
+Production text classification uses immutable checkpoint revisions of
+`cardiffnlp/twitter-xlm-roberta-base-sentiment` and
+`textdetox/xlmr-large-toxicity-classifier-v2`. The feature outputs retain
+positive, negative, and neutral sentiment probabilities. Toxicity is recorded
+as both the maximum chunk probability (`toxicity_probability`, used by the
+models) and a token-weighted mean (`toxicity_mean_probability`, descriptive
+only), so localized abuse is not diluted in long comments. The selected model
+IDs, revisions, and aggregation rules are written to `feature_manifest.json`.
+They can be overridden from `commentgap-features` with
+`--sentiment-model-id`, `--sentiment-revision`, `--toxicity-model-id`, and
+`--toxicity-revision`; custom revisions are resolved to immutable Hub commits
+before inference.
+
+### Isolated AQuA deliberative-quality store
+
+AQuA is deliberately not installed in the main Transformers 5 environment.
+The `commentgap-aqua` stage exports keyed Parquet inputs, invokes a separate
+Python 3.10 runtime, validates its outputs, and writes resumable per-story
+checkpoints. The committed schema freezes upstream AQuA commit
+`637914dcd62491766ff478dc21632813780d005d`, multilingual BERT revision
+`3f076fdb1ab68d5b2880cb87a0886f315b8146f8`, the published component order and
+weights, and SHA-256 hashes for all 80 adapter files.
+
+Create the environment separately. On macOS/CPU:
+
+```bash
+python3.10 -m venv .venv-aqua
+.venv-aqua/bin/python -m pip install -r requirements-aqua-legacy.txt
+```
+
+On the Linux A5000 host, use the CUDA 11.3 lock instead:
+
+```bash
+python3.10 -m venv .venv-aqua
+.venv-aqua/bin/python -m pip install -r requirements-aqua-cuda113.txt
+```
+
+Place the exact upstream checkout at
+`.cache/aqua-upstream-637914d/`; the runtime expects its adapters under
+`trained adapters/` and verifies every file before loading a model. A pilot
+before upstream parity has been frozen must be explicitly watermarked:
+
+```bash
+commentgap-aqua \
+  --device cuda \
+  --max-stories 20 \
+  --allow-unverified-parity
+```
+
+The default parallel composition automatically retries a story sequentially
+if the accelerator reports an out-of-memory error. Use
+`--execution-mode sequential` to select the lower-memory path from the start.
+Production builds fail closed until `commentgap-aqua-parity` verifies the
+upstream hard labels and published score, repeated CPU and sequential logits,
+and updates `aqua_runtime/artifacts.json` with the fixture hash.
+
+Each complete store retains all 20 hard labels, logits, raw four-class softmax
+values, raw expected ordinal values, published hard composite score, raw
+expected composite score, token count, and truncation status. The probabilities
+are explicitly marked `uncalibrated`. To merge the compact hard/expected
+features into the existing choice sets without loading the legacy model, pass:
+
+```bash
+commentgap-features --aqua-store model_output/selection_2025/aqua
+```
+
+The merge requires exact candidate coverage, matching text hashes and build
+signatures, a completed validation report, and a production watermark. AQuA
+features remain descriptive/sensitivity features and are not automatically
+added to the confirmatory root/all model specifications.
+
 Outputs are written below `model_output/selection_2025/`. Only
 `oof_scores_wide.parquet` is eligible for predictive-performance claims or the
 Paper 2 ranking-policy evaluation. Predictions from

@@ -19,6 +19,10 @@ import numpy as np
 HF_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 DEFAULT_EMBEDDING_MODEL_ID = "BAAI/bge-m3"
 DEFAULT_EMBEDDING_MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
+DEFAULT_SENTIMENT_MODEL_ID = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
+DEFAULT_SENTIMENT_MODEL_REVISION = "f2f1202b1bdeb07342385c3f807f9c07cd8f5cf8"
+DEFAULT_TOXICITY_MODEL_ID = "textdetox/xlmr-large-toxicity-classifier-v2"
+DEFAULT_TOXICITY_MODEL_REVISION = "cde9d07ac4df2af9c02d2461dee068bf04a58728"
 
 
 def resolve_hf_model_revision(model_id: str, revision: str | None = None) -> str:
@@ -55,6 +59,13 @@ class SentimentEncoder(Protocol):
 
     def predict(self, texts: list[str], batch_size: int) -> np.ndarray:
         """Return columns positive, negative, neutral."""
+
+
+class ToxicityEncoder(Protocol):
+    model_id: str
+
+    def predict(self, texts: list[str], batch_size: int) -> np.ndarray:
+        """Return columns maximum toxicity and token-weighted mean toxicity."""
 
 
 class TextEmbedder(Protocol):
@@ -107,43 +118,26 @@ def select_torch_device(requested: str = "auto") -> str:
     return "cpu"
 
 
-@dataclass
-class GermanSentimentEncoder:
-    """Batched German sentiment with token-weighted long-text aggregation."""
+class _ChunkedSequenceClassifier:
+    """Shared lazy-sized batching for transformer sequence classifiers."""
 
-    model_id: str = "oliverguhr/german-sentiment-bert"
-    revision: str | None = None
-    device: str = "auto"
-    chunk_tokens: int = 450
-
-    def __post_init__(self) -> None:
+    def _initialize_classifier(self) -> None:
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
         self._torch = torch
         self.device = select_torch_device(self.device)
-        kwargs = {"revision": self.revision} if self.revision else {}
+        self.resolved_revision = resolve_hf_model_revision(self.model_id, self.revision)
+        kwargs = {"revision": self.resolved_revision}
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_id, **kwargs)
         self._model = AutoModelForSequenceClassification.from_pretrained(
             self.model_id, **kwargs
         ).to(self.device)
         self._model.eval()
-        self.resolved_revision = (
-            getattr(self._model.config, "_commit_hash", None)
-            or self.revision
-            or "main_unresolved"
-        )
-        label_map = {
+        self._label_map = {
             int(key): str(value).lower()
             for key, value in self._model.config.id2label.items()
         }
-        self._label_indices = {
-            label: next((idx for idx, value in label_map.items() if label in value), None)
-            for label in ("positive", "negative", "neutral")
-        }
-        if any(value is None for value in self._label_indices.values()):
-            # This checkpoint historically uses LABEL_0/1/2 in the order below.
-            self._label_indices = {"positive": 0, "negative": 1, "neutral": 2}
 
     def _chunks(self, text: str) -> list[list[int]]:
         ids = self._tokenizer.encode(text, add_special_tokens=False)
@@ -160,12 +154,14 @@ class GermanSentimentEncoder:
         sep_token_id = getattr(self._tokenizer, "sep_token_id", None)
         if cls_token_id is None or sep_token_id is None:
             raise RuntimeError(
-                "The sentiment tokenizer exposes neither "
+                "The classifier tokenizer exposes neither "
                 "build_inputs_with_special_tokens() nor BERT CLS/SEP token IDs"
             )
         return [int(cls_token_id), *token_ids, int(sep_token_id)]
 
-    def predict(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
+    def _predict_chunks(
+        self, texts: list[str], batch_size: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         chunks: list[list[int]] = []
         owners: list[int] = []
         weights: list[int] = []
@@ -175,8 +171,7 @@ class GermanSentimentEncoder:
                 owners.append(owner)
                 weights.append(max(1, len(token_ids)))
 
-        accumulated = np.zeros((len(texts), 3), dtype=np.float64)
-        totals = np.zeros(len(texts), dtype=np.float64)
+        rows: list[np.ndarray] = []
         for start in range(0, len(chunks), batch_size):
             batch_ids = chunks[start : start + batch_size]
             encoded = self._tokenizer.pad(
@@ -188,21 +183,100 @@ class GermanSentimentEncoder:
             encoded = {key: value.to(self.device) for key, value in encoded.items()}
             with self._torch.inference_mode():
                 probabilities = self._torch.softmax(self._model(**encoded).logits, dim=-1)
-            probabilities = probabilities.detach().cpu().numpy()
-            for offset, row in enumerate(probabilities):
-                index = start + offset
-                owner = owners[index]
-                weight = weights[index]
-                ordered = np.array(
-                    [
-                        row[self._label_indices["positive"]],
-                        row[self._label_indices["negative"]],
-                        row[self._label_indices["neutral"]],
-                    ]
-                )
-                accumulated[owner] += ordered * weight
-                totals[owner] += weight
+            rows.append(probabilities.detach().cpu().numpy())
+        return (
+            np.concatenate(rows, axis=0),
+            np.asarray(owners, dtype=np.int64),
+            np.asarray(weights, dtype=np.float64),
+        )
+
+
+def _label_index(
+    label_map: dict[int, str], names: tuple[str, ...], fallback: int
+) -> int:
+    normalized_names = {re.sub(r"[^a-z0-9]+", "", name.lower()) for name in names}
+    for index, value in label_map.items():
+        normalized = re.sub(r"[^a-z0-9]+", "", value.lower())
+        if normalized in normalized_names:
+            return index
+    return fallback
+
+
+@dataclass
+class XLMTwitterSentimentEncoder(_ChunkedSequenceClassifier):
+    """CardiffNLP XLM-T sentiment with weighted long-text aggregation."""
+
+    model_id: str = DEFAULT_SENTIMENT_MODEL_ID
+    revision: str | None = None
+    device: str = "auto"
+    chunk_tokens: int = 510
+
+    def __post_init__(self) -> None:
+        self._initialize_classifier()
+        # CardiffNLP's checkpoint uses negative/neutral/positive at indices 0/1/2.
+        self._label_indices = {
+            "positive": _label_index(self._label_map, ("positive",), 2),
+            "negative": _label_index(self._label_map, ("negative",), 0),
+            "neutral": _label_index(self._label_map, ("neutral",), 1),
+        }
+        if len(set(self._label_indices.values())) != 3:
+            raise RuntimeError(
+                f"Could not identify distinct sentiment labels in {self._label_map!r}"
+            )
+
+    def predict(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
+        probabilities, owners, weights = self._predict_chunks(texts, batch_size)
+        ordered = probabilities[
+            :,
+            [
+                self._label_indices["positive"],
+                self._label_indices["negative"],
+                self._label_indices["neutral"],
+            ],
+        ]
+        accumulated = np.zeros((len(texts), 3), dtype=np.float64)
+        totals = np.zeros(len(texts), dtype=np.float64)
+        np.add.at(accumulated, owners, ordered * weights[:, None])
+        np.add.at(totals, owners, weights)
         return accumulated / totals[:, None]
+
+
+# Compatibility for code importing the previous adapter class name. Its default
+# checkpoint is now CardiffNLP XLM-T, so new code should use the explicit name.
+GermanSentimentEncoder = XLMTwitterSentimentEncoder
+
+
+@dataclass
+class TextDetoxToxicityEncoder(_ChunkedSequenceClassifier):
+    """TextDetox toxicity with max and weighted-mean chunk aggregation."""
+
+    model_id: str = DEFAULT_TOXICITY_MODEL_ID
+    revision: str | None = None
+    device: str = "auto"
+    chunk_tokens: int = 510
+
+    def __post_init__(self) -> None:
+        self._initialize_classifier()
+        self._toxic_index = _label_index(
+            self._label_map,
+            ("toxic", "toxicity", "toxic language"),
+            1,
+        )
+        if self._toxic_index >= int(self._model.config.num_labels):
+            raise RuntimeError(
+                f"Could not identify a toxicity label in {self._label_map!r}"
+            )
+
+    def predict(self, texts: list[str], batch_size: int = 16) -> np.ndarray:
+        probabilities, owners, weights = self._predict_chunks(texts, batch_size)
+        toxic = probabilities[:, self._toxic_index]
+        maxima = np.full(len(texts), -np.inf, dtype=np.float64)
+        weighted = np.zeros(len(texts), dtype=np.float64)
+        totals = np.zeros(len(texts), dtype=np.float64)
+        np.maximum.at(maxima, owners, toxic)
+        np.add.at(weighted, owners, toxic * weights)
+        np.add.at(totals, owners, weights)
+        return np.column_stack((maxima, weighted / totals))
 
 
 @dataclass
@@ -337,4 +411,21 @@ class PilotLexiconSentiment:
             neutral = 2
             total = pos + neg + neutral
             output.append((pos / total, neg / total, neutral / total))
+        return np.asarray(output, dtype=np.float32)
+
+
+@dataclass
+class PilotLexiconToxicity:
+    """Tiny deterministic toxicity adapter; never valid for inference."""
+
+    model_id: str = "PILOT_ONLY_lexicon_toxicity"
+    resolved_revision: str = "builtin-v1"
+    toxic: tuple[str, ...] = ("hass", "idiot", "depp", "dumm", "scheiß")
+
+    def predict(self, texts: list[str], batch_size: int = 256) -> np.ndarray:
+        output = []
+        for text in texts:
+            matches = sum(text.lower().count(word) for word in self.toxic)
+            probability = 1.0 - 1.0 / (2.0 + matches)
+            output.append((probability, probability))
         return np.asarray(output, dtype=np.float32)

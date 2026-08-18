@@ -9,6 +9,7 @@ scrap*
 .Rhistory
 /*.html
 /.cache/
+/.venv-aqua/
 /Capstone Code
 /submissions
 /notes

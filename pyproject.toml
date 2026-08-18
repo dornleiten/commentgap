@@ -17,6 +17,11 @@ commentgap-scrape = "commentgap_scraper.cli:main"
 commentgap-embed = "commentgap_analysis.embedding_cli:main"
 commentgap-similarity = "commentgap_analysis.similarity_cli:main"
 commentgap-features = "commentgap_analysis.feature_cli:main"
+commentgap-aqua = "commentgap_analysis.aqua_cli:main"
+commentgap-aqua-parity = "commentgap_analysis.aqua_parity:main"
 
 [tool.setuptools.packages.find]
-include = ["commentgap_scraper*", "commentgap_analysis*"]
+include = ["commentgap_scraper*", "commentgap_analysis*", "aqua_runtime*"]
+
+[tool.setuptools.package-data]
+aqua_runtime = ["artifacts.json"]

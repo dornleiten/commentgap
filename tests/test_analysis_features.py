@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 
 from commentgap_analysis.features import (
+    ROOT_MODEL_FEATURES,
+    FeatureBuildConfig,
     article_similarity_top3,
     assign_audience_labels,
     compute_author_history,
@@ -16,7 +18,12 @@ from commentgap_analysis.features import (
     vienna_period,
 )
 from commentgap_analysis.nlp import (
-    GermanSentimentEncoder,
+    DEFAULT_SENTIMENT_MODEL_ID,
+    DEFAULT_SENTIMENT_MODEL_REVISION,
+    DEFAULT_TOXICITY_MODEL_ID,
+    DEFAULT_TOXICITY_MODEL_REVISION,
+    TextDetoxToxicityEncoder,
+    XLMTwitterSentimentEncoder,
     resolve_hf_model_revision,
     select_torch_device,
 )
@@ -24,7 +31,7 @@ from commentgap_analysis.nlp import (
 
 class AnalysisFeatureTests(unittest.TestCase):
     def test_sentiment_special_tokens_support_transformers_5_tokenizer(self):
-        encoder = GermanSentimentEncoder.__new__(GermanSentimentEncoder)
+        encoder = XLMTwitterSentimentEncoder.__new__(XLMTwitterSentimentEncoder)
         encoder._tokenizer = SimpleNamespace(cls_token_id=101, sep_token_id=102)
         self.assertEqual(encoder._add_special_tokens([7, 8]), [101, 7, 8, 102])
 
@@ -34,6 +41,44 @@ class AnalysisFeatureTests(unittest.TestCase):
             sep_token_id=None,
         )
         self.assertEqual(encoder._add_special_tokens([7, 8]), [11, 7, 8, 12])
+
+    def test_new_nlp_defaults_are_pinned_and_toxicity_is_a_model_feature(self):
+        config = FeatureBuildConfig(inference_mode=False)
+        self.assertEqual(config.sentiment_model_id, DEFAULT_SENTIMENT_MODEL_ID)
+        self.assertEqual(config.sentiment_revision, DEFAULT_SENTIMENT_MODEL_REVISION)
+        self.assertEqual(config.toxicity_model_id, DEFAULT_TOXICITY_MODEL_ID)
+        self.assertEqual(config.toxicity_revision, DEFAULT_TOXICITY_MODEL_REVISION)
+        self.assertIn("toxicity_probability", ROOT_MODEL_FEATURES)
+
+    def test_xlmt_sentiment_uses_cardiff_label_order_and_weighted_chunks(self):
+        encoder = XLMTwitterSentimentEncoder.__new__(XLMTwitterSentimentEncoder)
+        encoder._label_indices = {"positive": 2, "negative": 0, "neutral": 1}
+        encoder._predict_chunks = lambda texts, batch_size: (
+            np.asarray(
+                [
+                    [0.6, 0.3, 0.1],
+                    [0.1, 0.2, 0.7],
+                    [0.2, 0.5, 0.3],
+                ]
+            ),
+            np.asarray([0, 0, 1]),
+            np.asarray([1.0, 3.0, 2.0]),
+        )
+        actual = encoder.predict(["first", "second"], batch_size=2)
+        np.testing.assert_allclose(actual[0], [0.55, 0.225, 0.225])
+        np.testing.assert_allclose(actual[1], [0.3, 0.2, 0.5])
+
+    def test_textdetox_returns_max_and_weighted_mean_toxicity(self):
+        encoder = TextDetoxToxicityEncoder.__new__(TextDetoxToxicityEncoder)
+        encoder._toxic_index = 1
+        encoder._predict_chunks = lambda texts, batch_size: (
+            np.asarray([[0.9, 0.1], [0.2, 0.8], [0.6, 0.4]]),
+            np.asarray([0, 0, 1]),
+            np.asarray([1.0, 3.0, 2.0]),
+        )
+        actual = encoder.predict(["first", "second"], batch_size=2)
+        np.testing.assert_allclose(actual[0], [0.8, 0.625])
+        np.testing.assert_allclose(actual[1], [0.4, 0.4])
 
     def test_hugging_face_revisions_are_resolved_to_immutable_commits(self):
         commit = "a" * 40

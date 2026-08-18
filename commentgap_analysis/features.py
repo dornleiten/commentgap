@@ -24,9 +24,16 @@ import pandas as pd
 from .nlp import (
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_EMBEDDING_MODEL_REVISION,
-    GermanSentimentEncoder,
+    DEFAULT_SENTIMENT_MODEL_ID,
+    DEFAULT_SENTIMENT_MODEL_REVISION,
+    DEFAULT_TOXICITY_MODEL_ID,
+    DEFAULT_TOXICITY_MODEL_REVISION,
     PilotLexiconSentiment,
+    PilotLexiconToxicity,
     SentimentEncoder,
+    TextDetoxToxicityEncoder,
+    ToxicityEncoder,
+    XLMTwitterSentimentEncoder,
     select_torch_device,
 )
 
@@ -45,6 +52,7 @@ ROOT_MODEL_FEATURES = [
     "log_words",
     "sentiment_positive",
     "sentiment_negative",
+    "toxicity_probability",
     "lexdiv_length_adjusted",
     "reading_level_length_adjusted",
     "url_present",
@@ -88,16 +96,21 @@ class FeatureBuildConfig:
     output_root: Path = Path("model_output/selection_2025/features")
     similarity_root: Path = Path("model_output/selection_2025/similarities")
     similarity_store: Path | None = None
+    aqua_store: Path | None = None
     year: int = 2025
     lookback_root: Path | None = None
     allow_incomplete: bool = False
     inference_mode: bool = True
     nlp_mode: str = "real"
     device: str = "auto"
+    sentiment_model_id: str = DEFAULT_SENTIMENT_MODEL_ID
     sentiment_revision: str | None = None
+    toxicity_model_id: str = DEFAULT_TOXICITY_MODEL_ID
+    toxicity_revision: str | None = None
     embedding_model_id: str = DEFAULT_EMBEDDING_MODEL_ID
     embedding_revision: str | None = None
     sentiment_batch_size: int = 32
+    toxicity_batch_size: int = 16
     tie_draws: int = DEFAULT_TIE_DRAWS
     seed: int = BASE_SEED
     require_page_publication_time: bool = True
@@ -113,10 +126,30 @@ class FeatureBuildConfig:
         object.__setattr__(self, "similarity_root", Path(self.similarity_root))
         if self.similarity_store is not None:
             object.__setattr__(self, "similarity_store", Path(self.similarity_store))
+        if self.aqua_store is not None:
+            object.__setattr__(self, "aqua_store", Path(self.aqua_store))
         if self.lookback_root is not None:
             object.__setattr__(self, "lookback_root", Path(self.lookback_root))
         if self.nlp_mode not in {"real", "pilot"}:
             raise ValueError("nlp_mode must be 'real' or 'pilot'")
+        if not self.sentiment_model_id.strip():
+            raise ValueError("sentiment_model_id cannot be empty")
+        if not self.toxicity_model_id.strip():
+            raise ValueError("toxicity_model_id cannot be empty")
+        if (
+            self.sentiment_model_id == DEFAULT_SENTIMENT_MODEL_ID
+            and self.sentiment_revision is None
+        ):
+            object.__setattr__(
+                self, "sentiment_revision", DEFAULT_SENTIMENT_MODEL_REVISION
+            )
+        if (
+            self.toxicity_model_id == DEFAULT_TOXICITY_MODEL_ID
+            and self.toxicity_revision is None
+        ):
+            object.__setattr__(
+                self, "toxicity_revision", DEFAULT_TOXICITY_MODEL_REVISION
+            )
         if (
             self.embedding_model_id == DEFAULT_EMBEDDING_MODEL_ID
             and self.embedding_revision is None
@@ -126,6 +159,10 @@ class FeatureBuildConfig:
             )
         if not self.embedding_model_id.strip():
             raise ValueError("embedding_model_id cannot be empty")
+        if self.sentiment_batch_size < 1:
+            raise ValueError("sentiment_batch_size must be positive")
+        if self.toxicity_batch_size < 1:
+            raise ValueError("toxicity_batch_size must be positive")
         if self.inference_mode and (self.allow_incomplete or self.nlp_mode != "real"):
             raise ValueError("Inference mode requires complete data and production NLP")
         if self.inference_mode and self.max_stories is not None:
@@ -723,11 +760,14 @@ def _length_residual(frame: pd.DataFrame, outcome: str) -> tuple[np.ndarray, dic
     return residual, {"outcome": outcome, "n_knots": 6, "degree": 3, "ridge_alpha": 1.0}
 
 
-def _feature_registry() -> dict[str, Any]:
+def _feature_registry(*, aqua_available: bool = False) -> dict[str, Any]:
+    from aqua_runtime.schema import AQUA_FEATURES, expected_alias_column, label_column
+
     labels = {
         "log_words": "Comment length (log words)",
         "sentiment_positive": "Positive sentiment",
         "sentiment_negative": "Negative sentiment",
+        "toxicity_probability": "Maximum toxicity probability",
         "lexdiv_length_adjusted": "Length-adjusted lexical diversity",
         "reading_level_length_adjusted": "Length-adjusted reading difficulty",
         "url_present": "URL present",
@@ -750,8 +790,44 @@ def _feature_registry() -> dict[str, Any]:
         "log_branch_prior_comments": "Earlier comments in branch",
         "log_branch_comments_prev_hour": "Branch comments in previous hour",
     }
+    aqua_features: dict[str, dict[str, Any]] = {}
+    for feature in AQUA_FEATURES:
+        aqua_features[label_column(feature.stem)] = {
+            "label": f"AQuA {feature.description} (hard ordinal label)",
+            "standardize": False,
+            "deferred": not aqua_available,
+            "descriptive_only": True,
+            "scale": "0..3",
+        }
+        aqua_features[expected_alias_column(feature.stem)] = {
+            "label": f"AQuA {feature.description} (raw expected ordinal score)",
+            "standardize": True,
+            "deferred": not aqua_available,
+            "descriptive_only": True,
+            "scale": "0..3",
+            "probability_status": "uncalibrated",
+        }
+    aqua_features.update(
+        {
+            "aqua_score_hard": {
+                "label": "Published hard-label AQuA composite score",
+                "standardize": True,
+                "deferred": not aqua_available,
+                "descriptive_only": True,
+                "scale": "0..5",
+            },
+            "aqua_score_expected": {
+                "label": "Raw expected AQuA composite score",
+                "standardize": True,
+                "deferred": not aqua_available,
+                "descriptive_only": True,
+                "scale": "0..5",
+                "probability_status": "uncalibrated",
+            },
+        }
+    )
     return {
-        "version": 1,
+        "version": 3,
         "models": {
             "root": {"features": ROOT_MODEL_FEATURES},
             "all": {"features": ALL_MODEL_FEATURES},
@@ -767,11 +843,19 @@ def _feature_registry() -> dict[str, Any]:
         | {
             name: {"label": label, "standardize": False, "deferred": True}
             for name, label in {
-                "toxicity_probability": "Toxicity probability",
                 "engagement_probability": "Engaging-comment probability",
                 "fact_claim_probability": "Fact-claim probability",
             }.items()
-        },
+        }
+        | {
+            "toxicity_mean_probability": {
+                "label": "Mean toxicity probability across chunks",
+                "standardize": False,
+                "deferred": False,
+                "descriptive_only": True,
+            }
+        }
+        | aqua_features,
         "categorical_reference": {"vienna_period": "weekday_work"},
     }
 
@@ -872,6 +956,7 @@ def _make_choice_set(
         "cttr",
         "smog_de",
         "sentiment_neutral",
+        "toxicity_mean_probability",
         "hours_since_article",
         "prior_roots",
         "prior_comments",
@@ -884,6 +969,10 @@ def _make_choice_set(
         "author_prior_comments_story",
         "vienna_period",
     ]
+    if "aqua_score_hard" in output.columns:
+        from aqua_runtime.schema import downstream_feature_columns
+
+        raw_descriptive.extend(downstream_feature_columns())
     keep += [name for name in raw_descriptive + features_used if name not in keep]
     summary = {
         "scope": scope,
@@ -899,13 +988,28 @@ def _make_choice_set(
 def _load_sentiment_encoder(config: FeatureBuildConfig) -> SentimentEncoder:
     if config.nlp_mode == "pilot":
         return PilotLexiconSentiment()
-    return GermanSentimentEncoder(device=config.device, revision=config.sentiment_revision)
+    return XLMTwitterSentimentEncoder(
+        model_id=config.sentiment_model_id,
+        device=config.device,
+        revision=config.sentiment_revision,
+    )
+
+
+def _load_toxicity_encoder(config: FeatureBuildConfig) -> ToxicityEncoder:
+    if config.nlp_mode == "pilot":
+        return PilotLexiconToxicity()
+    return TextDetoxToxicityEncoder(
+        model_id=config.toxicity_model_id,
+        device=config.device,
+        revision=config.toxicity_revision,
+    )
 
 
 def build_analysis_features(
     config: FeatureBuildConfig,
     *,
     sentiment_encoder: SentimentEncoder | None = None,
+    toxicity_encoder: ToxicityEncoder | None = None,
 ) -> dict[str, Any]:
     """Run the resumable feature build using precomputed semantic scalars."""
     build_started = time.monotonic()
@@ -939,6 +1043,17 @@ def build_analysis_features(
             "The precomputed similarity store does not match the current source "
             f"collection for {config.year}."
         )
+    aqua_build_root = None
+    aqua_manifest = None
+    if config.aqua_store is not None:
+        from .aqua import resolve_aqua_store
+
+        aqua_build_root, aqua_manifest = resolve_aqua_store(
+            config.aqua_store,
+            year=config.year,
+            source_fingerprint=fingerprint,
+            require_production=config.inference_mode,
+        )
     config_payload = {
         key: str(value) if isinstance(value, Path) else value
         for key, value in asdict(config).items()
@@ -946,6 +1061,9 @@ def build_analysis_features(
     }
     config_payload["resolved_similarity_store"] = str(similarity_store)
     config_payload["similarity_build_signature"] = similarity_manifest["build_signature"]
+    config_payload["aqua_build_signature"] = (
+        aqua_manifest["build_signature"] if aqua_manifest is not None else None
+    )
     build_signature = hashlib.sha256(
         json.dumps(config_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
@@ -1017,6 +1135,7 @@ def build_analysis_features(
         target_raw = target_raw[target_raw["story_id"].astype(str).isin(selected_stories)].copy()
         articles = articles[articles["story_id"].astype(str).isin(selected_stories)].copy()
     source_comment_count = len(target_raw)
+    source_article_count = len(articles)
     if target_raw.duplicated("comment_id").any():
         raise ValueError("comment_id is not unique in source data")
     target_raw["created_at"] = _as_utc(target_raw["created_at"])
@@ -1253,6 +1372,25 @@ def build_analysis_features(
     base["cttr"] = base["effective_text"].map(cttr)
     base["smog_de"] = base["effective_text"].map(smog_de)
     base["url_present"] = base["effective_text"].str.contains(URL_RE).astype(int)
+    if config.aqua_store is not None:
+        from .aqua import load_aqua_for_candidates
+
+        aqua_features, aqua_manifest = load_aqua_for_candidates(
+            config.aqua_store,
+            base[["story_id", "comment_id", "effective_text"]],
+            year=config.year,
+            source_fingerprint=fingerprint,
+            require_production=config.inference_mode,
+        )
+        before = len(base)
+        base = base.merge(
+            aqua_features,
+            on=["story_id", "comment_id"],
+            how="left",
+            validate="one_to_one",
+        )
+        if len(base) != before or base["aqua_runtime_status"].isna().any():
+            raise ValueError("Incomplete AQuA feature merge")
     print(
         "Feature stage complete: local text measures | "
         f"elapsed={_format_duration(time.monotonic() - stage_started)}",
@@ -1263,12 +1401,19 @@ def build_analysis_features(
         sentiment_encoder = _load_sentiment_encoder(config)
     if config.inference_mode and "PILOT_ONLY" in sentiment_encoder.model_id:
         raise ValueError("Pilot sentiment adapters cannot be used for inference")
+    if toxicity_encoder is None:
+        toxicity_encoder = _load_toxicity_encoder(config)
+    if config.inference_mode and "PILOT_ONLY" in toxicity_encoder.model_id:
+        raise ValueError("Pilot toxicity adapters cannot be used for inference")
     print(
         "Feature NLP preflight: "
-        f"model={sentiment_encoder.model_id} "
-        f"revision={getattr(sentiment_encoder, 'resolved_revision', 'unresolved')} "
+        f"sentiment_model={sentiment_encoder.model_id} "
+        f"sentiment_revision={getattr(sentiment_encoder, 'resolved_revision', 'unresolved')} "
+        f"toxicity_model={toxicity_encoder.model_id} "
+        f"toxicity_revision={getattr(toxicity_encoder, 'resolved_revision', 'unresolved')} "
         f"device={getattr(sentiment_encoder, 'device', select_torch_device(config.device))} "
-        f"batch={config.sentiment_batch_size}",
+        f"sentiment_batch={config.sentiment_batch_size} "
+        f"toxicity_batch={config.toxicity_batch_size}",
         flush=True,
     )
 
@@ -1287,7 +1432,7 @@ def build_analysis_features(
     skipped_stories = 0
     stage_started = time.monotonic()
     print(
-        "Feature stage: sentiment, semantic joins, and scalar checkpoints | "
+        "Feature stage: sentiment, toxicity, semantic joins, and scalar checkpoints | "
         f"stories={total_stories:,} candidates={total_candidates:,}",
         flush=True,
     )
@@ -1317,6 +1462,10 @@ def build_analysis_features(
         if sentiments.shape != (len(story), 3):
             raise ValueError("Sentiment encoder returned an unexpected shape")
         story[["sentiment_positive", "sentiment_negative", "sentiment_neutral"]] = sentiments
+        toxicities = toxicity_encoder.predict(texts, config.toxicity_batch_size)
+        if toxicities.shape != (len(story), 2):
+            raise ValueError("Toxicity encoder returned an unexpected shape")
+        story[["toxicity_probability", "toxicity_mean_probability"]] = toxicities
         similarity_path = (
             similarity_store
             / "scalars"
@@ -1409,16 +1558,35 @@ def build_analysis_features(
         f"elapsed={_format_duration(time.monotonic() - stage_started)}",
         flush=True,
     )
-    registry = _feature_registry()
+    registry = _feature_registry(aqua_available=aqua_manifest is not None)
     registry["length_adjustment"] = [lex_meta, reading_meta]
     registry["nlp"] = {
         "sentiment_model": sentiment_encoder.model_id,
         "sentiment_revision": getattr(sentiment_encoder, "resolved_revision", "unresolved"),
+        "sentiment_aggregation": "token_weighted_chunk_mean",
+        "toxicity_model": toxicity_encoder.model_id,
+        "toxicity_revision": getattr(toxicity_encoder, "resolved_revision", "unresolved"),
+        "toxicity_aggregation": {
+            "toxicity_probability": "maximum_chunk_probability",
+            "toxicity_mean_probability": "token_weighted_chunk_mean",
+        },
         "embedding_model": similarity_manifest["embedding_model"]["model_id"],
         "embedding_revision": similarity_manifest["embedding_model"]["resolved_revision"],
         "similarity_store": str(similarity_store),
         "similarity_build_signature": similarity_manifest["build_signature"],
         "watermark": watermark,
+        "aqua": (
+            {
+                "store": str(aqua_build_root),
+                "build_signature": aqua_manifest["build_signature"],
+                "schema_version": aqua_manifest["schema_version"],
+                "watermark": aqua_manifest["watermark"],
+                "probability_status": aqua_manifest["probability_status"],
+                "expected_alias_source": "*_expected_raw",
+            }
+            if aqua_manifest is not None
+            else None
+        ),
     }
     _atomic_json(registry, config.output_root / "feature_manifest.json")
     similarity_validation = similarity_store / "novelty_validation.json"
@@ -1438,7 +1606,7 @@ def build_analysis_features(
         },
         "source": {
             "comments": source_comment_count,
-            "articles": len(articles),
+            "articles": source_article_count,
             "dataset_fingerprint": fingerprint,
             "similarity_store": str(similarity_store),
             "similarity_build_signature": similarity_manifest["build_signature"],
