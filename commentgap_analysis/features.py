@@ -995,9 +995,6 @@ def build_analysis_features(
         "month",
         "published_at",
         "published_at_source",
-        "title",
-        "subtitle",
-        "body",
     ]
     stage_started = time.monotonic()
     print("Feature stage: loading source comments and articles", flush=True)
@@ -1200,8 +1197,46 @@ def build_analysis_features(
         f"rows={len(base):,} elapsed={_format_duration(time.monotonic() - stage_started)}",
         flush=True,
     )
-    article_data = articles.rename(columns={"year": "article_year", "month": "article_month"})
-    base = base.merge(article_data, on="story_id", validate="many_to_one")
+    print("Feature stage: attaching compact article controls", flush=True)
+    # Article text has already been represented by the precomputed semantic
+    # similarities. Never replicate title/subtitle/body over millions of
+    # comment rows: only these compact article controls are needed downstream.
+    article_data = articles[
+        [
+            "story_id",
+            "year",
+            "month",
+            "published_at",
+            "published_at_source",
+        ]
+    ].rename(columns={"year": "article_year", "month": "article_month"})
+    del articles
+    gc.collect()
+    if article_data.duplicated("story_id").any():
+        raise ValueError("story_id is not unique in compact article controls")
+    article_lookup = article_data.set_index("story_id")
+    missing_article_stories = set(base["story_id"].unique()) - set(article_lookup.index)
+    if missing_article_stories:
+        raise ValueError(
+            f"Comments reference {len(missing_article_stories)} missing articles"
+        )
+    article_columns_to_map = [
+        "article_year",
+        "article_month",
+        "published_at",
+        "published_at_source",
+    ]
+    for column in article_columns_to_map:
+        base[column] = base["story_id"].map(article_lookup[column])
+    del article_lookup
+    del article_data
+    gc.collect()
+    rss = _linux_rss_gib()
+    print(
+        "Feature stage complete: compact article controls"
+        + (f" | rss={rss:.1f}GiB" if rss is not None else ""),
+        flush=True,
+    )
     base["published_at"] = _as_utc(base["published_at"])
     base["hours_since_article"] = (
         base["created_at"] - base["published_at"]
