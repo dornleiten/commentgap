@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
 from functools import lru_cache
+import gc
 import hashlib
 from importlib.metadata import PackageNotFoundError, version as package_version
 import json
@@ -148,6 +149,20 @@ def _format_duration(seconds: float) -> str:
     return f"{secs}s"
 
 
+def _linux_rss_gib() -> float | None:
+    """Return current Linux resident memory without adding a dependency."""
+    status = Path("/proc/self/status")
+    if not status.exists():
+        return None
+    try:
+        for line in status.read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) / (1024**2)
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
 def _progress_line(
     label: str,
     completed: int,
@@ -160,7 +175,11 @@ def _progress_line(
     elapsed = time.monotonic() - started
     rate = completed / elapsed if elapsed and completed else 0.0
     eta = (total - completed) / rate if rate else 0.0
-    suffix = f" | {detail}" if detail else ""
+    rss = _linux_rss_gib()
+    diagnostics = [detail] if detail else []
+    if rss is not None:
+        diagnostics.append(f"rss={rss:.1f}GiB")
+    suffix = f" | {' '.join(diagnostics)}" if diagnostics else ""
     print(
         f"{label}: {completed:,}/{total:,} {unit} "
         f"({100 * completed / total if total else 100:.1f}%) | "
@@ -314,6 +333,7 @@ def compute_discussion_history(
     comments: pd.DataFrame,
     *,
     progress_every_rows: int | None = None,
+    consume_input: bool = False,
 ) -> pd.DataFrame:
     """Compute strictly prior discussion and branch activity without tie leakage."""
     required = {
@@ -327,8 +347,19 @@ def compute_discussion_history(
     missing = required - set(comments.columns)
     if missing:
         raise ValueError(f"Missing discussion-history columns: {sorted(missing)}")
-    output = comments.copy()
+    # Production builds hand ownership of the stage input to this function.
+    # Keeping only the ordered version avoids retaining an unordered full-size
+    # copy throughout the multi-hour pass. Tests and external callers retain
+    # the non-mutating default.
+    output = comments if consume_input else comments.copy()
     output["created_at"] = _as_utc(output["created_at"])
+    output.sort_values(
+        ["story_id", "created_at", "comment_id"],
+        kind="stable",
+        na_position="last",
+        ignore_index=True,
+        inplace=True,
+    )
     for name in (
         "prior_roots",
         "prior_comments",
@@ -343,7 +374,9 @@ def compute_discussion_history(
     processed = 0
     next_report = progress_every_rows or 0
     for _, story_indices in output.groupby("story_id", sort=False).groups.items():
-        story = output.loc[story_indices].sort_values(["created_at", "comment_id"])
+        # The complete frame is already in stable story/time order. Only this
+        # bounded per-story view is materialized while calculating histories.
+        story = output.loc[story_indices]
         roots_before = 0
         comments_before = 0
         recent: deque[pd.Timestamp] = deque()
@@ -391,6 +424,7 @@ def compute_author_history(
     target_mask: pd.Series | None = None,
     window_days: int = 30,
     progress_every_rows: int | None = None,
+    consume_input: bool = False,
 ) -> pd.DataFrame:
     """Compute prior cross-article history using collection-snapshot vote totals."""
     required = {
@@ -404,11 +438,19 @@ def compute_author_history(
     missing = required - set(comments.columns)
     if missing:
         raise ValueError(f"Missing author-history columns: {sorted(missing)}")
-    output = comments.copy()
+    output = comments if consume_input else comments.copy()
     output["created_at"] = _as_utc(output["created_at"])
     if target_mask is None:
         target_mask = pd.Series(True, index=output.index)
     target_mask = target_mask.reindex(output.index, fill_value=False)
+    output["_history_target"] = target_mask.to_numpy(dtype=bool)
+    output.sort_values(
+        ["created_at", "comment_id"],
+        kind="stable",
+        na_position="last",
+        ignore_index=True,
+        inplace=True,
+    )
     output["author_prior_30d_comments"] = np.int64(0)
     output["author_prior_30d_snapshot_upvotes"] = np.int64(0)
     output["author_prior_30d_snapshot_downvotes"] = np.int64(0)
@@ -418,16 +460,15 @@ def compute_author_history(
     by_story: defaultdict[str, defaultdict[str, list[int]]] = defaultdict(
         lambda: defaultdict(lambda: [0, 0, 0])
     )
-    ordered = output.sort_values(["created_at", "comment_id"])
     window = pd.Timedelta(days=window_days)
     started = time.monotonic()
     processed = 0
     next_report = progress_every_rows or 0
-    for timestamp, batch in ordered.groupby("created_at", sort=True, dropna=False):
+    for timestamp, batch in output.groupby("created_at", sort=False, dropna=False):
         if pd.isna(timestamp):
             continue
         for idx, row in batch.iterrows():
-            if not target_mask.at[idx]:
+            if not bool(row["_history_target"]):
                 continue
             author = str(row["author_hash"] or "")
             if not author:
@@ -466,7 +507,7 @@ def compute_author_history(
         if progress_every_rows and (processed >= next_report or processed == len(output)):
             _progress_line("Author history", processed, len(output), started)
             next_report = processed + progress_every_rows
-    return output
+    return output.drop(columns="_history_target")
 
 
 def word_count(text: str) -> int:
@@ -978,56 +1019,186 @@ def build_analysis_features(
         selected_stories = (sticky_stories + other_stories)[: config.max_stories]
         target_raw = target_raw[target_raw["story_id"].astype(str).isin(selected_stories)].copy()
         articles = articles[articles["story_id"].astype(str).isin(selected_stories)].copy()
+    source_comment_count = len(target_raw)
     if target_raw.duplicated("comment_id").any():
         raise ValueError("comment_id is not unique in source data")
     target_raw["created_at"] = _as_utc(target_raw["created_at"])
     target_raw["is_target"] = True
-
-    history_source = target_raw.copy()
-    if config.lookback_root is not None:
-        lookback = _read_dataset(config.lookback_root / "comments", config.year - 1, comment_columns)
-        lookback["created_at"] = _as_utc(lookback["created_at"])
-        lookback["is_target"] = False
-        history_source = pd.concat([lookback, target_raw], ignore_index=True, sort=False)
 
     candidate_mask = (
         target_raw["lifecycle_status"].eq("Published")
         & target_raw["effective_text"].fillna("").str.strip().ne("")
         & target_raw["created_at"].notna()
     )
-    candidate_ids = set(target_raw.loc[candidate_mask, "comment_id"].astype(str))
-    discussion_source = target_raw[target_raw["created_at"].notna()].copy()
-    print("Feature stage: calculating strictly-prior discussion activity", flush=True)
-    discussion_all = compute_discussion_history(
-        discussion_source,
-        progress_every_rows=config.progress_every_rows,
+    target_raw["_candidate"] = candidate_mask.to_numpy(dtype=bool)
+
+    history_checkpoint_root = (
+        config.output_root
+        / "history_checkpoints"
+        / f"build={build_signature[:8]}-{fingerprint[:8]}"
     )
-    discussion = discussion_all[
-        discussion_all["comment_id"].astype(str).isin(candidate_ids)
-    ].copy()
-    # Activity counts include every recorded posting with a timestamp, including
-    # later-deleted tombstones. Text/NLP candidate eligibility is applied only
-    # after these posting-time histories are computed.
-    author_source = history_source[history_source["created_at"].notna()].copy()
-    print("Feature stage: calculating 30-day author history", flush=True)
-    author = compute_author_history(
-        author_source,
-        target_mask=author_source["is_target"].astype(bool),
-        progress_every_rows=config.progress_every_rows,
-    )
-    author_columns = [
+    discussion_checkpoint = history_checkpoint_root / "discussion_history.parquet"
+    author_checkpoint = history_checkpoint_root / "author_history.parquet"
+    discussion_feature_columns = [
+        "comment_id",
+        "prior_roots",
+        "prior_comments",
+        "comments_prev_hour",
+        "branch_prior_comments",
+        "branch_comments_prev_hour",
+        "author_prior_comments_story",
+    ]
+    author_feature_columns = [
         "comment_id",
         "author_prior_30d_comments",
         "author_prior_30d_snapshot_upvotes",
         "author_prior_30d_snapshot_downvotes",
     ]
-    base = discussion.merge(
-        author.loc[
-            author["is_target"] & author["comment_id"].astype(str).isin(candidate_ids),
-            author_columns,
-        ],
+
+    if discussion_checkpoint.exists() and not config.overwrite:
+        print(
+            f"Feature stage: reusing discussion-history checkpoint {discussion_checkpoint}",
+            flush=True,
+        )
+        discussion_features = pd.read_parquet(
+            discussion_checkpoint,
+            columns=discussion_feature_columns + ["_candidate"],
+        )
+        discussion_features = discussion_features.loc[
+            discussion_features["_candidate"].astype(bool), discussion_feature_columns
+        ].copy()
+    else:
+        print("Feature stage: calculating strictly-prior discussion activity", flush=True)
+        discussion_source = target_raw.loc[target_raw["created_at"].notna()].copy()
+        discussion_all = compute_discussion_history(
+            discussion_source,
+            progress_every_rows=config.progress_every_rows,
+            consume_input=True,
+        )
+        _atomic_parquet(discussion_all, discussion_checkpoint)
+        print(
+            "Feature stage checkpointed: discussion history | "
+            f"rows={len(discussion_all):,} path={discussion_checkpoint}",
+            flush=True,
+        )
+        discussion_features = discussion_all.loc[
+            discussion_all["_candidate"].astype(bool), discussion_feature_columns
+        ].copy()
+        del discussion_all, discussion_source
+        gc.collect()
+    if discussion_features.duplicated("comment_id").any():
+        raise ValueError("Duplicate comment_id values in discussion-history checkpoint")
+    state.setdefault("stages", {})["discussion_history"] = {
+        "status": "complete",
+        "path": str(discussion_checkpoint),
+        "candidate_rows": len(discussion_features),
+    }
+    _atomic_json(state, state_path)
+
+    # Activity counts include every recorded posting with a timestamp, including
+    # later-deleted tombstones. Text/NLP candidate eligibility is applied only
+    # after these posting-time histories are computed.
+    if author_checkpoint.exists() and not config.overwrite:
+        print(
+            f"Feature stage: reusing author-history checkpoint {author_checkpoint}",
+            flush=True,
+        )
+        author_features = pd.read_parquet(
+            author_checkpoint,
+            columns=author_feature_columns + ["is_target", "_candidate"],
+        )
+        author_features = author_features.loc[
+            author_features["is_target"].astype(bool)
+            & author_features["_candidate"].astype(bool),
+            author_feature_columns,
+        ].copy()
+    else:
+        author_source_columns = [
+            "comment_id",
+            "story_id",
+            "created_at",
+            "author_hash",
+            "votes_positive",
+            "votes_negative",
+            "is_target",
+            "_candidate",
+        ]
+        author_source = target_raw.loc[
+            target_raw["created_at"].notna(), author_source_columns
+        ].copy()
+        if config.lookback_root is not None:
+            lookback_columns = [
+                "comment_id",
+                "story_id",
+                "created_at",
+                "author_hash",
+                "votes_positive",
+                "votes_negative",
+            ]
+            lookback = _read_dataset(
+                config.lookback_root / "comments",
+                config.year - 1,
+                lookback_columns,
+            )
+            lookback["created_at"] = _as_utc(lookback["created_at"])
+            lookback = lookback.loc[lookback["created_at"].notna()].copy()
+            lookback["is_target"] = False
+            lookback["_candidate"] = False
+            author_source = pd.concat(
+                [lookback[author_source_columns], author_source],
+                ignore_index=True,
+                sort=False,
+            )
+            del lookback
+            gc.collect()
+        print("Feature stage: calculating 30-day author history", flush=True)
+        author_all = compute_author_history(
+            author_source,
+            target_mask=author_source["is_target"].astype(bool),
+            progress_every_rows=config.progress_every_rows,
+            consume_input=True,
+        )
+        _atomic_parquet(author_all, author_checkpoint)
+        print(
+            "Feature stage checkpointed: author history | "
+            f"rows={len(author_all):,} path={author_checkpoint}",
+            flush=True,
+        )
+        author_features = author_all.loc[
+            author_all["is_target"].astype(bool)
+            & author_all["_candidate"].astype(bool),
+            author_feature_columns,
+        ].copy()
+        del author_all, author_source
+        gc.collect()
+    if author_features.duplicated("comment_id").any():
+        raise ValueError("Duplicate comment_id values in author-history checkpoint")
+    state.setdefault("stages", {})["author_history"] = {
+        "status": "complete",
+        "path": str(author_checkpoint),
+        "candidate_rows": len(author_features),
+    }
+    _atomic_json(state, state_path)
+
+    print("Feature stage: joining compact history results to candidates", flush=True)
+    stage_started = time.monotonic()
+    base = target_raw.loc[candidate_mask].drop(columns=["_candidate"]).copy()
+    del target_raw, candidate_mask
+    gc.collect()
+    history_features = discussion_features.merge(
+        author_features,
         on="comment_id",
         validate="one_to_one",
+    )
+    del discussion_features, author_features
+    gc.collect()
+    base = base.merge(history_features, on="comment_id", validate="one_to_one")
+    del history_features
+    gc.collect()
+    print(
+        "Feature stage complete: compact history joins | "
+        f"rows={len(base):,} elapsed={_format_duration(time.monotonic() - stage_started)}",
+        flush=True,
     )
     article_data = articles.rename(columns={"year": "article_year", "month": "article_month"})
     base = base.merge(article_data, on="story_id", validate="many_to_one")
@@ -1177,12 +1348,22 @@ def build_analysis_features(
 
     print("Feature stage: constructing root and all-comment choice sets", flush=True)
     stage_started = time.monotonic()
+    # The full raw table was deliberately released before NLP inference. Reload
+    # it only for final curator-set validation and immediately release it again.
+    choice_raw = _read_dataset(config.data_root / "comments", config.year, comment_columns)
+    choice_raw["created_at"] = _as_utc(choice_raw["created_at"])
+    scalar_story_ids = set(scalar["story_id"].astype(str).unique())
+    choice_raw = choice_raw[
+        choice_raw["story_id"].astype(str).isin(scalar_story_ids)
+    ].copy()
     root, root_ties, root_summary = _make_choice_set(
-        scalar, target_raw, scope="root", config=config
+        scalar, choice_raw, scope="root", config=config
     )
     all_comments, all_ties, all_summary = _make_choice_set(
-        scalar, target_raw, scope="all", config=config
+        scalar, choice_raw, scope="all", config=config
     )
+    del choice_raw, scalar_story_ids
+    gc.collect()
     _atomic_parquet(root, config.output_root / "choice_set_root.parquet")
     _atomic_parquet(all_comments, config.output_root / "choice_set_all.parquet")
     _atomic_parquet(root_ties.assign(candidate_scope="root"), config.output_root / "tie_diagnostics_root.parquet")
@@ -1221,7 +1402,7 @@ def build_analysis_features(
             "status_counts": qa.get("status_counts"),
         },
         "source": {
-            "comments": len(target_raw),
+            "comments": source_comment_count,
             "articles": len(articles),
             "dataset_fingerprint": fingerprint,
             "similarity_store": str(similarity_store),
