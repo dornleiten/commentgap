@@ -151,6 +151,20 @@ class GermanSentimentEncoder:
             return [[]]
         return [ids[i : i + self.chunk_tokens] for i in range(0, len(ids), self.chunk_tokens)]
 
+    def _add_special_tokens(self, token_ids: list[int]) -> list[int]:
+        """Add BERT boundary tokens across Transformers 4/5 tokenizer APIs."""
+        builder = getattr(self._tokenizer, "build_inputs_with_special_tokens", None)
+        if callable(builder):
+            return list(builder(token_ids))
+        cls_token_id = getattr(self._tokenizer, "cls_token_id", None)
+        sep_token_id = getattr(self._tokenizer, "sep_token_id", None)
+        if cls_token_id is None or sep_token_id is None:
+            raise RuntimeError(
+                "The sentiment tokenizer exposes neither "
+                "build_inputs_with_special_tokens() nor BERT CLS/SEP token IDs"
+            )
+        return [int(cls_token_id), *token_ids, int(sep_token_id)]
+
     def predict(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
         chunks: list[list[int]] = []
         owners: list[int] = []
@@ -166,8 +180,9 @@ class GermanSentimentEncoder:
         for start in range(0, len(chunks), batch_size):
             batch_ids = chunks[start : start + batch_size]
             encoded = self._tokenizer.pad(
-                {"input_ids": [self._tokenizer.build_inputs_with_special_tokens(x) for x in batch_ids]},
+                {"input_ids": [self._add_special_tokens(x) for x in batch_ids]},
                 padding=True,
+                return_attention_mask=True,
                 return_tensors="pt",
             )
             encoded = {key: value.to(self.device) for key, value in encoded.items()}

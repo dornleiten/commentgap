@@ -15,10 +15,26 @@ from commentgap_analysis.features import (
     validate_qa_summary,
     vienna_period,
 )
-from commentgap_analysis.nlp import resolve_hf_model_revision, select_torch_device
+from commentgap_analysis.nlp import (
+    GermanSentimentEncoder,
+    resolve_hf_model_revision,
+    select_torch_device,
+)
 
 
 class AnalysisFeatureTests(unittest.TestCase):
+    def test_sentiment_special_tokens_support_transformers_5_tokenizer(self):
+        encoder = GermanSentimentEncoder.__new__(GermanSentimentEncoder)
+        encoder._tokenizer = SimpleNamespace(cls_token_id=101, sep_token_id=102)
+        self.assertEqual(encoder._add_special_tokens([7, 8]), [101, 7, 8, 102])
+
+        encoder._tokenizer = SimpleNamespace(
+            build_inputs_with_special_tokens=lambda values: [11, *values, 12],
+            cls_token_id=None,
+            sep_token_id=None,
+        )
+        self.assertEqual(encoder._add_special_tokens([7, 8]), [11, 7, 8, 12])
+
     def test_hugging_face_revisions_are_resolved_to_immutable_commits(self):
         commit = "a" * 40
         with patch(
