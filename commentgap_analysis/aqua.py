@@ -52,6 +52,9 @@ DEFAULT_AQUA_ARTIFACT_MANIFEST = (
     Path(__file__).resolve().parents[1] / "aqua_runtime" / "artifacts.json"
 )
 DEFAULT_AQUA_REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements-aqua-legacy.txt"
+DEFAULT_AQUA_CUDA_REQUIREMENTS = (
+    Path(__file__).resolve().parents[1] / "requirements-aqua-cuda113.txt"
+)
 
 
 @dataclass(frozen=True)
@@ -62,11 +65,13 @@ class AquaBuildConfig:
     runtime_python: Path = DEFAULT_AQUA_RUNTIME_PYTHON
     adapter_root: Path = DEFAULT_AQUA_ADAPTER_ROOT
     artifact_manifest: Path = DEFAULT_AQUA_ARTIFACT_MANIFEST
-    requirements_lock: Path = DEFAULT_AQUA_REQUIREMENTS
+    requirements_lock: Path | None = None
     device: str = "cpu"
     execution_mode: str = "parallel"
     sequential_fallback: bool = True
-    batch_size: int = 8
+    batch_size: int = 64
+    adaptive_batches: bool = True
+    max_batch_tokens: int = 2048
     max_length: int = 512
     allow_incomplete: bool = False
     max_stories: int | None = None
@@ -81,15 +86,24 @@ class AquaBuildConfig:
             "runtime_python",
             "adapter_root",
             "artifact_manifest",
-            "requirements_lock",
         ):
             object.__setattr__(self, name, Path(getattr(self, name)))
         if self.device not in {"cpu", "cuda"}:
             raise ValueError("AQuA device must be explicitly 'cpu' or 'cuda'")
+        requirements_lock = self.requirements_lock
+        if requirements_lock is None:
+            requirements_lock = (
+                DEFAULT_AQUA_CUDA_REQUIREMENTS
+                if self.device == "cuda"
+                else DEFAULT_AQUA_REQUIREMENTS
+            )
+        object.__setattr__(self, "requirements_lock", Path(requirements_lock))
         if self.execution_mode not in {"parallel", "sequential"}:
             raise ValueError("execution_mode must be 'parallel' or 'sequential'")
-        if self.batch_size < 1 or self.max_length < 1:
-            raise ValueError("AQuA batch size and maximum length must be positive")
+        if self.batch_size < 1 or self.max_batch_tokens < 1 or self.max_length < 1:
+            raise ValueError(
+                "AQuA batch size, token budget, and maximum length must be positive"
+            )
         if self.max_stories is not None and self.max_stories < 1:
             raise ValueError("max_stories must be positive")
         if self.progress_every_stories < 1:
@@ -132,6 +146,9 @@ def build_runtime_command(
         execution_mode or config.execution_mode,
         "--batch-size",
         str(config.batch_size),
+        "--adaptive-batches" if config.adaptive_batches else "--no-adaptive-batches",
+        "--max-batch-tokens",
+        str(config.max_batch_tokens),
         "--max-length",
         str(config.max_length),
         "--progress-every-shards",
@@ -338,6 +355,8 @@ def _build_identity(config: AquaBuildConfig, fingerprint: str) -> tuple[str, dic
         "execution_mode": config.execution_mode,
         "sequential_fallback": config.sequential_fallback,
         "batch_size": config.batch_size,
+        "adaptive_batches": config.adaptive_batches,
+        "max_batch_tokens": config.max_batch_tokens,
         "max_length": config.max_length,
         "allow_incomplete": config.allow_incomplete,
         "max_stories": config.max_stories,
@@ -703,6 +722,7 @@ def build_aqua_store(
             "rows": summary.get("rows"),
             "shards": summary.get("shards"),
             "elapsed_seconds": summary.get("elapsed_seconds"),
+            "batching": summary.get("batching"),
             "peak_memory_mib": summary.get("peak_memory_mib"),
             "python": summary.get("python"),
             "platform": summary.get("platform"),
@@ -714,6 +734,9 @@ def build_aqua_store(
         (float(summary.get("peak_memory_mib", 0.0)) for summary in runtime_summaries),
         default=None,
     )
+    validation["batching"] = [
+        summary["batching"] for summary in runtime_summaries if summary.get("batching")
+    ]
     qa_table_path = build_root / "aqua_qa_sample.csv"
     _write_qa_table(shard_paths, qa_table_path)
     validation["qa_table_path"] = str(qa_table_path.resolve())

@@ -28,7 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("aqua_runtime/artifacts.json"),
     )
-    parser.add_argument("--requirements-lock", type=Path, default=Path("requirements-aqua-legacy.txt"))
+    parser.add_argument(
+        "--requirements-lock",
+        type=Path,
+        default=None,
+        help="Runtime lockfile (default: CUDA lock for --device cuda, CPU lock otherwise).",
+    )
     parser.add_argument("--device", choices=("cpu", "cuda"), required=True)
     parser.add_argument("--execution-mode", choices=("parallel", "sequential"), default="parallel")
     parser.add_argument(
@@ -36,7 +41,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not retry an accelerator OOM with deterministic sequential adapters.",
     )
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Maximum adaptive batch size (default: 64).",
+    )
+    parser.add_argument(
+        "--adaptive-batches",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Length-bucket under a padded-token budget (default: enabled).",
+    )
+    parser.add_argument(
+        "--max-batch-tokens",
+        type=int,
+        default=2048,
+        help="Maximum batch-size × capped-token-length budget (default: 2048).",
+    )
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--allow-incomplete", action="store_true")
     parser.add_argument("--max-stories", type=int, default=None)
@@ -64,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         execution_mode=args.execution_mode,
         sequential_fallback=not args.no_sequential_fallback,
         batch_size=args.batch_size,
+        adaptive_batches=args.adaptive_batches,
+        max_batch_tokens=args.max_batch_tokens,
         max_length=args.max_length,
         allow_incomplete=args.allow_incomplete,
         max_stories=args.max_stories,

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from functools import lru_cache
 import gc
 import hashlib
+import inspect
 from importlib.metadata import PackageNotFoundError, version as package_version
 import json
 import math
@@ -184,6 +185,36 @@ def _format_duration(seconds: float) -> str:
     if minutes:
         return f"{minutes}m {secs:02d}s"
     return f"{secs}s"
+
+
+def _identity_signature(identity: dict[str, Any]) -> str:
+    """Return a stable cache identity for one independently reusable stage."""
+    return hashlib.sha256(
+        json.dumps(identity, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _adapter_implementation_signature(adapter: Any) -> str:
+    """Fingerprint one NLP adapter so code changes invalidate only its family."""
+    adapter_type = type(adapter)
+    identity = f"{adapter_type.__module__}.{adapter_type.__qualname__}"
+    try:
+        source = inspect.getsource(adapter_type)
+    except (OSError, TypeError):
+        source = identity
+    return hashlib.sha256(f"{identity}\n{source}".encode("utf-8")).hexdigest()
+
+
+def _functions_implementation_signature(*functions: Any) -> str:
+    parts: list[str] = []
+    for function in functions:
+        identity = f"{function.__module__}.{function.__qualname__}"
+        try:
+            source = inspect.getsource(function)
+        except (OSError, TypeError):
+            source = identity
+        parts.append(f"{identity}\n{source}")
+    return hashlib.sha256("\n---\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def _linux_rss_gib() -> float | None:
@@ -1054,41 +1085,97 @@ def build_analysis_features(
             source_fingerprint=fingerprint,
             require_production=config.inference_mode,
         )
-    config_payload = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in asdict(config).items()
-        if key not in {"overwrite", "output_root"}
-    }
-    config_payload["resolved_similarity_store"] = str(similarity_store)
-    config_payload["similarity_build_signature"] = similarity_manifest["build_signature"]
-    config_payload["aqua_build_signature"] = (
-        aqua_manifest["build_signature"] if aqua_manifest is not None else None
+    lookback_fingerprint = (
+        dataset_fingerprint(config.lookback_root, config.year - 1)
+        if config.lookback_root is not None
+        else None
     )
-    build_signature = hashlib.sha256(
-        json.dumps(config_payload, sort_keys=True).encode("utf-8")
-    ).hexdigest()
-    state_path = config.output_root / "build_state.json"
+    history_identity = {
+        "schema_version": 2,
+        "year": config.year,
+        "target_dataset_fingerprint": fingerprint,
+        "lookback_dataset_fingerprint": lookback_fingerprint,
+        "max_stories": config.max_stories,
+        "discussion_semantics": "strict-prior timestamp batches; one-hour inclusive boundary",
+        "author_semantics": "strict-prior 30-day window; focal article excluded; snapshot votes",
+        "candidate_filter": "Published, non-empty effective_text, non-missing created_at",
+        "implementation_signature": _functions_implementation_signature(
+            compute_discussion_history,
+            compute_author_history,
+        ),
+    }
+    history_signature = _identity_signature(history_identity)
+
+    # The final assembly identity composes independent upstream identities. It
+    # intentionally excludes batch size, device and progress frequency because
+    # those alter execution rather than feature values.
+    build_identity = {
+        "schema_version": 2,
+        "year": config.year,
+        "target_dataset_fingerprint": fingerprint,
+        "history_signature": history_signature,
+        "similarity_build_signature": similarity_manifest["build_signature"],
+        "aqua_build_signature": (
+            aqua_manifest["build_signature"] if aqua_manifest is not None else None
+        ),
+        "sentiment": {
+            "model_id": config.sentiment_model_id,
+            "revision": config.sentiment_revision,
+            "aggregation": "token_weighted_chunk_mean",
+        },
+        "toxicity": {
+            "model_id": config.toxicity_model_id,
+            "revision": config.toxicity_revision,
+            "aggregation": "maximum_and_token_weighted_chunk_mean",
+        },
+        "choice_sets": {
+            "tie_draws": config.tie_draws,
+            "seed": config.seed,
+            "require_page_publication_time": config.require_page_publication_time,
+            "exclude_january_without_lookback": config.exclude_january_without_lookback,
+        },
+        "inference_mode": config.inference_mode,
+        "nlp_mode": config.nlp_mode,
+        "max_stories": config.max_stories,
+        "local_feature_implementation_signature": _functions_implementation_signature(
+            word_count,
+            cttr,
+            smog_de,
+            vienna_period,
+            _length_residual,
+            _prepare_model_columns,
+            assign_audience_labels,
+        ),
+    }
+    build_signature = _identity_signature(build_identity)
+    state_path = (
+        config.output_root
+        / "build_states"
+        / f"build={build_signature[:12]}.json"
+    )
     if state_path.exists():
         previous = json.loads(state_path.read_text())
         if previous.get("dataset_fingerprint") != fingerprint and not config.overwrite:
-            raise RuntimeError(
-                "Input collection changed since checkpoints were created; use a new output "
-                "directory or set overwrite=True"
-            )
-        if previous.get("build_signature") != build_signature and not config.overwrite:
-            raise RuntimeError(
-                "Feature-build configuration changed; use a new output directory or "
-                "set overwrite=True"
-            )
+            raise RuntimeError("The matching feature-build state has a different dataset fingerprint")
     watermark = "INFERENCE" if config.inference_mode else "PILOT_NOT_FOR_INFERENCE"
     state = {
         "status": "running",
         "dataset_fingerprint": fingerprint,
         "build_signature": build_signature,
+        "build_identity": build_identity,
+        "history_signature": history_signature,
+        "history_identity": history_identity,
         "watermark": watermark,
         "config": {key: str(value) if isinstance(value, Path) else value for key, value in asdict(config).items()},
     }
+    legacy_state_path = config.output_root / "build_state.json"
+    legacy_state = (
+        json.loads(legacy_state_path.read_text())
+        if legacy_state_path.exists()
+        else None
+    )
     _atomic_json(state, state_path)
+    _atomic_json(state, legacy_state_path)
 
     comment_columns = [
         "comment_id",
@@ -1151,8 +1238,36 @@ def build_analysis_features(
     history_checkpoint_root = (
         config.output_root
         / "history_checkpoints"
-        / f"build={build_signature[:8]}-{fingerprint[:8]}"
+        / f"build={history_signature[:12]}-{fingerprint[:8]}"
     )
+    # One-time compatibility bridge for checkpoints produced before cache
+    # identities were split by feature family.
+    if legacy_state and not history_checkpoint_root.exists():
+        legacy_config = legacy_state.get("config", {})
+        legacy_signature = str(legacy_state.get("build_signature", ""))
+        same_history_inputs = (
+            legacy_state.get("dataset_fingerprint") == fingerprint
+            and legacy_config.get("year") == config.year
+            and legacy_config.get("max_stories") == config.max_stories
+            and str(legacy_config.get("lookback_root"))
+            == str(config.lookback_root)
+        )
+        legacy_history_root = (
+            config.output_root
+            / "history_checkpoints"
+            / f"build={legacy_signature[:8]}-{fingerprint[:8]}"
+        )
+        if (
+            same_history_inputs
+            and (legacy_history_root / "discussion_history.parquet").exists()
+            and (legacy_history_root / "author_history.parquet").exists()
+        ):
+            history_checkpoint_root = legacy_history_root
+            print(
+                "Feature stage: adopting compatible legacy history checkpoints | "
+                f"path={history_checkpoint_root}",
+                flush=True,
+            )
     discussion_checkpoint = history_checkpoint_root / "discussion_history.parquet"
     author_checkpoint = history_checkpoint_root / "author_history.parquet"
     discussion_feature_columns = [
@@ -1417,6 +1532,65 @@ def build_analysis_features(
         flush=True,
     )
 
+    sentiment_identity = {
+        "schema_version": 1,
+        "year": config.year,
+        "dataset_fingerprint": fingerprint,
+        "candidate_filter": "Published, non-empty effective_text, non-missing created_at",
+        "model_id": sentiment_encoder.model_id,
+        "resolved_revision": getattr(sentiment_encoder, "resolved_revision", "unresolved"),
+        "adapter_implementation_signature": _adapter_implementation_signature(
+            sentiment_encoder
+        ),
+        "aggregation": "token_weighted_chunk_mean",
+        "chunk_tokens": getattr(sentiment_encoder, "chunk_tokens", None),
+        "columns": ["sentiment_positive", "sentiment_negative", "sentiment_neutral"],
+        "max_stories": config.max_stories,
+    }
+    toxicity_identity = {
+        "schema_version": 1,
+        "year": config.year,
+        "dataset_fingerprint": fingerprint,
+        "candidate_filter": "Published, non-empty effective_text, non-missing created_at",
+        "model_id": toxicity_encoder.model_id,
+        "resolved_revision": getattr(toxicity_encoder, "resolved_revision", "unresolved"),
+        "adapter_implementation_signature": _adapter_implementation_signature(
+            toxicity_encoder
+        ),
+        "aggregation": "maximum_and_token_weighted_chunk_mean",
+        "chunk_tokens": getattr(toxicity_encoder, "chunk_tokens", None),
+        "columns": ["toxicity_probability", "toxicity_mean_probability"],
+        "max_stories": config.max_stories,
+    }
+    sentiment_signature = _identity_signature(sentiment_identity)
+    toxicity_signature = _identity_signature(toxicity_identity)
+    build_identity["sentiment"]["feature_family_signature"] = sentiment_signature
+    build_identity["toxicity"]["feature_family_signature"] = toxicity_signature
+    build_signature = _identity_signature(build_identity)
+    state["build_signature"] = build_signature
+    state["build_identity"] = build_identity
+    state_path = (
+        config.output_root
+        / "build_states"
+        / f"build={build_signature[:12]}.json"
+    )
+    _atomic_json(state, state_path)
+    _atomic_json(state, config.output_root / "build_state.json")
+    sentiment_checkpoint_root = (
+        config.output_root
+        / "feature_families"
+        / "sentiment"
+        / f"build={sentiment_signature[:12]}-{fingerprint[:8]}"
+        / f"year={config.year}"
+    )
+    toxicity_checkpoint_root = (
+        config.output_root
+        / "feature_families"
+        / "toxicity"
+        / f"build={toxicity_signature[:12]}-{fingerprint[:8]}"
+        / f"year={config.year}"
+    )
+
     checkpoint_root = (
         config.output_root
         / "scalar_features"
@@ -1430,6 +1604,10 @@ def build_analysis_features(
     new_candidates = 0
     written_stories = 0
     skipped_stories = 0
+    sentiment_written = 0
+    sentiment_reused = 0
+    toxicity_written = 0
+    toxicity_reused = 0
     stage_started = time.monotonic()
     print(
         "Feature stage: sentiment, toxicity, semantic joins, and scalar checkpoints | "
@@ -1458,14 +1636,63 @@ def build_analysis_features(
             continue
         story = story.sort_values(["created_at", "comment_id"]).copy()
         texts = story["effective_text"].astype(str).tolist()
-        sentiments = sentiment_encoder.predict(texts, config.sentiment_batch_size)
-        if sentiments.shape != (len(story), 3):
-            raise ValueError("Sentiment encoder returned an unexpected shape")
-        story[["sentiment_positive", "sentiment_negative", "sentiment_neutral"]] = sentiments
-        toxicities = toxicity_encoder.predict(texts, config.toxicity_batch_size)
-        if toxicities.shape != (len(story), 2):
-            raise ValueError("Toxicity encoder returned an unexpected shape")
-        story[["toxicity_probability", "toxicity_mean_probability"]] = toxicities
+        family_key_columns = ["story_id", "comment_id"]
+        sentiment_columns = [
+            "sentiment_positive",
+            "sentiment_negative",
+            "sentiment_neutral",
+        ]
+        sentiment_path = (
+            sentiment_checkpoint_root / f"month={month:02d}" / f"{story_id}.parquet"
+        )
+        if sentiment_path.exists() and not config.overwrite:
+            sentiment_frame = pd.read_parquet(
+                sentiment_path, columns=family_key_columns + sentiment_columns
+            )
+            sentiment_reused += 1
+        else:
+            sentiments = sentiment_encoder.predict(texts, config.sentiment_batch_size)
+            if sentiments.shape != (len(story), 3):
+                raise ValueError("Sentiment encoder returned an unexpected shape")
+            sentiment_frame = story[family_key_columns].copy()
+            sentiment_frame[sentiment_columns] = sentiments
+            _atomic_parquet(sentiment_frame, sentiment_path)
+            sentiment_written += 1
+
+        toxicity_columns = ["toxicity_probability", "toxicity_mean_probability"]
+        toxicity_path = (
+            toxicity_checkpoint_root / f"month={month:02d}" / f"{story_id}.parquet"
+        )
+        if toxicity_path.exists() and not config.overwrite:
+            toxicity_frame = pd.read_parquet(
+                toxicity_path, columns=family_key_columns + toxicity_columns
+            )
+            toxicity_reused += 1
+        else:
+            toxicities = toxicity_encoder.predict(texts, config.toxicity_batch_size)
+            if toxicities.shape != (len(story), 2):
+                raise ValueError("Toxicity encoder returned an unexpected shape")
+            toxicity_frame = story[family_key_columns].copy()
+            toxicity_frame[toxicity_columns] = toxicities
+            _atomic_parquet(toxicity_frame, toxicity_path)
+            toxicity_written += 1
+
+        for family_name, family_frame, family_columns in (
+            ("sentiment", sentiment_frame, sentiment_columns),
+            ("toxicity", toxicity_frame, toxicity_columns),
+        ):
+            if family_frame.duplicated(family_key_columns).any():
+                raise ValueError(f"Duplicate {family_name} keys for story {story_id}")
+            before = len(story)
+            story = story.merge(
+                family_frame,
+                on=family_key_columns,
+                how="left",
+                validate="one_to_one",
+            )
+            if len(story) != before or story[family_columns].isna().any().any():
+                raise ValueError(f"Incomplete {family_name} feature join for story {story_id}")
+        del sentiment_frame, toxicity_frame
         similarity_path = (
             similarity_store
             / "scalars"
@@ -1513,9 +1740,38 @@ def build_analysis_features(
                 detail=(
                     f"candidates={processed_candidates:,}/{total_candidates:,} "
                     f"new_rows={new_candidates:,} written={written_stories:,} "
-                    f"skipped={skipped_stories:,}"
+                    f"skipped={skipped_stories:,} "
+                    f"sentiment(new/reused)={sentiment_written:,}/{sentiment_reused:,} "
+                    f"toxicity(new/reused)={toxicity_written:,}/{toxicity_reused:,}"
                 ),
             )
+
+    sentiment_manifest = {
+        "status": "complete",
+        "build_signature": sentiment_signature,
+        "identity": sentiment_identity,
+        "root": str(sentiment_checkpoint_root),
+        "files": total_stories,
+        "rows": total_candidates,
+        "new_story_checkpoints": sentiment_written,
+        "reused_story_checkpoints": sentiment_reused,
+    }
+    toxicity_manifest = {
+        "status": "complete",
+        "build_signature": toxicity_signature,
+        "identity": toxicity_identity,
+        "root": str(toxicity_checkpoint_root),
+        "files": total_stories,
+        "rows": total_candidates,
+        "new_story_checkpoints": toxicity_written,
+        "reused_story_checkpoints": toxicity_reused,
+    }
+    _atomic_json(sentiment_manifest, sentiment_checkpoint_root.parent / "manifest.json")
+    _atomic_json(toxicity_manifest, toxicity_checkpoint_root.parent / "manifest.json")
+    state.setdefault("stages", {})["sentiment"] = sentiment_manifest
+    state.setdefault("stages", {})["toxicity"] = toxicity_manifest
+    _atomic_json(state, state_path)
+    _atomic_json(state, config.output_root / "build_state.json")
 
     import pyarrow.dataset as ds
 
@@ -1564,12 +1820,16 @@ def build_analysis_features(
         "sentiment_model": sentiment_encoder.model_id,
         "sentiment_revision": getattr(sentiment_encoder, "resolved_revision", "unresolved"),
         "sentiment_aggregation": "token_weighted_chunk_mean",
+        "sentiment_feature_store": str(sentiment_checkpoint_root),
+        "sentiment_build_signature": sentiment_signature,
         "toxicity_model": toxicity_encoder.model_id,
         "toxicity_revision": getattr(toxicity_encoder, "resolved_revision", "unresolved"),
         "toxicity_aggregation": {
             "toxicity_probability": "maximum_chunk_probability",
             "toxicity_mean_probability": "token_weighted_chunk_mean",
         },
+        "toxicity_feature_store": str(toxicity_checkpoint_root),
+        "toxicity_build_signature": toxicity_signature,
         "embedding_model": similarity_manifest["embedding_model"]["model_id"],
         "embedding_revision": similarity_manifest["embedding_model"]["resolved_revision"],
         "similarity_store": str(similarity_store),
@@ -1624,17 +1884,20 @@ def build_analysis_features(
             "elapsed_seconds": time.monotonic() - build_started,
             "new_story_checkpoints": written_stories,
             "skipped_story_checkpoints": skipped_stories,
+            "sentiment_story_checkpoints_written": sentiment_written,
+            "sentiment_story_checkpoints_reused": sentiment_reused,
+            "toxicity_story_checkpoints_written": toxicity_written,
+            "toxicity_story_checkpoints_reused": toxicity_reused,
         },
     }
     _atomic_json(summary, config.output_root / "provenance_manifest.json")
-    _atomic_json(
-        {
-            **state,
-            "status": "complete",
-            "manifest": str(config.output_root / "provenance_manifest.json"),
-        },
-        state_path,
-    )
+    completed_state = {
+        **state,
+        "status": "complete",
+        "manifest": str(config.output_root / "provenance_manifest.json"),
+    }
+    _atomic_json(completed_state, state_path)
+    _atomic_json(completed_state, config.output_root / "build_state.json")
     print(
         "Feature build complete: "
         f"elapsed={_format_duration(time.monotonic() - build_started)} "

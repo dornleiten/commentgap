@@ -7,7 +7,12 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from aqua_runtime.model import predictions_to_frame, validate_adapter_artifacts
+from aqua_runtime.model import (
+    AquaModel,
+    plan_length_aware_batches,
+    predictions_to_frame,
+    validate_adapter_artifacts,
+)
 from aqua_runtime.schema import (
     AQUA_FEATURES,
     AQUA_SCORE_MAX,
@@ -60,6 +65,74 @@ def _fixture_output(build_signature="b" * 64, watermark="PRODUCTION"):
 
 
 class AquaAnalysisTests(unittest.TestCase):
+    def test_length_aware_batch_plan_respects_row_and_token_limits(self):
+        lengths = np.asarray([90, 10, 80, 20, 70, 30])
+        batches = plan_length_aware_batches(
+            lengths,
+            max_batch_size=4,
+            max_batch_tokens=120,
+            adaptive=True,
+        )
+        self.assertEqual([batch.tolist() for batch in batches], [[1, 3, 5], [4], [2], [0]])
+        self.assertEqual(
+            sorted(index for batch in batches for index in batch.tolist()),
+            list(range(len(lengths))),
+        )
+        for batch in batches:
+            self.assertLessEqual(len(batch), 4)
+            if len(batch) > 1:
+                self.assertLessEqual(len(batch) * int(lengths[batch].max()), 120)
+
+    def test_adaptive_prediction_restores_order_and_splits_cuda_oom(self):
+        lengths = [90, 10, 80, 20, 70, 30]
+
+        class FixtureTokenizer:
+            def __call__(self, texts, *, return_tensors=None, **kwargs):
+                identifiers = [int(text.removeprefix("row")) for text in texts]
+                if return_tensors is not None:
+                    return {"row_ids": np.asarray(identifiers)}
+                return {
+                    "input_ids": [list(range(lengths[index])) for index in identifiers]
+                }
+
+        model = AquaModel.__new__(AquaModel)
+        model.features = (AQUA_FEATURES[0],)
+        model.device = "cuda"
+        model.max_length = 512
+        model._tokenizer = FixtureTokenizer()
+        cleared = []
+        model._torch = SimpleNamespace(
+            cuda=SimpleNamespace(empty_cache=lambda: cleared.append(True))
+        )
+        attempted_batches = []
+
+        def fixture_logits(encoded):
+            identifiers = encoded["row_ids"]
+            attempted_batches.append(identifiers.tolist())
+            if len(identifiers) > 2:
+                raise RuntimeError("CUDA out of memory")
+            values = np.zeros((len(identifiers), 4), dtype=np.float32)
+            values[:, 0] = identifiers
+            return [values]
+
+        model._batch_logits = fixture_logits
+        logits, token_counts, truncated, diagnostics = model.predict(
+            [f"row{index}" for index in range(len(lengths))],
+            batch_size=4,
+            adaptive_batches=True,
+            max_batch_tokens=400,
+            return_diagnostics=True,
+        )
+        np.testing.assert_array_equal(token_counts, lengths)
+        np.testing.assert_array_equal(truncated, np.zeros(len(lengths), dtype=bool))
+        np.testing.assert_array_equal(
+            logits[AQUA_FEATURES[0].stem][:, 0], np.arange(len(lengths))
+        )
+        self.assertEqual(diagnostics["oom_backoffs"], 1)
+        self.assertEqual(diagnostics["executed_batches"], 3)
+        self.assertEqual(len(cleared), 1)
+        self.assertEqual(attempted_batches[0], [1, 3, 5, 4])
+
     def test_canonical_schema_and_published_extrema_are_locked(self):
         self.assertEqual(len(AQUA_FEATURES), 20)
         self.assertEqual([feature.order for feature in AQUA_FEATURES], list(range(1, 21)))
@@ -186,6 +259,8 @@ class AquaAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(command[:3], ["/isolated/python", "-m", "aqua_runtime.cli"])
         self.assertEqual(command[command.index("--device") + 1], "cuda")
+        self.assertIn("--adaptive-batches", command)
+        self.assertEqual(command[command.index("--max-batch-tokens") + 1], "2048")
         self.assertIn("--artifact-manifest", command)
         self.assertIn("--build-signature", command)
         jobs_command = build_runtime_command(
@@ -197,6 +272,17 @@ class AquaAnalysisTests(unittest.TestCase):
         )
         self.assertIn("--job-manifest", jobs_command)
         self.assertNotIn("--input", jobs_command)
+
+    def test_default_requirements_lock_matches_requested_device(self):
+        cpu = AquaBuildConfig(device="cpu")
+        cuda = AquaBuildConfig(device="cuda")
+        self.assertEqual(cpu.requirements_lock.name, "requirements-aqua-legacy.txt")
+        self.assertEqual(cuda.requirements_lock.name, "requirements-aqua-cuda113.txt")
+
+        explicit = AquaBuildConfig(
+            device="cuda", requirements_lock=Path("requirements-aqua-legacy.txt")
+        )
+        self.assertEqual(explicit.requirements_lock, Path("requirements-aqua-legacy.txt"))
 
     def test_parity_verifier_compares_upstream_hard_outputs_and_runtime_logits(self):
         with tempfile.TemporaryDirectory() as temporary:

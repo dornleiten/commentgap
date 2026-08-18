@@ -8,6 +8,8 @@ import pandas as pd
 from commentgap_analysis.features import (
     ROOT_MODEL_FEATURES,
     FeatureBuildConfig,
+    _adapter_implementation_signature,
+    _identity_signature,
     article_similarity_top3,
     assign_audience_labels,
     compute_author_history,
@@ -30,6 +32,31 @@ from commentgap_analysis.nlp import (
 
 
 class AnalysisFeatureTests(unittest.TestCase):
+    def test_feature_family_cache_identities_are_isolated(self):
+        class SentimentAdapter:
+            pass
+
+        class ToxicityAdapterV1:
+            pass
+
+        class ToxicityAdapterV2:
+            changed = True
+
+        sentiment = _adapter_implementation_signature(SentimentAdapter())
+        toxicity_v1 = _adapter_implementation_signature(ToxicityAdapterV1())
+        toxicity_v2 = _adapter_implementation_signature(ToxicityAdapterV2())
+        self.assertNotEqual(toxicity_v1, toxicity_v2)
+        history = _identity_signature({"data": "same", "semantics": 1})
+        first = {
+            "history": history,
+            "sentiment": sentiment,
+            "toxicity": toxicity_v1,
+        }
+        second = {**first, "toxicity": toxicity_v2}
+        self.assertEqual(first["history"], second["history"])
+        self.assertEqual(first["sentiment"], second["sentiment"])
+        self.assertNotEqual(_identity_signature(first), _identity_signature(second))
+
     def test_sentiment_special_tokens_support_transformers_5_tokenizer(self):
         encoder = XLMTwitterSentimentEncoder.__new__(XLMTwitterSentimentEncoder)
         encoder._tokenizer = SimpleNamespace(cls_token_id=101, sep_token_id=102)

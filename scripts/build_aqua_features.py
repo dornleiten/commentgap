@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository-local entry point for the isolated AQuA feature store."""
+"""Repository-local main-environment entry point for the AQuA feature store."""
 
 from __future__ import annotations
 

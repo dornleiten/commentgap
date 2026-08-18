@@ -250,6 +250,20 @@ python3.10 -m venv .venv-aqua
 .venv-aqua/bin/python -m pip install -r requirements-aqua-cuda113.txt
 ```
 
+Do not install the CommentGap package into `.venv-aqua`: that environment is
+intentionally Python 3.10, while the main package requires Python 3.11 or
+newer. Run the orchestrator from the normal analysis environment and point it
+at the isolated interpreter. For example, if the main environment is `.venv`:
+
+```bash
+deactivate  # if .venv-aqua is currently active
+source .venv/bin/activate
+python -m pip install -e .
+
+# Optional A5000 preflight: this must print True and identify the GPU.
+.venv-aqua/bin/python -c 'import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CUDA unavailable")'
+```
+
 Place the exact upstream checkout at
 `.cache/aqua-upstream-637914d/`; the runtime expects its adapters under
 `trained adapters/` and verifies every file before loading a model. A pilot
@@ -257,6 +271,21 @@ before upstream parity has been frozen must be explicitly watermarked:
 
 ```bash
 commentgap-aqua \
+  --runtime-python .venv-aqua/bin/python \
+  --device cuda \
+  --max-stories 20 \
+  --allow-unverified-parity
+```
+
+`--device cuda` automatically records `requirements-aqua-cuda113.txt` in the
+build identity; CPU runs record `requirements-aqua-legacy.txt`. An explicit
+`--requirements-lock` overrides this selection.
+
+The same pilot can be launched without installing the console entry point:
+
+```bash
+python scripts/build_aqua_features.py \
+  --runtime-python .venv-aqua/bin/python \
   --device cuda \
   --max-stories 20 \
   --allow-unverified-parity
@@ -265,6 +294,27 @@ commentgap-aqua \
 The default parallel composition automatically retries a story sequentially
 if the accelerator reports an out-of-memory error. Use
 `--execution-mode sequential` to select the lower-memory path from the start.
+Inference uses adaptive length-aware batches by default: comments are stably
+sorted by capped tokenizer length within each story, packed subject to both a
+64-row ceiling and a 2,048 padded-token budget, and restored to source order by
+key before output. A CUDA OOM splits only the failing batch and retries its two
+halves. Runtime summaries record planned/executed batch sizes, padding, and OOM
+backoffs. Tune the ceilings with `--batch-size` and `--max-batch-tokens`; use
+`--no-adaptive-batches` for a fixed-row compatibility run.
+
+The conservative A5000 defaults therefore permit large batches of short
+comments while limiting a 512-token batch to four rows:
+
+```bash
+commentgap-aqua \
+  --runtime-python .venv-aqua/bin/python \
+  --device cuda \
+  --batch-size 64 \
+  --max-batch-tokens 2048 \
+  --max-stories 20 \
+  --allow-unverified-parity
+```
+
 Production builds fail closed until `commentgap-aqua-parity` verifies the
 upstream hard labels and published score, repeated CPU and sequential logits,
 and updates `aqua_runtime/artifacts.json` with the fixture hash.

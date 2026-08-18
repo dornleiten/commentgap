@@ -52,7 +52,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact-manifest", type=Path, required=True)
     parser.add_argument("--device", choices=("cpu", "cuda"), required=True)
     parser.add_argument("--execution-mode", choices=("parallel", "sequential"), default="parallel")
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Maximum rows per adaptive batch, or exact row batch size in fixed mode.",
+    )
+    parser.add_argument(
+        "--adaptive-batches",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Length-bucket rows under a padded-token budget (default: enabled).",
+    )
+    parser.add_argument(
+        "--max-batch-tokens",
+        type=int,
+        default=2048,
+        help="Maximum batch rows multiplied by the longest capped token length.",
+    )
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--progress-every-shards", type=int, default=25)
     parser.add_argument("--adapter", action="append", default=None)
@@ -64,8 +81,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     args = build_parser().parse_args(argv)
-    if args.batch_size < 1 or args.max_length < 1 or args.progress_every_shards < 1:
-        raise ValueError("batch size, maximum length, and progress interval must be positive")
+    if (
+        args.batch_size < 1
+        or args.max_batch_tokens < 1
+        or args.max_length < 1
+        or args.progress_every_shards < 1
+    ):
+        raise ValueError(
+            "batch size, token budget, maximum length, and progress interval "
+            "must be positive"
+        )
     if (args.job_manifest is None) == (args.input is None):
         raise ValueError("Specify either --input/--output or --job-manifest")
     if args.input is not None and args.output is None:
@@ -95,6 +120,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     total_rows = 0
     total_truncated = 0
+    batching_totals = {
+        "planned_batches": 0,
+        "executed_batches": 0,
+        "oom_backoffs": 0,
+        "effective_unpadded_tokens": 0,
+        "planned_padded_tokens": 0,
+        "executed_padded_tokens": 0,
+    }
+    minimum_executed_batch_size: int | None = None
+    maximum_executed_batch_size = 0
     for job_index, job in enumerate(jobs, start=1):
         job_started = time.monotonic()
         input_path = Path(job["input"])
@@ -113,8 +148,12 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("AQuA input contains empty comment text")
         if not text.map(text_hash).eq(source["effective_text_hash"]).all():
             raise ValueError("AQuA input contains an invalid effective_text_hash")
-        logits, token_counts, truncated = model.predict(
-            text.tolist(), args.batch_size
+        logits, token_counts, truncated, batching = model.predict(
+            text.tolist(),
+            args.batch_size,
+            adaptive_batches=args.adaptive_batches,
+            max_batch_tokens=args.max_batch_tokens,
+            return_diagnostics=True,
         )
         output = predictions_to_frame(
             source[["story_id", "comment_id", "effective_text_hash"]],
@@ -128,6 +167,19 @@ def main(argv: list[str] | None = None) -> int:
         _atomic_parquet(output, output_path)
         total_rows += len(output)
         total_truncated += int(output["aqua_input_truncated"].sum())
+        for key in batching_totals:
+            batching_totals[key] += int(batching[key])
+        job_minimum = int(batching["minimum_executed_batch_size"])
+        if job_minimum:
+            minimum_executed_batch_size = (
+                job_minimum
+                if minimum_executed_batch_size is None
+                else min(minimum_executed_batch_size, job_minimum)
+            )
+        maximum_executed_batch_size = max(
+            maximum_executed_batch_size,
+            int(batching["maximum_executed_batch_size"]),
+        )
         _atomic_json(
             {
                 "rows": len(output),
@@ -136,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
                 "device": args.device,
                 "execution_mode": args.execution_mode,
                 "batch_size": args.batch_size,
+                "batching": batching,
                 "job_index": job_index,
                 "jobs": len(jobs),
                 "build_signature": args.build_signature,
@@ -149,12 +202,37 @@ def main(argv: list[str] | None = None) -> int:
                 f"rows={total_rows:,}",
                 flush=True,
             )
+    executed_padded_tokens = batching_totals["executed_padded_tokens"]
+    batching_summary = {
+        "strategy": (
+            "length_bucketed_token_budget"
+            if args.adaptive_batches
+            else "fixed_rows"
+        ),
+        "max_batch_size": args.batch_size,
+        "max_batch_tokens": args.max_batch_tokens if args.adaptive_batches else None,
+        **batching_totals,
+        "minimum_executed_batch_size": minimum_executed_batch_size or 0,
+        "maximum_executed_batch_size": maximum_executed_batch_size,
+        "mean_executed_batch_size": (
+            total_rows / batching_totals["executed_batches"]
+            if batching_totals["executed_batches"]
+            else 0.0
+        ),
+        "executed_padding_fraction": (
+            1.0
+            - batching_totals["effective_unpadded_tokens"] / executed_padded_tokens
+            if executed_padded_tokens
+            else 0.0
+        ),
+    }
     summary = {
         "rows": total_rows,
         "shards": len(jobs),
         "device": args.device,
         "execution_mode": args.execution_mode,
         "batch_size": args.batch_size,
+        "batching": batching_summary,
         "max_length": args.max_length,
         "truncated_rows": total_truncated,
         "elapsed_seconds": time.monotonic() - started,

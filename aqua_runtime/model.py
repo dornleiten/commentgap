@@ -29,6 +29,48 @@ from .schema import (
 )
 
 
+def plan_length_aware_batches(
+    effective_lengths: np.ndarray,
+    *,
+    max_batch_size: int,
+    max_batch_tokens: int,
+    adaptive: bool,
+) -> list[np.ndarray]:
+    """Plan stable keyed batches, optionally sorting by capped token length."""
+    lengths = np.asarray(effective_lengths, dtype=np.int64)
+    if lengths.ndim != 1:
+        raise ValueError("AQuA token lengths must be one-dimensional")
+    if max_batch_size < 1 or max_batch_tokens < 1:
+        raise ValueError("AQuA batch limits must be positive")
+    if not len(lengths):
+        return []
+    if (lengths < 1).any():
+        raise ValueError("AQuA token lengths must be positive")
+    if not adaptive:
+        indices = np.arange(len(lengths), dtype=np.int64)
+        return [
+            indices[start : start + max_batch_size]
+            for start in range(0, len(indices), max_batch_size)
+        ]
+
+    order = np.argsort(lengths, kind="stable")
+    batches: list[np.ndarray] = []
+    current: list[int] = []
+    for raw_index in order:
+        index = int(raw_index)
+        proposed_size = len(current) + 1
+        proposed_tokens = proposed_size * int(lengths[index])
+        if current and (
+            proposed_size > max_batch_size or proposed_tokens > max_batch_tokens
+        ):
+            batches.append(np.asarray(current, dtype=np.int64))
+            current = []
+        current.append(index)
+    if current:
+        batches.append(np.asarray(current, dtype=np.int64))
+    return batches
+
+
 def load_artifact_manifest(path: Path) -> dict:
     manifest = json.loads(Path(path).read_text())
     if manifest.get("base_model", {}).get("revision") != AQUA_BASE_MODEL_REVISION:
@@ -155,23 +197,47 @@ class AquaModel:
             logits.append(output.logits.detach().cpu().numpy())
         return logits
 
-    def predict(self, texts: list[str], batch_size: int) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray]:
-        all_logits: dict[str, list[np.ndarray]] = {
-            feature.stem: [] for feature in self.features
-        }
-        token_counts: list[int] = []
-        truncated: list[bool] = []
-        for start in range(0, len(texts), batch_size):
-            batch_texts = texts[start : start + batch_size]
-            untruncated = self._tokenizer(
-                batch_texts,
+    def _token_lengths(self, texts: list[str], chunk_size: int = 1024) -> np.ndarray:
+        lengths: list[int] = []
+        for start in range(0, len(texts), chunk_size):
+            encoded = self._tokenizer(
+                texts[start : start + chunk_size],
                 add_special_tokens=True,
                 truncation=False,
                 padding=False,
             )
-            lengths = [len(values) for values in untruncated["input_ids"]]
-            token_counts.extend(lengths)
-            truncated.extend(length > self.max_length for length in lengths)
+            lengths.extend(len(values) for values in encoded["input_ids"])
+        return np.asarray(lengths, dtype=np.int32)
+
+    def predict(
+        self,
+        texts: list[str],
+        batch_size: int,
+        *,
+        adaptive_batches: bool = False,
+        max_batch_tokens: int = 2048,
+        return_diagnostics: bool = False,
+    ):
+        token_counts = self._token_lengths(texts)
+        truncated = token_counts > self.max_length
+        effective_lengths = np.minimum(token_counts, self.max_length)
+        batches = plan_length_aware_batches(
+            effective_lengths,
+            max_batch_size=batch_size,
+            max_batch_tokens=max_batch_tokens,
+            adaptive=adaptive_batches,
+        )
+        planned_batches = [batch.copy() for batch in batches]
+        all_logits = {
+            feature.stem: np.empty((len(texts), 4), dtype=np.float32)
+            for feature in self.features
+        }
+        completed_batches: list[np.ndarray] = []
+        oom_backoffs = 0
+        position = 0
+        while position < len(batches):
+            batch_indices = batches[position]
+            batch_texts = [texts[int(index)] for index in batch_indices]
             encoded = self._tokenizer(
                 batch_texts,
                 add_special_tokens=True,
@@ -180,18 +246,66 @@ class AquaModel:
                 padding=True,
                 return_tensors="pt",
             )
-            batch_logits = self._batch_logits(encoded)
+            try:
+                batch_logits = self._batch_logits(encoded)
+            except RuntimeError as error:
+                is_cuda_oom = self.device == "cuda" and "out of memory" in str(error).lower()
+                if not is_cuda_oom or len(batch_indices) == 1:
+                    raise
+                del encoded
+                self._torch.cuda.empty_cache()
+                midpoint = len(batch_indices) // 2
+                batches[position : position + 1] = [
+                    batch_indices[:midpoint],
+                    batch_indices[midpoint:],
+                ]
+                oom_backoffs += 1
+                print(
+                    "AQuA adaptive batching: CUDA OOM at "
+                    f"rows={len(batch_indices)}; retrying as "
+                    f"{midpoint}+{len(batch_indices) - midpoint}",
+                    flush=True,
+                )
+                continue
             for feature, values in zip(self.features, batch_logits):
                 if values.ndim != 2 or values.shape[1] != 4:
                     raise RuntimeError(
                         f"Adapter {feature.repository_adapter} returned shape {values.shape}"
                     )
-                all_logits[feature.stem].append(values)
-        return (
-            {stem: np.concatenate(values, axis=0) for stem, values in all_logits.items()},
-            np.asarray(token_counts, dtype=np.int32),
-            np.asarray(truncated, dtype=bool),
-        )
+                all_logits[feature.stem][batch_indices] = values
+            completed_batches.append(batch_indices)
+            position += 1
+
+        def padded_tokens(items: list[np.ndarray]) -> int:
+            return int(
+                sum(
+                    len(batch) * int(effective_lengths[batch].max())
+                    for batch in items
+                    if len(batch)
+                )
+            )
+
+        executed_sizes = [len(batch) for batch in completed_batches]
+        diagnostics = {
+            "strategy": (
+                "length_bucketed_token_budget" if adaptive_batches else "fixed_rows"
+            ),
+            "max_batch_size": batch_size,
+            "max_batch_tokens": max_batch_tokens if adaptive_batches else None,
+            "planned_batches": len(planned_batches),
+            "executed_batches": len(completed_batches),
+            "oom_backoffs": oom_backoffs,
+            "minimum_executed_batch_size": min(executed_sizes, default=0),
+            "maximum_executed_batch_size": max(executed_sizes, default=0),
+            "mean_executed_batch_size": (
+                float(np.mean(executed_sizes)) if executed_sizes else 0.0
+            ),
+            "effective_unpadded_tokens": int(effective_lengths.sum()),
+            "planned_padded_tokens": padded_tokens(planned_batches),
+            "executed_padded_tokens": padded_tokens(completed_batches),
+        }
+        result = (all_logits, token_counts, truncated)
+        return (*result, diagnostics) if return_diagnostics else result
 
 
 def predictions_to_frame(
