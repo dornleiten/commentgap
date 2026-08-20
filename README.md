@@ -294,13 +294,21 @@ python scripts/build_aqua_features.py \
 The default parallel composition automatically retries a story sequentially
 if the accelerator reports an out-of-memory error. Use
 `--execution-mode sequential` to select the lower-memory path from the start.
-Inference uses adaptive length-aware batches by default: comments are stably
-sorted by capped tokenizer length within each story, packed subject to both a
-64-row ceiling and a 2,048 padded-token budget, and restored to source order by
-key before output. A CUDA OOM splits only the failing batch and retries its two
-halves. Runtime summaries record planned/executed batch sizes, padding, and OOM
-backoffs. Tune the ceilings with `--batch-size` and `--max-batch-tokens`; use
-`--no-adaptive-batches` for a fixed-row compatibility run.
+Inference uses adaptive length-aware batches by default. Pending story shards
+are pooled into bounded cross-story windows of at most 100 stories or 50,000
+comments, then comments are stably sorted by capped tokenizer length across the
+window. Batches are packed subject to both a 64-row ceiling and a 2,048
+padded-token budget, and predictions are restored by key to the original
+per-story checkpoints. The window bounds limit ordinary RAM; the row/token
+batch bounds limit GPU memory. A story larger than the row window remains one
+atomic window and is never split across checkpoints.
+
+A CUDA OOM splits only the failing GPU batch and retries its two halves.
+Runtime summaries record window sizes, planned/executed batch sizes, padding,
+and OOM backoffs. Tune the GPU ceilings with `--batch-size` and
+`--max-batch-tokens`, and the ordinary-RAM/resume tradeoff with
+`--window-max-stories` and `--window-max-rows`. Use `--no-adaptive-batches` for
+a fixed-row compatibility run.
 
 The conservative A5000 defaults therefore permit large batches of short
 comments while limiting a 512-token batch to four rows:
@@ -311,6 +319,8 @@ commentgap-aqua \
   --device cuda \
   --batch-size 64 \
   --max-batch-tokens 2048 \
+  --window-max-stories 100 \
+  --window-max-rows 50000 \
   --max-stories 20 \
   --allow-unverified-parity
 ```

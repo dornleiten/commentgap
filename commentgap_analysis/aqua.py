@@ -72,6 +72,8 @@ class AquaBuildConfig:
     batch_size: int = 64
     adaptive_batches: bool = True
     max_batch_tokens: int = 2048
+    window_max_stories: int = 100
+    window_max_rows: int = 50000
     max_length: int = 512
     allow_incomplete: bool = False
     max_stories: int | None = None
@@ -100,9 +102,16 @@ class AquaBuildConfig:
         object.__setattr__(self, "requirements_lock", Path(requirements_lock))
         if self.execution_mode not in {"parallel", "sequential"}:
             raise ValueError("execution_mode must be 'parallel' or 'sequential'")
-        if self.batch_size < 1 or self.max_batch_tokens < 1 or self.max_length < 1:
+        if (
+            self.batch_size < 1
+            or self.max_batch_tokens < 1
+            or self.window_max_stories < 1
+            or self.window_max_rows < 1
+            or self.max_length < 1
+        ):
             raise ValueError(
-                "AQuA batch size, token budget, and maximum length must be positive"
+                "AQuA batch size, token budget, window limits, and maximum "
+                "length must be positive"
             )
         if self.max_stories is not None and self.max_stories < 1:
             raise ValueError("max_stories must be positive")
@@ -149,6 +158,10 @@ def build_runtime_command(
         "--adaptive-batches" if config.adaptive_batches else "--no-adaptive-batches",
         "--max-batch-tokens",
         str(config.max_batch_tokens),
+        "--window-max-stories",
+        str(config.window_max_stories),
+        "--window-max-rows",
+        str(config.window_max_rows),
         "--max-length",
         str(config.max_length),
         "--progress-every-shards",
@@ -357,6 +370,8 @@ def _build_identity(config: AquaBuildConfig, fingerprint: str) -> tuple[str, dic
         "batch_size": config.batch_size,
         "adaptive_batches": config.adaptive_batches,
         "max_batch_tokens": config.max_batch_tokens,
+        "window_max_stories": config.window_max_stories,
+        "window_max_rows": config.window_max_rows,
         "max_length": config.max_length,
         "allow_incomplete": config.allow_incomplete,
         "max_stories": config.max_stories,
@@ -610,7 +625,14 @@ def build_aqua_store(
                 story[["story_id", "comment_id", "effective_text", "effective_text_hash"]],
                 input_path,
             )
-            jobs.append({"input": str(input_path.resolve()), "output": str(destination.resolve())})
+            jobs.append(
+                {
+                    "input": str(input_path.resolve()),
+                    "output": str(destination.resolve()),
+                    "story_id": str(story_id),
+                    "rows": len(story),
+                }
+            )
         processed_rows += len(story)
         if index % config.progress_every_stories == 0 or index == grouped.ngroups:
             print(
@@ -723,6 +745,8 @@ def build_aqua_store(
             "shards": summary.get("shards"),
             "elapsed_seconds": summary.get("elapsed_seconds"),
             "batching": summary.get("batching"),
+            "windows": summary.get("windows"),
+            "windowing": summary.get("windowing"),
             "peak_memory_mib": summary.get("peak_memory_mib"),
             "python": summary.get("python"),
             "platform": summary.get("platform"),

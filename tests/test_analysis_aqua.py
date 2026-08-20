@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ from aqua_runtime.model import (
     predictions_to_frame,
     validate_adapter_artifacts,
 )
+from aqua_runtime.cli import main as aqua_runtime_main, plan_job_windows
 from aqua_runtime.schema import (
     AQUA_FEATURES,
     AQUA_SCORE_MAX,
@@ -65,6 +67,112 @@ def _fixture_output(build_signature="b" * 64, watermark="PRODUCTION"):
 
 
 class AquaAnalysisTests(unittest.TestCase):
+    def test_cross_story_window_plan_respects_story_and_regular_ram_limits(self):
+        jobs = [{"rows": rows, "name": name} for name, rows in zip("abcde", [10, 20, 25, 5, 60])]
+        windows = plan_job_windows(jobs, max_stories=2, max_rows=30)
+        self.assertEqual(
+            [[job["name"] for job in window] for window in windows],
+            [["a", "b"], ["c", "d"], ["e"]],
+        )
+
+    def test_runtime_pools_stories_and_restores_per_story_outputs(self):
+        from aqua_runtime.schema import text_hash
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            jobs = []
+            for story_id, row_ids in (("s1", [3, 0]), ("s2", [2, 1])):
+                source = pd.DataFrame(
+                    {
+                        "story_id": [story_id] * 2,
+                        "comment_id": [f"c{row_id}" for row_id in row_ids],
+                        "effective_text": [f"row{row_id}" for row_id in row_ids],
+                    }
+                )
+                source["effective_text_hash"] = source["effective_text"].map(text_hash)
+                input_path = root / f"{story_id}-input.parquet"
+                output_path = root / f"{story_id}-output.parquet"
+                source.to_parquet(input_path, index=False)
+                jobs.append(
+                    {
+                        "input": str(input_path),
+                        "output": str(output_path),
+                        "story_id": story_id,
+                        "rows": len(source),
+                    }
+                )
+            manifest_path = root / "jobs.json"
+            manifest_path.write_text(json.dumps({"jobs": jobs}))
+            summary_path = root / "summary.json"
+            calls = []
+
+            class FixtureModel:
+                artifact_hashes = {}
+
+                def __init__(self, **kwargs):
+                    pass
+
+                def predict(self, texts, batch_size, **kwargs):
+                    calls.append(list(texts))
+                    row_ids = np.asarray([int(text.removeprefix("row")) for text in texts])
+                    logits = np.zeros((len(texts), 4), dtype=np.float32)
+                    logits[:, 0] = row_ids
+                    token_counts = row_ids + 5
+                    truncated = np.zeros(len(texts), dtype=bool)
+                    diagnostics = {
+                        "strategy": "length_bucketed_token_budget",
+                        "max_batch_size": batch_size,
+                        "max_batch_tokens": kwargs["max_batch_tokens"],
+                        "planned_batches": 1,
+                        "executed_batches": 1,
+                        "oom_backoffs": 0,
+                        "minimum_executed_batch_size": len(texts),
+                        "maximum_executed_batch_size": len(texts),
+                        "mean_executed_batch_size": float(len(texts)),
+                        "effective_unpadded_tokens": int(token_counts.sum()),
+                        "planned_padded_tokens": int(len(texts) * token_counts.max()),
+                        "executed_padded_tokens": int(len(texts) * token_counts.max()),
+                    }
+                    return (
+                        {AQUA_FEATURES[0].stem: logits},
+                        token_counts,
+                        truncated,
+                        diagnostics,
+                    )
+
+            arguments = [
+                "--job-manifest",
+                str(manifest_path),
+                "--summary-output",
+                str(summary_path),
+                "--adapter-root",
+                str(root / "adapters"),
+                "--artifact-manifest",
+                str(root / "artifacts.json"),
+                "--device",
+                "cpu",
+                "--adapter",
+                "relevance",
+                "--build-signature",
+                "b" * 64,
+                "--watermark",
+                "PILOT_NOT_FOR_INFERENCE",
+            ]
+            with patch("aqua_runtime.cli.AquaModel", FixtureModel):
+                self.assertEqual(aqua_runtime_main(arguments), 0)
+
+            self.assertEqual(calls, [["row3", "row0", "row2", "row1"]])
+            for job, expected_ids in zip(jobs, ([3, 0], [2, 1])):
+                output = pd.read_parquet(job["output"])
+                self.assertEqual(output["comment_id"].tolist(), [f"c{i}" for i in expected_ids])
+                self.assertEqual(
+                    output["aqua_relevance_logit_0_raw"].tolist(), expected_ids
+                )
+            summary = json.loads(summary_path.read_text())
+            self.assertEqual(summary["windows"], 1)
+            self.assertEqual(summary["windowing"]["maximum_executed_stories"], 2)
+            self.assertEqual(summary["batching"]["scope"], "cross_story_window")
+
     def test_length_aware_batch_plan_respects_row_and_token_limits(self):
         lengths = np.asarray([90, 10, 80, 20, 70, 30])
         batches = plan_length_aware_batches(
@@ -261,6 +369,8 @@ class AquaAnalysisTests(unittest.TestCase):
         self.assertEqual(command[command.index("--device") + 1], "cuda")
         self.assertIn("--adaptive-batches", command)
         self.assertEqual(command[command.index("--max-batch-tokens") + 1], "2048")
+        self.assertEqual(command[command.index("--window-max-stories") + 1], "100")
+        self.assertEqual(command[command.index("--window-max-rows") + 1], "50000")
         self.assertIn("--artifact-manifest", command)
         self.assertIn("--build-signature", command)
         jobs_command = build_runtime_command(
@@ -421,6 +531,7 @@ class AquaAnalysisTests(unittest.TestCase):
                         keys["effective_text_hash"].tolist(),
                         source["effective_text"].map(text_hash).tolist(),
                     )
+                    self.assertEqual(job["rows"], len(source))
                     output = _fixture_output_for_keys(
                         keys,
                         build_signature=build_signature,

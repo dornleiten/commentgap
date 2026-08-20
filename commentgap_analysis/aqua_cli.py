@@ -59,6 +59,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=2048,
         help="Maximum batch-size × capped-token-length budget (default: 2048).",
     )
+    parser.add_argument(
+        "--window-max-stories",
+        type=int,
+        default=100,
+        help="Maximum stories pooled for cross-story length bucketing (default: 100).",
+    )
+    parser.add_argument(
+        "--window-max-rows",
+        type=int,
+        default=50000,
+        help="Regular-RAM guard for one cross-story window (default: 50000 rows).",
+    )
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--allow-incomplete", action="store_true")
     parser.add_argument("--max-stories", type=int, default=None)
@@ -88,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
         batch_size=args.batch_size,
         adaptive_batches=args.adaptive_batches,
         max_batch_tokens=args.max_batch_tokens,
+        window_max_stories=args.window_max_stories,
+        window_max_rows=args.window_max_rows,
         max_length=args.max_length,
         allow_incomplete=args.allow_incomplete,
         max_stories=args.max_stories,
