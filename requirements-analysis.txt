@@ -10,6 +10,9 @@ torch==2.10.0
 transformers==5.2.0
 sentence-transformers==5.2.2
 huggingface-hub==1.4.1
+tiktoken>=0.7,<1
+protobuf>=4.25,<7
+sentencepiece>=0.2,<1
 hnswlib==0.8.0
 pyphen==0.17.2
 regex==2026.1.15

@@ -69,6 +69,30 @@ class AnalysisFeatureTests(unittest.TestCase):
         )
         self.assertEqual(encoder._add_special_tokens([7, 8]), [11, 7, 8, 12])
 
+    def test_classifier_chunks_long_text_before_checked_model_input(self):
+        class FakeTokenizer:
+            def __call__(self, text, **kwargs):
+                self.kwargs = kwargs
+                return {"input_ids": list(range(565))}
+
+        encoder = XLMTwitterSentimentEncoder.__new__(XLMTwitterSentimentEncoder)
+        encoder.chunk_tokens = 510
+        encoder._tokenizer = FakeTokenizer()
+        encoder._maximum_input_tokens = 512
+        encoder._sequence_diagnostics = {
+            "texts": 0,
+            "texts_requiring_chunking": 0,
+            "chunks": 0,
+            "maximum_content_tokens_observed": 0,
+            "maximum_model_input_tokens_observed": 0,
+            "model_input_limit": 512,
+            "content_tokens_per_chunk": 510,
+        }
+        chunks = encoder._chunks("long text")
+        self.assertEqual([len(chunk) for chunk in chunks], [510, 55])
+        self.assertFalse(encoder._tokenizer.kwargs["verbose"])
+        self.assertEqual(encoder.sequence_diagnostics()["texts_requiring_chunking"], 1)
+
     def test_new_nlp_defaults_are_pinned_and_toxicity_is_a_model_feature(self):
         config = FeatureBuildConfig(inference_mode=False)
         self.assertEqual(config.sentiment_model_id, DEFAULT_SENTIMENT_MODEL_ID)
@@ -76,6 +100,20 @@ class AnalysisFeatureTests(unittest.TestCase):
         self.assertEqual(config.toxicity_model_id, DEFAULT_TOXICITY_MODEL_ID)
         self.assertEqual(config.toxicity_revision, DEFAULT_TOXICITY_MODEL_REVISION)
         self.assertIn("toxicity_probability", ROOT_MODEL_FEATURES)
+
+    def test_production_nlp_cache_signatures_survive_diagnostic_code_changes(self):
+        from commentgap_analysis.features import _adapter_implementation_signature
+
+        sentiment = XLMTwitterSentimentEncoder.__new__(XLMTwitterSentimentEncoder)
+        toxicity = TextDetoxToxicityEncoder.__new__(TextDetoxToxicityEncoder)
+        self.assertEqual(
+            _adapter_implementation_signature(sentiment),
+            "d596848be71b609ff495690da3cce50f902d760a712cfa8423d7fa0d0c2a8c4d",
+        )
+        self.assertEqual(
+            _adapter_implementation_signature(toxicity),
+            "6b8e118aa2d8185297f3ab3c3ec4953d5dfb05b3fefe3a8ecf25c94f54d8a8e7",
+        )
 
     def test_xlmt_sentiment_uses_cardiff_label_order_and_weighted_chunks(self):
         encoder = XLMTwitterSentimentEncoder.__new__(XLMTwitterSentimentEncoder)

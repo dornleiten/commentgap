@@ -195,7 +195,16 @@ def _identity_signature(identity: dict[str, Any]) -> str:
 
 
 def _adapter_implementation_signature(adapter: Any) -> str:
-    """Fingerprint one NLP adapter so code changes invalidate only its family."""
+    """Identify numerical NLP semantics while permitting safe cache reuse.
+
+    Production adapters expose a frozen compatibility signature. Diagnostic,
+    logging, batching and validation changes can then reuse existing predictions;
+    a change that can alter feature values must deliberately bump the signature.
+    Injected/test adapters retain source-based invalidation.
+    """
+    frozen_signature = getattr(adapter, "cache_compatibility_signature", None)
+    if frozen_signature:
+        return str(frozen_signature)
     adapter_type = type(adapter)
     identity = f"{adapter_type.__module__}.{adapter_type.__qualname__}"
     try:
@@ -1750,21 +1759,37 @@ def build_analysis_features(
         "status": "complete",
         "build_signature": sentiment_signature,
         "identity": sentiment_identity,
+        "output_semantics_version": getattr(
+            sentiment_encoder, "output_semantics_version", None
+        ),
         "root": str(sentiment_checkpoint_root),
         "files": total_stories,
         "rows": total_candidates,
         "new_story_checkpoints": sentiment_written,
         "reused_story_checkpoints": sentiment_reused,
+        "sequence_diagnostics": (
+            sentiment_encoder.sequence_diagnostics()
+            if hasattr(sentiment_encoder, "sequence_diagnostics")
+            else None
+        ),
     }
     toxicity_manifest = {
         "status": "complete",
         "build_signature": toxicity_signature,
         "identity": toxicity_identity,
+        "output_semantics_version": getattr(
+            toxicity_encoder, "output_semantics_version", None
+        ),
         "root": str(toxicity_checkpoint_root),
         "files": total_stories,
         "rows": total_candidates,
         "new_story_checkpoints": toxicity_written,
         "reused_story_checkpoints": toxicity_reused,
+        "sequence_diagnostics": (
+            toxicity_encoder.sequence_diagnostics()
+            if hasattr(toxicity_encoder, "sequence_diagnostics")
+            else None
+        ),
     }
     _atomic_json(sentiment_manifest, sentiment_checkpoint_root.parent / "manifest.json")
     _atomic_json(toxicity_manifest, toxicity_checkpoint_root.parent / "manifest.json")

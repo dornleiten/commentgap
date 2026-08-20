@@ -138,12 +138,66 @@ class _ChunkedSequenceClassifier:
             int(key): str(value).lower()
             for key, value in self._model.config.id2label.items()
         }
+        special_tokens = int(self._tokenizer.num_special_tokens_to_add(pair=False))
+        possible_limits = [
+            int(value)
+            for value in (
+                getattr(self._tokenizer, "model_max_length", None),
+                getattr(self._model.config, "max_position_embeddings", None),
+            )
+            if value is not None and 0 < int(value) < 1_000_000
+        ]
+        if not possible_limits:
+            raise RuntimeError("Could not determine the classifier's maximum input length")
+        self._maximum_input_tokens = min(possible_limits)
+        self._maximum_content_tokens = self._maximum_input_tokens - special_tokens
+        if self.chunk_tokens > self._maximum_content_tokens:
+            raise ValueError(
+                f"chunk_tokens={self.chunk_tokens} exceeds the safe content budget "
+                f"of {self._maximum_content_tokens} tokens for {self.model_id}"
+            )
+        self._sequence_diagnostics = {
+            "texts": 0,
+            "texts_requiring_chunking": 0,
+            "chunks": 0,
+            "maximum_content_tokens_observed": 0,
+            "maximum_model_input_tokens_observed": 0,
+            "model_input_limit": self._maximum_input_tokens,
+            "content_tokens_per_chunk": self.chunk_tokens,
+        }
 
     def _chunks(self, text: str) -> list[list[int]]:
-        ids = self._tokenizer.encode(text, add_special_tokens=False)
+        # Tokenize without truncation so long comments can be split and aggregated.
+        # verbose=False suppresses the tokenizer's misleading warning about the
+        # unsplit sequence; every resulting model input is checked below.
+        encoded = self._tokenizer(
+            text,
+            add_special_tokens=False,
+            truncation=False,
+            padding=False,
+            return_attention_mask=False,
+            verbose=False,
+        )
+        ids = list(encoded["input_ids"])
+        self._sequence_diagnostics["texts"] += 1
+        self._sequence_diagnostics["maximum_content_tokens_observed"] = max(
+            self._sequence_diagnostics["maximum_content_tokens_observed"], len(ids)
+        )
+        if len(ids) > self.chunk_tokens:
+            self._sequence_diagnostics["texts_requiring_chunking"] += 1
         if not ids:
+            self._sequence_diagnostics["chunks"] += 1
             return [[]]
-        return [ids[i : i + self.chunk_tokens] for i in range(0, len(ids), self.chunk_tokens)]
+        chunks = [
+            ids[i : i + self.chunk_tokens]
+            for i in range(0, len(ids), self.chunk_tokens)
+        ]
+        self._sequence_diagnostics["chunks"] += len(chunks)
+        return chunks
+
+    def sequence_diagnostics(self) -> dict[str, int]:
+        """Return cumulative, JSON-safe long-sequence audit counts."""
+        return dict(self._sequence_diagnostics)
 
     def _add_special_tokens(self, token_ids: list[int]) -> list[int]:
         """Add BERT boundary tokens across Transformers 4/5 tokenizer APIs."""
@@ -174,8 +228,19 @@ class _ChunkedSequenceClassifier:
         rows: list[np.ndarray] = []
         for start in range(0, len(chunks), batch_size):
             batch_ids = chunks[start : start + batch_size]
+            model_inputs = [self._add_special_tokens(x) for x in batch_ids]
+            maximum = max(map(len, model_inputs), default=0)
+            self._sequence_diagnostics["maximum_model_input_tokens_observed"] = max(
+                self._sequence_diagnostics["maximum_model_input_tokens_observed"],
+                maximum,
+            )
+            if maximum > self._maximum_input_tokens:
+                raise RuntimeError(
+                    f"Prepared a {maximum}-token input for {self.model_id}, exceeding "
+                    f"its verified {self._maximum_input_tokens}-token limit"
+                )
             encoded = self._tokenizer.pad(
-                {"input_ids": [self._add_special_tokens(x) for x in batch_ids]},
+                {"input_ids": model_inputs},
                 padding=True,
                 return_attention_mask=True,
                 return_tensors="pt",
@@ -206,6 +271,12 @@ def _label_index(
 class XLMTwitterSentimentEncoder(_ChunkedSequenceClassifier):
     """CardiffNLP XLM-T sentiment with weighted long-text aggregation."""
 
+    # Frozen cache signature for output-equivalent implementation changes.
+    # Increment this only when the numerical feature semantics change.
+    cache_compatibility_signature = (
+        "d596848be71b609ff495690da3cce50f902d760a712cfa8423d7fa0d0c2a8c4d"
+    )
+    output_semantics_version = "xlmt-sentiment-token-weighted-chunks-v1"
     model_id: str = DEFAULT_SENTIMENT_MODEL_ID
     revision: str | None = None
     device: str = "auto"
@@ -250,6 +321,12 @@ GermanSentimentEncoder = XLMTwitterSentimentEncoder
 class TextDetoxToxicityEncoder(_ChunkedSequenceClassifier):
     """TextDetox toxicity with max and weighted-mean chunk aggregation."""
 
+    # Frozen cache signature for output-equivalent implementation changes.
+    # Increment this only when the numerical feature semantics change.
+    cache_compatibility_signature = (
+        "6b8e118aa2d8185297f3ab3c3ec4953d5dfb05b3fefe3a8ecf25c94f54d8a8e7"
+    )
+    output_semantics_version = "textdetox-max-and-token-weighted-chunks-v1"
     model_id: str = DEFAULT_TOXICITY_MODEL_ID
     revision: str | None = None
     device: str = "auto"
