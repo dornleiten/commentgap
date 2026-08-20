@@ -42,6 +42,34 @@ def _package_versions() -> dict[str, str]:
     return output
 
 
+def _format_duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes:d}m {seconds:02d}s"
+    return f"{seconds:d}s"
+
+
+def _progress_details(
+    *, elapsed: float, completed_rows: int, expected_rows: int | None
+) -> str:
+    if elapsed <= 0 or completed_rows <= 0:
+        return f"elapsed={_format_duration(elapsed)} rate=n/a eta=n/a"
+    rate = completed_rows / elapsed
+    eta = (
+        _format_duration(max(0, expected_rows - completed_rows) / rate)
+        if expected_rows is not None
+        else "n/a"
+    )
+    return (
+        f"elapsed={_format_duration(elapsed)} "
+        f"rate={rate:.2f} rows/s eta={eta}"
+    )
+
+
 def plan_job_windows(
     jobs: list[dict], *, max_stories: int, max_rows: int
 ) -> list[list[dict]]:
@@ -185,6 +213,11 @@ def main(argv: list[str] | None = None) -> int:
         max_stories=args.window_max_stories,
         max_rows=args.window_max_rows,
     )
+    expected_total_rows = (
+        sum(int(job["rows"]) for job in jobs)
+        if all(job.get("rows") is not None for job in jobs)
+        else None
+    )
     started = time.monotonic()
     features = (
         tuple(feature_by_adapter(adapter) for adapter in args.adapter)
@@ -220,7 +253,12 @@ def main(argv: list[str] | None = None) -> int:
         source = pd.concat(sources, ignore_index=True)
         print(
             f"AQuA runtime: starting window {window_index:,}/{len(windows):,} | "
-            f"stories={len(window_jobs):,} rows={len(source):,}",
+            f"stories={len(window_jobs):,} rows={len(source):,} | "
+            + _progress_details(
+                elapsed=time.monotonic() - started,
+                completed_rows=total_rows,
+                expected_rows=expected_total_rows,
+            ),
             flush=True,
         )
         if source.duplicated(["story_id", "comment_id"]).any():
@@ -290,9 +328,20 @@ def main(argv: list[str] | None = None) -> int:
             maximum_executed_batch_size,
             int(batching["maximum_executed_batch_size"]),
         )
+        row_progress = (
+            f"{total_rows:,}/{expected_total_rows:,}"
+            if expected_total_rows is not None
+            else f"{total_rows:,}"
+        )
+        elapsed = time.monotonic() - started
         print(
             f"AQuA runtime: window {window_index:,}/{len(windows):,} | "
-            f"stories={completed_jobs:,}/{len(jobs):,} rows={total_rows:,}",
+            f"stories={completed_jobs:,}/{len(jobs):,} rows={row_progress} | "
+            + _progress_details(
+                elapsed=elapsed,
+                completed_rows=total_rows,
+                expected_rows=expected_total_rows,
+            ),
             flush=True,
         )
         # Drop the large window frames before loading the next window. This is

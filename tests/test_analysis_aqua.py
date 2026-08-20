@@ -14,7 +14,11 @@ from aqua_runtime.model import (
     predictions_to_frame,
     validate_adapter_artifacts,
 )
-from aqua_runtime.cli import main as aqua_runtime_main, plan_job_windows
+from aqua_runtime.cli import (
+    _progress_details,
+    main as aqua_runtime_main,
+    plan_job_windows,
+)
 from aqua_runtime.schema import (
     AQUA_FEATURES,
     AQUA_SCORE_MAX,
@@ -67,6 +71,16 @@ def _fixture_output(build_signature="b" * 64, watermark="PRODUCTION"):
 
 
 class AquaAnalysisTests(unittest.TestCase):
+    def test_runtime_progress_reports_elapsed_rate_and_row_eta(self):
+        self.assertEqual(
+            _progress_details(elapsed=10.0, completed_rows=20, expected_rows=100),
+            "elapsed=10s rate=2.00 rows/s eta=40s",
+        )
+        self.assertEqual(
+            _progress_details(elapsed=5.0, completed_rows=0, expected_rows=100),
+            "elapsed=5s rate=n/a eta=n/a",
+        )
+
     def test_cross_story_window_plan_respects_story_and_regular_ram_limits(self):
         jobs = [{"rows": rows, "name": name} for name, rows in zip("abcde", [10, 20, 25, 5, 60])]
         windows = plan_job_windows(jobs, max_stories=2, max_rows=30)

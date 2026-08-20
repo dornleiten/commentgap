@@ -305,8 +305,10 @@ atomic window and is never split across checkpoints.
 
 A CUDA OOM splits only the failing GPU batch and retries its two halves.
 Runtime summaries record window sizes, planned/executed batch sizes, padding,
-and OOM backoffs. Tune the GPU ceilings with `--batch-size` and
-`--max-batch-tokens`, and the ordinary-RAM/resume tradeoff with
+and OOM backoffs. Window messages report cumulative elapsed time, processed-row
+throughput, and a row-weighted ETA after the first window completes. Tune the
+GPU ceilings with `--batch-size` and `--max-batch-tokens`, and the
+ordinary-RAM/resume tradeoff with
 `--window-max-stories` and `--window-max-rows`. Use `--no-adaptive-batches` for
 a fixed-row compatibility run.
 
