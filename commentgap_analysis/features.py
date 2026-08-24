@@ -51,6 +51,7 @@ BASE_SEED = 20260813
 DEFAULT_TIE_DRAWS = 10
 LOCAL_TEXT_OUTPUT_SEMANTICS_VERSION = 1
 LOCAL_TEXT_COLUMNS = ["word_count", "log_words", "cttr", "smog_de", "url_present"]
+CHOICE_WRITE_BATCH_ROWS = 25_000
 
 
 ROOT_MODEL_FEATURES = [
@@ -926,6 +927,40 @@ def _length_residual(frame: pd.DataFrame, outcome: str) -> tuple[np.ndarray, dic
     return residual, {"outcome": outcome, "n_knots": 6, "degree": 3, "ridge_alpha": 1.0}
 
 
+def _fit_length_adjuster(
+    frame: pd.DataFrame, outcome: str
+) -> tuple[Any, dict[str, Any]]:
+    """Fit the existing length adjustment without retaining its residual array."""
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import SplineTransformer
+
+    valid = np.isfinite(frame[outcome]) & np.isfinite(frame["log_words"])
+    if valid.sum() < 20:
+        raise ValueError(f"Too few observations to length-adjust {outcome}")
+    model = make_pipeline(
+        SplineTransformer(n_knots=6, degree=3, include_bias=False), Ridge(alpha=1.0)
+    )
+    model.fit(
+        frame.loc[valid, ["log_words"]].to_numpy(),
+        frame.loc[valid, outcome].to_numpy(),
+    )
+    return model, {"outcome": outcome, "n_knots": 6, "degree": 3, "ridge_alpha": 1.0}
+
+
+def _apply_length_adjuster(
+    frame: pd.DataFrame, outcome: str, model: Any
+) -> np.ndarray:
+    valid = np.isfinite(frame[outcome]) & np.isfinite(frame["log_words"])
+    predicted = np.full(len(frame), np.nan)
+    if valid.any():
+        predicted[valid] = model.predict(
+            frame.loc[valid, ["log_words"]].to_numpy()
+        )
+    residual = frame[outcome].to_numpy(dtype=float) - predicted
+    return residual
+
+
 def _feature_registry(*, aqua_available: bool = False) -> dict[str, Any]:
     from aqua_runtime.schema import AQUA_FEATURES, expected_alias_column, label_column
 
@@ -1054,6 +1089,116 @@ def _prepare_model_columns(frame: pd.DataFrame, scope: str) -> pd.DataFrame:
     return output
 
 
+def _prepare_model_columns_with_novelty_mean(
+    frame: pd.DataFrame,
+    scope: str,
+    novelty_fill_value: float,
+) -> pd.DataFrame:
+    """Prepare one bounded story frame using the previously computed global mean."""
+    output = frame.copy()
+    output["relative_votes"] = output["votes_positive"] - output["votes_negative"]
+    for raw in (
+        "hours_since_article",
+        "prior_roots",
+        "prior_comments",
+        "comments_prev_hour",
+        "author_prior_30d_comments",
+        "author_prior_30d_snapshot_upvotes",
+        "author_prior_30d_snapshot_downvotes",
+        "author_prior_comments_story",
+        "depth",
+        "branch_prior_comments",
+        "branch_comments_prev_hour",
+    ):
+        output[f"log_{raw}"] = np.log1p(output[raw].clip(lower=0).astype(float))
+    output["is_reply"] = (~output["is_root"].astype(bool)).astype(int)
+    for period in ("overnight", "weekday_shoulder_evening", "weekend_day_evening"):
+        output[f"vienna_{period}"] = (output["vienna_period"] == period).astype(int)
+    novelty = "novelty_prior_roots" if scope == "root" else "novelty_prior_all"
+    if not np.isfinite(novelty_fill_value):
+        raise ValueError(f"No finite values for {novelty}")
+    output[f"{novelty}_model"] = output[novelty].fillna(novelty_fill_value)
+    return output
+
+
+def _finalize_choice_set(
+    output: pd.DataFrame,
+    *,
+    scope: str,
+    config: FeatureBuildConfig,
+    novelty_fill_value: float | None = None,
+    invalid_sticky_stories_excluded: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Create model columns and labels after story eligibility is established."""
+    output = (
+        _prepare_model_columns(output, scope)
+        if novelty_fill_value is None
+        else _prepare_model_columns_with_novelty_mean(
+            output, scope, novelty_fill_value
+        )
+    )
+    output["curator_selected"] = output["is_sticky"].astype(bool)
+    output, ties = assign_audience_labels(
+        output, draws=config.tie_draws, seed=config.seed
+    )
+    features_used = ROOT_MODEL_FEATURES if scope == "root" else ALL_MODEL_FEATURES
+    missingness = output[features_used].isna().sum()
+    if int(missingness.sum()):
+        raise ValueError(
+            f"Missing model features in {scope}: "
+            f"{missingness[missingness > 0].to_dict()}"
+        )
+    if output.duplicated(["story_id", "comment_id"]).any():
+        raise ValueError(f"Duplicate candidate keys in {scope}")
+    output["candidate_scope"] = scope
+    keep = [
+        "story_id",
+        "comment_id",
+        "article_year",
+        "article_month",
+        "candidate_scope",
+        "n_candidates",
+        "n_picks",
+        "curator_selected",
+        "relative_votes",
+    ] + [
+        f"audience_selected_draw_{draw:02d}"
+        for draw in range(1, config.tie_draws + 1)
+    ]
+    raw_descriptive = [
+        "word_count",
+        "cttr",
+        "smog_de",
+        "sentiment_neutral",
+        "toxicity_mean_probability",
+        "hours_since_article",
+        "prior_roots",
+        "prior_comments",
+        "comments_prev_hour",
+        "branch_prior_comments",
+        "branch_comments_prev_hour",
+        "author_prior_30d_comments",
+        "author_prior_30d_snapshot_upvotes",
+        "author_prior_30d_snapshot_downvotes",
+        "author_prior_comments_story",
+        "vienna_period",
+    ]
+    if "aqua_score_hard" in output.columns:
+        from aqua_runtime.schema import downstream_feature_columns
+
+        raw_descriptive.extend(downstream_feature_columns())
+    keep += [name for name in raw_descriptive + features_used if name not in keep]
+    summary = {
+        "scope": scope,
+        "candidate_rows": len(output),
+        "eligible_stories": int(output["story_id"].nunique()),
+        "sticky_comments": int(output["curator_selected"].sum()),
+        "invalid_sticky_stories_excluded": invalid_sticky_stories_excluded,
+        "ambiguous_vote_cutoffs": int(ties["ambiguous_cutoff"].sum()),
+    }
+    return output[keep].sort_values(["story_id", "comment_id"]), ties, summary
+
+
 def _make_choice_set(
     features: pd.DataFrame,
     raw_comments: pd.DataFrame,
@@ -1094,61 +1239,358 @@ def _make_choice_set(
     )
     eligible = counts[(counts["n_picks"] > 0) & (counts["n_picks"] < counts["n_candidates"])]
     output = output.merge(eligible, left_on="story_id", right_index=True, validate="many_to_one")
-    output = _prepare_model_columns(output, scope)
-    output["curator_selected"] = output["is_sticky"].astype(bool)
-    output, ties = assign_audience_labels(
-        output, draws=config.tie_draws, seed=config.seed
+    return _finalize_choice_set(
+        output,
+        scope=scope,
+        config=config,
+        invalid_sticky_stories_excluded=len(invalid_sticky_stories),
     )
-    features_used = ROOT_MODEL_FEATURES if scope == "root" else ALL_MODEL_FEATURES
-    missingness = output[features_used].isna().sum()
-    if int(missingness.sum()):
-        raise ValueError(f"Missing model features in {scope}: {missingness[missingness > 0].to_dict()}")
-    if output.duplicated(["story_id", "comment_id"]).any():
-        raise ValueError(f"Duplicate candidate keys in {scope}")
-    output["candidate_scope"] = scope
-    keep = [
+
+
+class _BufferedParquetSink:
+    """Write one atomic Parquet file without retaining the complete table."""
+
+    def __init__(self, destination: Path, *, batch_rows: int) -> None:
+        self.destination = Path(destination)
+        self.temporary = self.destination.with_suffix(self.destination.suffix + ".tmp")
+        self.batch_rows = batch_rows
+        self.frames: list[pd.DataFrame] = []
+        self.rows = 0
+        self.total_rows = 0
+        self.writer: Any | None = None
+        self.schema: Any | None = None
+
+    def append(self, frame: pd.DataFrame) -> None:
+        if frame.empty:
+            return
+        self.frames.append(frame)
+        self.rows += len(frame)
+        self.total_rows += len(frame)
+        if self.rows >= self.batch_rows:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self.frames:
+            return
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        combined = pd.concat(self.frames, ignore_index=True)
+        self.frames.clear()
+        self.rows = 0
+        table = pa.Table.from_pandas(combined, preserve_index=False)
+        table = table.replace_schema_metadata()
+        del combined
+        if self.writer is None:
+            self.destination.parent.mkdir(parents=True, exist_ok=True)
+            self.schema = table.schema
+            self.writer = pq.ParquetWriter(
+                self.temporary,
+                self.schema,
+                compression="zstd",
+            )
+        elif not table.schema.equals(self.schema, check_metadata=False):
+            table = table.cast(self.schema)
+        self.writer.write_table(table)
+
+    def close(self) -> None:
+        self.flush()
+        if self.writer is None:
+            raise ValueError(f"Refusing to write an empty Parquet file: {self.destination}")
+        self.writer.close()
+        self.writer = None
+
+    def commit(self) -> None:
+        os.replace(self.temporary, self.destination)
+
+    def abort(self) -> None:
+        self.frames.clear()
+        if self.writer is not None:
+            self.writer.close()
+            self.writer = None
+        self.temporary.unlink(missing_ok=True)
+
+
+def _eligible_story_scope(
+    frame: pd.DataFrame,
+    *,
+    scope: str,
+    invalid_sticky_stories: set[str],
+    config: FeatureBuildConfig,
+) -> pd.DataFrame | None:
+    """Apply the existing choice-set eligibility rules to one story."""
+    if scope not in {"root", "all"}:
+        raise ValueError(scope)
+    story_ids = frame["story_id"].astype(str).unique()
+    if len(story_ids) != 1:
+        raise ValueError("A scalar story shard must contain exactly one story_id")
+    story_id = str(story_ids[0])
+    output = frame[frame["is_root"].astype(bool)].copy() if scope == "root" else frame.copy()
+    if output.empty or story_id in invalid_sticky_stories:
+        return None
+    if config.require_page_publication_time:
+        if not output["published_at_source"].eq("page").all():
+            return None
+        if output["invalid_posting_time"].astype(bool).any():
+            return None
+    if config.lookback_root is None and config.exclude_january_without_lookback:
+        january = (
+            output["article_year"].eq(config.year)
+            & output["article_month"].eq(1)
+        )
+        if january.all():
+            return None
+    n_candidates = len(output)
+    n_picks = int(output["is_sticky"].astype(bool).sum())
+    if not 0 < n_picks < n_candidates:
+        return None
+    output["n_candidates"] = n_candidates
+    output["n_picks"] = n_picks
+    return output
+
+
+def _invalid_sticky_story_sets(
+    data_root: Path,
+    year: int,
+    included_story_ids: set[str],
+) -> dict[str, set[str]]:
+    """Scan only sticky raw comments, in batches, for invalid curator picks."""
+    import pyarrow.dataset as ds
+
+    root = Path(data_root) / "comments" / f"year={year}"
+    dataset = ds.dataset(root, format="parquet", partitioning=None)
+    columns = [
         "story_id",
         "comment_id",
+        "is_root",
+        "lifecycle_status",
+        "effective_text",
+        "created_at",
+    ]
+    scanner = dataset.scanner(
+        columns=columns,
+        filter=ds.field("is_sticky") == True,  # noqa: E712 - PyArrow expression
+        batch_size=65_536,
+    )
+    invalid_all: set[str] = set()
+    invalid_root: set[str] = set()
+    for batch in scanner.to_batches():
+        sticky = batch.to_pandas()
+        sticky["story_id"] = sticky["story_id"].astype(str)
+        sticky = sticky[sticky["story_id"].isin(included_story_ids)]
+        if sticky.empty:
+            continue
+        created_at = _as_utc(sticky["created_at"])
+        invalid = sticky[
+            ~sticky["lifecycle_status"].eq("Published")
+            | sticky["effective_text"].fillna("").str.strip().eq("")
+            | created_at.isna()
+            | sticky["comment_id"].fillna("").astype(str).str.strip().eq("")
+        ]
+        invalid_ids = set(invalid["story_id"].astype(str))
+        invalid_all.update(invalid_ids)
+        invalid_root.update(
+            invalid.loc[invalid["is_root"].astype(bool), "story_id"].astype(str)
+        )
+    return {"root": invalid_root, "all": invalid_all}
+
+
+def _build_choice_sets_bounded(
+    *,
+    checkpoint_root: Path,
+    data_root: Path,
+    output_root: Path,
+    config: FeatureBuildConfig,
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Fit global adjustments and stream final choice sets by story."""
+    import pyarrow.dataset as ds
+
+    scalar_paths = sorted(
+        Path(checkpoint_root).glob("month=*/*.parquet"),
+        key=lambda path: (path.stem, path.parent.name),
+    )
+    if not scalar_paths:
+        raise FileNotFoundError(f"No scalar story checkpoints under {checkpoint_root}")
+    story_ids = [path.stem for path in scalar_paths]
+    if len(story_ids) != len(set(story_ids)):
+        raise ValueError("Duplicate story checkpoint names in scalar feature store")
+    included_story_ids = set(story_ids)
+
+    print(
+        "Feature assembly: fitting length adjustments from three numeric columns | "
+        f"stories={len(scalar_paths):,}",
+        flush=True,
+    )
+    length_table = ds.dataset(
+        checkpoint_root, format="parquet", partitioning=None
+    ).to_table(columns=["log_words", "cttr", "smog_de"])
+    length_frame = length_table.to_pandas(split_blocks=True)
+    del length_table
+    lex_model, lex_meta = _fit_length_adjuster(length_frame, "cttr")
+    reading_model, reading_meta = _fit_length_adjuster(length_frame, "smog_de")
+    length_rows = len(length_frame)
+    del length_frame
+    gc.collect()
+    print(
+        "Feature assembly: length adjustments fitted | "
+        f"rows={length_rows:,}",
+        flush=True,
+    )
+
+    print("Feature assembly: scanning invalid sticky comments", flush=True)
+    invalid_stories = _invalid_sticky_story_sets(
+        data_root,
+        config.year,
+        included_story_ids,
+    )
+    compact_columns = [
+        "story_id",
+        "comment_id",
+        "is_root",
+        "is_sticky",
+        "published_at_source",
+        "invalid_posting_time",
         "article_year",
         "article_month",
-        "candidate_scope",
-        "n_candidates",
-        "n_picks",
-        "curator_selected",
-        "relative_votes",
-    ] + [f"audience_selected_draw_{draw:02d}" for draw in range(1, config.tie_draws + 1)]
-    raw_descriptive = [
-        "word_count",
-        "cttr",
-        "smog_de",
-        "sentiment_neutral",
-        "toxicity_mean_probability",
-        "hours_since_article",
-        "prior_roots",
-        "prior_comments",
-        "comments_prev_hour",
-        "branch_prior_comments",
-        "branch_comments_prev_hour",
-        "author_prior_30d_comments",
-        "author_prior_30d_snapshot_upvotes",
-        "author_prior_30d_snapshot_downvotes",
-        "author_prior_comments_story",
-        "vienna_period",
+        "novelty_prior_roots",
+        "novelty_prior_all",
     ]
-    if "aqua_score_hard" in output.columns:
-        from aqua_runtime.schema import downstream_feature_columns
+    eligible_ids: dict[str, set[str]] = {"root": set(), "all": set()}
+    novelty_sums = {"root": 0.0, "all": 0.0}
+    novelty_counts = {"root": 0, "all": 0}
+    eligibility_started = time.monotonic()
+    for index, path in enumerate(scalar_paths, start=1):
+        compact = pd.read_parquet(path, columns=compact_columns)
+        story_id = str(compact["story_id"].iloc[0])
+        for scope, novelty_column in (
+            ("root", "novelty_prior_roots"),
+            ("all", "novelty_prior_all"),
+        ):
+            eligible = _eligible_story_scope(
+                compact,
+                scope=scope,
+                invalid_sticky_stories=invalid_stories[scope],
+                config=config,
+            )
+            if eligible is None:
+                continue
+            eligible_ids[scope].add(story_id)
+            values = eligible[novelty_column].to_numpy(dtype=float)
+            finite = np.isfinite(values)
+            novelty_sums[scope] += float(values[finite].sum())
+            novelty_counts[scope] += int(finite.sum())
+        if index % config.progress_every_stories == 0 or index == len(scalar_paths):
+            _progress_line(
+                "Choice eligibility",
+                index,
+                len(scalar_paths),
+                eligibility_started,
+                unit="stories",
+                detail=(
+                    f"eligible(root/all)={len(eligible_ids['root']):,}/"
+                    f"{len(eligible_ids['all']):,}"
+                ),
+            )
+    novelty_means: dict[str, float] = {}
+    for scope in ("root", "all"):
+        if novelty_counts[scope] == 0:
+            novelty_name = (
+                "novelty_prior_roots" if scope == "root" else "novelty_prior_all"
+            )
+            raise ValueError(f"No finite values for {novelty_name}")
+        novelty_means[scope] = novelty_sums[scope] / novelty_counts[scope]
 
-        raw_descriptive.extend(downstream_feature_columns())
-    keep += [name for name in raw_descriptive + features_used if name not in keep]
-    summary = {
-        "scope": scope,
-        "candidate_rows": len(output),
-        "eligible_stories": int(output["story_id"].nunique()),
-        "sticky_comments": int(output["curator_selected"].sum()),
-        "invalid_sticky_stories_excluded": len(invalid_sticky_stories),
-        "ambiguous_vote_cutoffs": int(ties["ambiguous_cutoff"].sum()),
+    sinks = {
+        "root": _BufferedParquetSink(
+            Path(output_root) / "choice_set_root.parquet",
+            batch_rows=CHOICE_WRITE_BATCH_ROWS,
+        ),
+        "all": _BufferedParquetSink(
+            Path(output_root) / "choice_set_all.parquet",
+            batch_rows=CHOICE_WRITE_BATCH_ROWS,
+        ),
+        "root_ties": _BufferedParquetSink(
+            Path(output_root) / "tie_diagnostics_root.parquet",
+            batch_rows=CHOICE_WRITE_BATCH_ROWS,
+        ),
+        "all_ties": _BufferedParquetSink(
+            Path(output_root) / "tie_diagnostics_all.parquet",
+            batch_rows=CHOICE_WRITE_BATCH_ROWS,
+        ),
     }
-    return output[keep].sort_values(["story_id", "comment_id"]), ties, summary
+    summaries = {
+        scope: {
+            "scope": scope,
+            "candidate_rows": 0,
+            "eligible_stories": 0,
+            "sticky_comments": 0,
+            "invalid_sticky_stories_excluded": len(invalid_stories[scope]),
+            "ambiguous_vote_cutoffs": 0,
+        }
+        for scope in ("root", "all")
+    }
+    writing_started = time.monotonic()
+    try:
+        for index, path in enumerate(scalar_paths, start=1):
+            story = pd.read_parquet(path)
+            story_id = str(story["story_id"].iloc[0])
+            story["lexdiv_length_adjusted"] = _apply_length_adjuster(
+                story, "cttr", lex_model
+            )
+            story["reading_level_length_adjusted"] = _apply_length_adjuster(
+                story, "smog_de", reading_model
+            )
+            for scope in ("root", "all"):
+                if story_id not in eligible_ids[scope]:
+                    continue
+                eligible = _eligible_story_scope(
+                    story,
+                    scope=scope,
+                    invalid_sticky_stories=invalid_stories[scope],
+                    config=config,
+                )
+                if eligible is None:
+                    raise RuntimeError(
+                        f"Choice eligibility changed between passes for {scope} {story_id}"
+                    )
+                output, ties, story_summary = _finalize_choice_set(
+                    eligible,
+                    scope=scope,
+                    config=config,
+                    novelty_fill_value=novelty_means[scope],
+                )
+                sinks[scope].append(output)
+                sinks[f"{scope}_ties"].append(
+                    ties.assign(candidate_scope=scope)
+                )
+                for field in (
+                    "candidate_rows",
+                    "eligible_stories",
+                    "sticky_comments",
+                    "ambiguous_vote_cutoffs",
+                ):
+                    summaries[scope][field] += story_summary[field]
+            if index % config.progress_every_stories == 0 or index == len(scalar_paths):
+                _progress_line(
+                    "Choice-set writing",
+                    index,
+                    len(scalar_paths),
+                    writing_started,
+                    unit="stories",
+                    detail=(
+                        f"rows(root/all)={summaries['root']['candidate_rows']:,}/"
+                        f"{summaries['all']['candidate_rows']:,}"
+                    ),
+                )
+        for sink in sinks.values():
+            sink.close()
+        for sink in sinks.values():
+            sink.commit()
+    except BaseException:
+        for sink in sinks.values():
+            sink.abort()
+        raise
+    return summaries["root"], summaries["all"], [lex_meta, reading_meta]
 
 
 def _load_sentiment_encoder(config: FeatureBuildConfig) -> SentimentEncoder:
@@ -1913,6 +2355,14 @@ def build_analysis_features(
                 ),
             )
 
+    # The scalar checkpoints now own all candidate-level values needed below.
+    # Releasing the full in-memory candidate frame before assembly prevents a
+    # second 9M-row table from doubling peak ordinary-RAM usage.
+    del grouped_stories, base
+    story = None
+    texts = None
+    gc.collect()
+
     local_text_manifest = {
         "status": "complete",
         "build_signature": local_text_signature,
@@ -1971,49 +2421,29 @@ def build_analysis_features(
     _atomic_json(state, state_path)
     _atomic_json(state, config.output_root / "build_state.json")
 
-    import pyarrow.dataset as ds
-
-    print("Feature stage: assembling scalar dataset and length adjustments", flush=True)
-    stage_started = time.monotonic()
-    scalar = ds.dataset(checkpoint_root, format="parquet", partitioning=None).to_table().to_pandas()
-    scalar["lexdiv_length_adjusted"], lex_meta = _length_residual(scalar, "cttr")
-    scalar["reading_level_length_adjusted"], reading_meta = _length_residual(scalar, "smog_de")
-    print(
-        "Feature stage complete: scalar assembly | "
-        f"rows={len(scalar):,} elapsed={_format_duration(time.monotonic() - stage_started)}",
-        flush=True,
-    )
-
-    print("Feature stage: constructing root and all-comment choice sets", flush=True)
-    stage_started = time.monotonic()
-    # The full raw table was deliberately released before NLP inference. Reload
-    # it only for final curator-set validation and immediately release it again.
-    choice_raw = _read_dataset(config.data_root / "comments", config.year, comment_columns)
-    choice_raw["created_at"] = _as_utc(choice_raw["created_at"])
-    scalar_story_ids = set(scalar["story_id"].astype(str).unique())
-    choice_raw = choice_raw[
-        choice_raw["story_id"].astype(str).isin(scalar_story_ids)
-    ].copy()
-    root, root_ties, root_summary = _make_choice_set(
-        scalar, choice_raw, scope="root", config=config
-    )
-    all_comments, all_ties, all_summary = _make_choice_set(
-        scalar, choice_raw, scope="all", config=config
-    )
-    del choice_raw, scalar_story_ids
+    # Metadata needed below has already been frozen in the family manifests.
+    # Free both transformer objects (and their CPU-side weights) before the
+    # bounded-memory scalar pass.
+    del sentiment_encoder, toxicity_encoder
     gc.collect()
-    _atomic_parquet(root, config.output_root / "choice_set_root.parquet")
-    _atomic_parquet(all_comments, config.output_root / "choice_set_all.parquet")
-    _atomic_parquet(root_ties.assign(candidate_scope="root"), config.output_root / "tie_diagnostics_root.parquet")
-    _atomic_parquet(all_ties.assign(candidate_scope="all"), config.output_root / "tie_diagnostics_all.parquet")
+
+    print("Feature stage: bounded-memory scalar assembly and choice sets", flush=True)
+    stage_started = time.monotonic()
+    root_summary, all_summary, length_adjustment = _build_choice_sets_bounded(
+        checkpoint_root=checkpoint_root,
+        data_root=config.data_root,
+        output_root=config.output_root,
+        config=config,
+    )
     print(
         "Feature stage complete: choice sets | "
-        f"root_rows={len(root):,} all_rows={len(all_comments):,} "
+        f"root_rows={root_summary['candidate_rows']:,} "
+        f"all_rows={all_summary['candidate_rows']:,} "
         f"elapsed={_format_duration(time.monotonic() - stage_started)}",
         flush=True,
     )
     registry = _feature_registry(aqua_available=aqua_manifest is not None)
-    registry["length_adjustment"] = [lex_meta, reading_meta]
+    registry["length_adjustment"] = length_adjustment
     registry["local_text"] = {
         "feature_store": str(local_text_checkpoint_root),
         "build_signature": local_text_signature,
@@ -2021,13 +2451,13 @@ def build_analysis_features(
         "columns": LOCAL_TEXT_COLUMNS,
     }
     registry["nlp"] = {
-        "sentiment_model": sentiment_encoder.model_id,
-        "sentiment_revision": getattr(sentiment_encoder, "resolved_revision", "unresolved"),
+        "sentiment_model": sentiment_identity["model_id"],
+        "sentiment_revision": sentiment_identity["resolved_revision"],
         "sentiment_aggregation": "token_weighted_chunk_mean",
         "sentiment_feature_store": str(sentiment_checkpoint_root),
         "sentiment_build_signature": sentiment_signature,
-        "toxicity_model": toxicity_encoder.model_id,
-        "toxicity_revision": getattr(toxicity_encoder, "resolved_revision", "unresolved"),
+        "toxicity_model": toxicity_identity["model_id"],
+        "toxicity_revision": toxicity_identity["resolved_revision"],
         "toxicity_aggregation": {
             "toxicity_probability": "maximum_chunk_probability",
             "toxicity_mean_probability": "token_weighted_chunk_mean",
@@ -2087,6 +2517,9 @@ def build_analysis_features(
         },
         "execution": {
             "elapsed_seconds": time.monotonic() - build_started,
+            "choice_assembly_strategy": "bounded_story_stream",
+            "choice_write_batch_rows": CHOICE_WRITE_BATCH_ROWS,
+            "length_fit_columns": ["log_words", "cttr", "smog_de"],
             "new_story_checkpoints": written_stories,
             "skipped_story_checkpoints": skipped_stories,
             "sentiment_story_checkpoints_written": sentiment_written,

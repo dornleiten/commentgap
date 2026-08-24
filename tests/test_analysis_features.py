@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,8 +11,11 @@ from commentgap_analysis.features import (
     ROOT_MODEL_FEATURES,
     FeatureBuildConfig,
     _adapter_implementation_signature,
+    _build_choice_sets_bounded,
     _identity_signature,
+    _length_residual,
     _local_text_identity,
+    _make_choice_set,
     article_similarity_top3,
     assign_audience_labels,
     compute_author_history,
@@ -35,6 +40,124 @@ from commentgap_analysis.nlp import (
 
 
 class AnalysisFeatureTests(unittest.TestCase):
+    def test_bounded_choice_assembly_matches_in_memory_implementation(self):
+        rows: list[dict[str, object]] = []
+        raw_rows: list[dict[str, object]] = []
+        for story_number, story_id in enumerate(("s1", "s2"), start=1):
+            for position in range(12):
+                comment_id = f"{story_id}-c{position:02d}"
+                is_root = position < 6
+                row: dict[str, object] = {
+                    "story_id": story_id,
+                    "comment_id": comment_id,
+                    "article_year": 2025,
+                    "article_month": 2,
+                    "is_root": is_root,
+                    "is_sticky": position == 0,
+                    "published_at_source": "page",
+                    "invalid_posting_time": False,
+                    "votes_positive": 20 - position,
+                    "votes_negative": position % 2,
+                    "vienna_period": "weekday_work",
+                    "word_count": 10 + position,
+                    "cttr": 0.3 + (story_number * 0.01) + position * 0.005,
+                    "smog_de": 4.0 + story_number * 0.1 + position * 0.03,
+                    "sentiment_positive": 0.4,
+                    "sentiment_negative": 0.2,
+                    "sentiment_neutral": 0.4,
+                    "toxicity_probability": 0.1,
+                    "toxicity_mean_probability": 0.05,
+                    "log_words": np.log1p(10 + position),
+                    "url_present": 0,
+                    "article_similarity_top3": 0.5,
+                    "novelty_prior_roots": np.nan if position == 0 else 0.2 + position * 0.01,
+                    "novelty_prior_all": np.nan if position == 0 else 0.3 + position * 0.01,
+                }
+                for column in (
+                    "hours_since_article",
+                    "prior_roots",
+                    "prior_comments",
+                    "comments_prev_hour",
+                    "author_prior_30d_comments",
+                    "author_prior_30d_snapshot_upvotes",
+                    "author_prior_30d_snapshot_downvotes",
+                    "author_prior_comments_story",
+                    "depth",
+                    "branch_prior_comments",
+                    "branch_comments_prev_hour",
+                ):
+                    row[column] = position
+                rows.append(row)
+                raw_rows.append(
+                    {
+                        "story_id": story_id,
+                        "comment_id": comment_id,
+                        "is_root": is_root,
+                        "is_sticky": position == 0,
+                        "lifecycle_status": "Published",
+                        "effective_text": f"Text {comment_id}",
+                        "created_at": pd.Timestamp("2025-02-01T10:00:00Z")
+                        + pd.Timedelta(minutes=position),
+                    }
+                )
+        scalar = pd.DataFrame(rows)
+        raw = pd.DataFrame(raw_rows)
+        expected = scalar.copy()
+        expected["lexdiv_length_adjusted"], _ = _length_residual(expected, "cttr")
+        expected["reading_level_length_adjusted"], _ = _length_residual(
+            expected, "smog_de"
+        )
+        config = FeatureBuildConfig(
+            inference_mode=False,
+            tie_draws=2,
+            exclude_january_without_lookback=False,
+        )
+        expected_root, _, expected_root_summary = _make_choice_set(
+            expected, raw, scope="root", config=config
+        )
+        expected_all, _, expected_all_summary = _make_choice_set(
+            expected, raw, scope="all", config=config
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scalar_root = root / "scalar" / "year=2025"
+            comments_root = root / "data" / "comments" / "year=2025" / "month=02"
+            comments_root.mkdir(parents=True)
+            raw.to_parquet(comments_root / "comments.parquet", index=False)
+            for story_id, story in scalar.groupby("story_id", sort=True):
+                destination = scalar_root / "month=02" / f"{story_id}.parquet"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                story.to_parquet(destination, index=False)
+            actual_root_summary, actual_all_summary, metadata = (
+                _build_choice_sets_bounded(
+                    checkpoint_root=scalar_root,
+                    data_root=root / "data",
+                    output_root=root / "output",
+                    config=config,
+                )
+            )
+            actual_root = pd.read_parquet(root / "output" / "choice_set_root.parquet")
+            actual_all = pd.read_parquet(root / "output" / "choice_set_all.parquet")
+
+        pd.testing.assert_frame_equal(
+            actual_root.reset_index(drop=True),
+            expected_root.reset_index(drop=True),
+            check_exact=False,
+            atol=1e-12,
+            rtol=1e-12,
+        )
+        pd.testing.assert_frame_equal(
+            actual_all.reset_index(drop=True),
+            expected_all.reset_index(drop=True),
+            check_exact=False,
+            atol=1e-12,
+            rtol=1e-12,
+        )
+        self.assertEqual(actual_root_summary, expected_root_summary)
+        self.assertEqual(actual_all_summary, expected_all_summary)
+        self.assertEqual([item["outcome"] for item in metadata], ["cttr", "smog_de"])
+
     def test_feature_family_cache_identities_are_isolated(self):
         class SentimentAdapter:
             pass

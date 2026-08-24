@@ -246,6 +246,15 @@ The family identity and counters are recorded in
 `provenance_manifest.json`. Progress displays
 `local_text(new/reused)=<created>/<reused>`.
 
+Final choice-set assembly is also bounded in ordinary RAM. It fits the global
+CTTR and SMOG length adjustments from only `log_words`, `cttr`, and `smog_de`,
+then releases that compact table and processes full scalar features one story
+at a time. Root/all choice sets and tie diagnostics are written through
+25,000-row buffered Parquet writers. A terminated assembly can be rerun with
+the same command: completed scalar, local-text, sentiment, and toxicity story
+checkpoints are reused, and the final `.parquet.tmp` files are replaced
+atomically only after a complete pass.
+
 ### Isolated AQuA deliberative-quality store
 
 AQuA is deliberately not installed in the main Transformers 5 environment.
