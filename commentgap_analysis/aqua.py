@@ -375,6 +375,7 @@ def _build_identity(config: AquaBuildConfig, fingerprint: str) -> tuple[str, dic
         "max_length": config.max_length,
         "allow_incomplete": config.allow_incomplete,
         "max_stories": config.max_stories,
+        "require_parity": config.require_parity,
         "parity_fixture_sha256": parity.get("fixture_sha256"),
     }
     signature = hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()

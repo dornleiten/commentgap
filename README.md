@@ -331,6 +331,12 @@ Production builds fail closed until `commentgap-aqua-parity` verifies the
 upstream hard labels and published score, repeated CPU and sequential logits,
 and updates `aqua_runtime/artifacts.json` with the fixture hash.
 
+If a complete all-story run was accidentally made with
+`--allow-unverified-parity`, do not edit its manifest manually or repeat the
+GPU inference. After parity has been verified, use the audited, resumable
+`commentgap-aqua-promote` workflow described in
+[`notes/AQUA_PILOT_PROMOTION.md`](notes/AQUA_PILOT_PROMOTION.md).
+
 Each complete store retains all 20 hard labels, logits, raw four-class softmax
 values, raw expected ordinal values, published hard composite score, raw
 expected composite score, token count, and truncation status. The probabilities
