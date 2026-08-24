@@ -22,6 +22,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+from aqua_runtime.schema import text_hash
+
 from .nlp import (
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_EMBEDDING_MODEL_REVISION,
@@ -47,6 +49,8 @@ VIENNA = ZoneInfo("Europe/Vienna")
 
 BASE_SEED = 20260813
 DEFAULT_TIE_DRAWS = 10
+LOCAL_TEXT_OUTPUT_SEMANTICS_VERSION = 1
+LOCAL_TEXT_COLUMNS = ["word_count", "log_words", "cttr", "smog_de", "url_present"]
 
 
 ROOT_MODEL_FEATURES = [
@@ -620,6 +624,128 @@ def smog_de(text: str) -> float:
     return math.sqrt(polysyllables * 30.0 / sentences) - 2.0
 
 
+def _local_text_identity(
+    config: FeatureBuildConfig, fingerprint: str
+) -> dict[str, Any]:
+    try:
+        pyphen_version = package_version("pyphen")
+    except PackageNotFoundError:
+        pyphen_version = "not-installed-vowel-fallback"
+    return {
+        "schema_version": 1,
+        "output_semantics_version": LOCAL_TEXT_OUTPUT_SEMANTICS_VERSION,
+        "year": config.year,
+        "dataset_fingerprint": fingerprint,
+        "candidate_filter": (
+            "Published, non-empty effective_text, non-missing created_at"
+        ),
+        "max_stories": config.max_stories,
+        "columns": LOCAL_TEXT_COLUMNS,
+        "word_pattern": WORD_RE.pattern,
+        "sentence_pattern": SENTENCE_RE.pattern,
+        "vowel_group_pattern": VOWEL_GROUP_RE.pattern,
+        "url_pattern": URL_RE.pattern,
+        "url_pattern_flags": URL_RE.flags,
+        "syllabification": {"language": "de_DE", "pyphen_version": pyphen_version},
+        "smog_formula": "sqrt(polysyllables * 30 / sentences) - 2",
+        "implementation_signature": _functions_implementation_signature(
+            word_count,
+            cttr,
+            _syllables_de,
+            smog_de,
+        ),
+    }
+
+
+def compute_local_text_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """Compute deterministic comment-local measures without retaining raw text."""
+    required = {"story_id", "comment_id", "effective_text"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"Missing local-text input columns: {sorted(missing)}")
+    if frame[["story_id", "comment_id", "effective_text"]].isna().any().any():
+        raise ValueError("Local-text input keys and text cannot be null")
+    if frame.duplicated(["story_id", "comment_id"]).any():
+        raise ValueError("Local-text input contains duplicate keys")
+    output = frame[["story_id", "comment_id"]].copy()
+    output["story_id"] = output["story_id"].astype(str)
+    output["comment_id"] = output["comment_id"].astype(str)
+    text = frame["effective_text"].astype(str)
+    output["effective_text_hash"] = text.map(text_hash)
+    output["word_count"] = text.map(word_count)
+    output["log_words"] = np.log1p(output["word_count"])
+    output["cttr"] = text.map(cttr)
+    output["smog_de"] = text.map(smog_de)
+    output["url_present"] = text.str.contains(URL_RE).astype(int)
+    return output
+
+
+def validate_local_text_features(
+    frame: pd.DataFrame, expected: pd.DataFrame
+) -> pd.DataFrame:
+    """Validate a local-text checkpoint and restore the expected key order."""
+    required_columns = [
+        "story_id",
+        "comment_id",
+        "effective_text_hash",
+        *LOCAL_TEXT_COLUMNS,
+    ]
+    missing = set(required_columns) - set(frame.columns)
+    if missing:
+        raise ValueError(f"Local-text checkpoint is missing columns: {sorted(missing)}")
+    expected_required = {"story_id", "comment_id", "effective_text"}
+    missing_expected = expected_required - set(expected.columns)
+    if missing_expected:
+        raise ValueError(
+            f"Local-text validation input is missing columns: {sorted(missing_expected)}"
+        )
+    actual = frame[required_columns].copy()
+    wanted = expected[["story_id", "comment_id", "effective_text"]].copy()
+    for candidate in (actual, wanted):
+        candidate["story_id"] = candidate["story_id"].astype(str)
+        candidate["comment_id"] = candidate["comment_id"].astype(str)
+    if actual.duplicated(["story_id", "comment_id"]).any():
+        raise ValueError("Local-text checkpoint contains duplicate keys")
+    if wanted.duplicated(["story_id", "comment_id"]).any():
+        raise ValueError("Local-text validation input contains duplicate keys")
+    wanted["effective_text_hash"] = wanted["effective_text"].astype(str).map(text_hash)
+    wanted = wanted.drop(columns="effective_text")
+    joined = wanted.merge(
+        actual,
+        on=["story_id", "comment_id"],
+        how="outer",
+        suffixes=("_expected", "_actual"),
+        indicator=True,
+        validate="one_to_one",
+        sort=False,
+    )
+    if not joined["_merge"].eq("both").all():
+        raise ValueError(
+            "Local-text checkpoint key coverage mismatch: "
+            f"{joined['_merge'].value_counts().to_dict()}"
+        )
+    if not joined["effective_text_hash_expected"].eq(
+        joined["effective_text_hash_actual"]
+    ).all():
+        raise ValueError("Local-text checkpoint effective_text_hash mismatch")
+    if joined[LOCAL_TEXT_COLUMNS].isna().any().any():
+        raise ValueError("Local-text checkpoint contains null feature values")
+    if (joined["word_count"] < 0).any():
+        raise ValueError("Local-text checkpoint contains a negative word count")
+    if not np.allclose(
+        joined["log_words"].to_numpy(float),
+        np.log1p(joined["word_count"].to_numpy(float)),
+        atol=1e-12,
+        rtol=1e-12,
+    ):
+        raise ValueError("Local-text log_words does not recompute")
+    if not joined["url_present"].isin((0, 1)).all():
+        raise ValueError("Local-text URL indicator is not binary")
+    if not np.isfinite(joined[["cttr", "smog_de"]].to_numpy(float)).all():
+        raise ValueError("Local-text checkpoint contains non-finite values")
+    return joined[["story_id", "comment_id", *LOCAL_TEXT_COLUMNS]].copy()
+
+
 def vienna_period(timestamp: pd.Timestamp) -> str | None:
     if pd.isna(timestamp):
         return None
@@ -1114,6 +1240,8 @@ def build_analysis_features(
         ),
     }
     history_signature = _identity_signature(history_identity)
+    local_text_identity = _local_text_identity(config, fingerprint)
+    local_text_signature = _identity_signature(local_text_identity)
 
     # The final assembly identity composes independent upstream identities. It
     # intentionally excludes batch size, device and progress frequency because
@@ -1123,6 +1251,7 @@ def build_analysis_features(
         "year": config.year,
         "target_dataset_fingerprint": fingerprint,
         "history_signature": history_signature,
+        "local_text_signature": local_text_signature,
         "similarity_build_signature": similarity_manifest["build_signature"],
         "aqua_build_signature": (
             aqua_manifest["build_signature"] if aqua_manifest is not None else None
@@ -1174,6 +1303,8 @@ def build_analysis_features(
         "build_identity": build_identity,
         "history_signature": history_signature,
         "history_identity": history_identity,
+        "local_text_signature": local_text_signature,
+        "local_text_identity": local_text_identity,
         "watermark": watermark,
         "config": {key: str(value) if isinstance(value, Path) else value for key, value in asdict(config).items()},
     }
@@ -1486,16 +1617,8 @@ def build_analysis_features(
     ).dt.total_seconds() / 3600
     base["invalid_posting_time"] = base["hours_since_article"].isna() | (base["hours_since_article"] < 0)
     base["vienna_period"] = base["created_at"].map(vienna_period)
-    print(
-        f"Feature stage: calculating local text measures for {len(base):,} candidates",
-        flush=True,
-    )
+    print("Feature stage: validating and attaching AQuA features", flush=True)
     stage_started = time.monotonic()
-    base["word_count"] = base["effective_text"].map(word_count)
-    base["log_words"] = np.log1p(base["word_count"])
-    base["cttr"] = base["effective_text"].map(cttr)
-    base["smog_de"] = base["effective_text"].map(smog_de)
-    base["url_present"] = base["effective_text"].str.contains(URL_RE).astype(int)
     if config.aqua_store is not None:
         from .aqua import load_aqua_for_candidates
 
@@ -1516,7 +1639,7 @@ def build_analysis_features(
         if len(base) != before or base["aqua_runtime_status"].isna().any():
             raise ValueError("Incomplete AQuA feature merge")
     print(
-        "Feature stage complete: local text measures | "
+        "Feature stage complete: AQuA feature attachment | "
         f"elapsed={_format_duration(time.monotonic() - stage_started)}",
         flush=True,
     )
@@ -1599,6 +1722,13 @@ def build_analysis_features(
         / f"build={toxicity_signature[:12]}-{fingerprint[:8]}"
         / f"year={config.year}"
     )
+    local_text_checkpoint_root = (
+        config.output_root
+        / "feature_families"
+        / "local_text"
+        / f"build={local_text_signature[:12]}-{fingerprint[:8]}"
+        / f"year={config.year}"
+    )
 
     checkpoint_root = (
         config.output_root
@@ -1617,9 +1747,12 @@ def build_analysis_features(
     sentiment_reused = 0
     toxicity_written = 0
     toxicity_reused = 0
+    local_text_written = 0
+    local_text_reused = 0
     stage_started = time.monotonic()
     print(
-        "Feature stage: sentiment, toxicity, semantic joins, and scalar checkpoints | "
+        "Feature stage: local text, sentiment, toxicity, semantic joins, and "
+        "scalar checkpoints | "
         f"stories={total_stories:,} candidates={total_candidates:,}",
         flush=True,
     )
@@ -1646,6 +1779,30 @@ def build_analysis_features(
         story = story.sort_values(["created_at", "comment_id"]).copy()
         texts = story["effective_text"].astype(str).tolist()
         family_key_columns = ["story_id", "comment_id"]
+        local_text_path = (
+            local_text_checkpoint_root / f"month={month:02d}" / f"{story_id}.parquet"
+        )
+        if local_text_path.exists() and not config.overwrite:
+            local_text_frame = validate_local_text_features(
+                pd.read_parquet(local_text_path), story
+            )
+            local_text_reused += 1
+        else:
+            local_text_output = compute_local_text_features(story)
+            local_text_frame = validate_local_text_features(local_text_output, story)
+            _atomic_parquet(local_text_output, local_text_path)
+            del local_text_output
+            local_text_written += 1
+        before = len(story)
+        story = story.merge(
+            local_text_frame,
+            on=family_key_columns,
+            how="left",
+            validate="one_to_one",
+        )
+        if len(story) != before or story[LOCAL_TEXT_COLUMNS].isna().any().any():
+            raise ValueError(f"Incomplete local-text feature join for story {story_id}")
+        del local_text_frame
         sentiment_columns = [
             "sentiment_positive",
             "sentiment_negative",
@@ -1750,11 +1907,23 @@ def build_analysis_features(
                     f"candidates={processed_candidates:,}/{total_candidates:,} "
                     f"new_rows={new_candidates:,} written={written_stories:,} "
                     f"skipped={skipped_stories:,} "
+                    f"local_text(new/reused)={local_text_written:,}/{local_text_reused:,} "
                     f"sentiment(new/reused)={sentiment_written:,}/{sentiment_reused:,} "
                     f"toxicity(new/reused)={toxicity_written:,}/{toxicity_reused:,}"
                 ),
             )
 
+    local_text_manifest = {
+        "status": "complete",
+        "build_signature": local_text_signature,
+        "identity": local_text_identity,
+        "output_semantics_version": LOCAL_TEXT_OUTPUT_SEMANTICS_VERSION,
+        "root": str(local_text_checkpoint_root),
+        "files": total_stories,
+        "rows": total_candidates,
+        "new_story_checkpoints": local_text_written,
+        "reused_story_checkpoints": local_text_reused,
+    }
     sentiment_manifest = {
         "status": "complete",
         "build_signature": sentiment_signature,
@@ -1791,8 +1960,12 @@ def build_analysis_features(
             else None
         ),
     }
+    _atomic_json(
+        local_text_manifest, local_text_checkpoint_root.parent / "manifest.json"
+    )
     _atomic_json(sentiment_manifest, sentiment_checkpoint_root.parent / "manifest.json")
     _atomic_json(toxicity_manifest, toxicity_checkpoint_root.parent / "manifest.json")
+    state.setdefault("stages", {})["local_text"] = local_text_manifest
     state.setdefault("stages", {})["sentiment"] = sentiment_manifest
     state.setdefault("stages", {})["toxicity"] = toxicity_manifest
     _atomic_json(state, state_path)
@@ -1841,6 +2014,12 @@ def build_analysis_features(
     )
     registry = _feature_registry(aqua_available=aqua_manifest is not None)
     registry["length_adjustment"] = [lex_meta, reading_meta]
+    registry["local_text"] = {
+        "feature_store": str(local_text_checkpoint_root),
+        "build_signature": local_text_signature,
+        "output_semantics_version": LOCAL_TEXT_OUTPUT_SEMANTICS_VERSION,
+        "columns": LOCAL_TEXT_COLUMNS,
+    }
     registry["nlp"] = {
         "sentiment_model": sentiment_encoder.model_id,
         "sentiment_revision": getattr(sentiment_encoder, "resolved_revision", "unresolved"),
@@ -1899,6 +2078,7 @@ def build_analysis_features(
         "root": root_summary,
         "all": all_summary,
         "models": registry["nlp"],
+        "local_text": registry["local_text"],
         "environment": {
             "python": platform.python_version(),
             "platform": platform.platform(),
@@ -1913,6 +2093,8 @@ def build_analysis_features(
             "sentiment_story_checkpoints_reused": sentiment_reused,
             "toxicity_story_checkpoints_written": toxicity_written,
             "toxicity_story_checkpoints_reused": toxicity_reused,
+            "local_text_story_checkpoints_written": local_text_written,
+            "local_text_story_checkpoints_reused": local_text_reused,
         },
     }
     _atomic_json(summary, config.output_root / "provenance_manifest.json")

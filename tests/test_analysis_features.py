@@ -10,12 +10,15 @@ from commentgap_analysis.features import (
     FeatureBuildConfig,
     _adapter_implementation_signature,
     _identity_signature,
+    _local_text_identity,
     article_similarity_top3,
     assign_audience_labels,
     compute_author_history,
     compute_discussion_history,
+    compute_local_text_features,
     temporal_novelty,
     validate_approximate_novelty,
+    validate_local_text_features,
     validate_qa_summary,
     vienna_period,
 )
@@ -56,6 +59,52 @@ class AnalysisFeatureTests(unittest.TestCase):
         self.assertEqual(first["history"], second["history"])
         self.assertEqual(first["sentiment"], second["sentiment"])
         self.assertNotEqual(_identity_signature(first), _identity_signature(second))
+
+    def test_local_text_cache_is_independent_of_aqua_and_lookback(self):
+        fingerprint = "f" * 64
+        baseline = _local_text_identity(
+            FeatureBuildConfig(inference_mode=False), fingerprint
+        )
+        with_external_stores = _local_text_identity(
+            FeatureBuildConfig(
+                inference_mode=False,
+                aqua_store="aqua",
+                lookback_root="lookback",
+            ),
+            fingerprint,
+        )
+        self.assertEqual(baseline, with_external_stores)
+
+    def test_local_text_checkpoint_round_trip_and_validation(self):
+        source = pd.DataFrame(
+            {
+                "story_id": ["s1", "s1"],
+                "comment_id": ["c1", "c2"],
+                "effective_text": [
+                    "Ein einfacher Beitrag.",
+                    "Mehr Wörter und https://example.org als Verweis!",
+                ],
+            }
+        )
+        checkpoint = compute_local_text_features(source)
+        validated = validate_local_text_features(checkpoint, source)
+        self.assertEqual(validated["comment_id"].tolist(), ["c1", "c2"])
+        self.assertEqual(validated["url_present"].tolist(), [0, 1])
+        self.assertEqual(
+            validated["log_words"].tolist(),
+            np.log1p(validated["word_count"]).tolist(),
+        )
+        self.assertNotIn("effective_text", checkpoint)
+
+        corrupted = checkpoint.copy()
+        corrupted.at[0, "effective_text_hash"] = "changed"
+        with self.assertRaisesRegex(ValueError, "effective_text_hash mismatch"):
+            validate_local_text_features(corrupted, source)
+
+        corrupted = checkpoint.copy()
+        corrupted.at[0, "log_words"] += 0.1
+        with self.assertRaisesRegex(ValueError, "log_words does not recompute"):
+            validate_local_text_features(corrupted, source)
 
     def test_sentiment_special_tokens_support_transformers_5_tokenizer(self):
         encoder = XLMTwitterSentimentEncoder.__new__(XLMTwitterSentimentEncoder)

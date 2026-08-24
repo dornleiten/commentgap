@@ -226,6 +226,26 @@ They can be overridden from `commentgap-features` with
 `--toxicity-revision`; custom revisions are resolved to immutable Hub commits
 before inference.
 
+Deterministic comment-local measures are also checkpointed independently of
+the final feature build. The store contains `word_count`, `log_words`, `cttr`,
+German `smog_de`, and `url_present` in one validated Parquet shard per story:
+
+```text
+model_output/selection_2025/features/feature_families/local_text/
+  build=<local-signature>-<dataset-fingerprint>/year=2025/month=MM/<story_id>.parquet
+```
+
+The first feature run after introducing (or semantically changing) these
+measures creates the shards. Later builds reuse them when the source dataset,
+year, candidate subset, text-measure semantics, and Pyphen version match. Reuse
+is independent of AQuA, lookback-history, choice-set, device, and NLP batch
+settings. Every shard is checked for exact story/comment coverage and
+`effective_text` hashes before use; stale or mismatched shards fail closed.
+The family identity and counters are recorded in
+`feature_families/local_text/.../manifest.json`, `feature_manifest.json`, and
+`provenance_manifest.json`. Progress displays
+`local_text(new/reused)=<created>/<reused>`.
+
 ### Isolated AQuA deliberative-quality store
 
 AQuA is deliberately not installed in the main Transformers 5 environment.
