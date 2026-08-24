@@ -1,24 +1,4 @@
 {
-  "schema_version": 1,
-  "upstream": {
-    "repository": "https://github.com/mabehrendt/AQuA",
-    "commit": "637914dcd62491766ff478dc21632813780d005d"
-  },
-  "base_model": {
-    "model_id": "bert-base-multilingual-cased",
-    "revision": "3f076fdb1ab68d5b2880cb87a0886f315b8146f8"
-  },
-  "parity": {
-    "status": "pending",
-    "fixture_sha256": null,
-    "note": "Run and freeze upstream parity in the isolated legacy environment before a production-watermarked build."
-  },
-  "ordinal_class_mapping": {
-    "LABEL_0": 0,
-    "LABEL_1": 1,
-    "LABEL_2": 2,
-    "LABEL_3": 3
-  },
   "adapter_files": {
     "addknowledge": {
       "adapter_config.json": "3544ebb67f202cbd978fad3549b8a8cd88d8ea96c307198227229b2ae4ecc90c",
@@ -140,5 +120,25 @@
       "pytorch_adapter.bin": "17b02da9fa6d0efef1946e0502dbfc3c8093dbbaa352ff6c5e6baffcb7f38d7d",
       "pytorch_model_head.bin": "a15c377d05f5d8163b9e86d1703d4be86211525acdbb4b1b0c279cedd5b0ae8e"
     }
+  },
+  "base_model": {
+    "model_id": "bert-base-multilingual-cased",
+    "revision": "3f076fdb1ab68d5b2880cb87a0886f315b8146f8"
+  },
+  "ordinal_class_mapping": {
+    "LABEL_0": 0,
+    "LABEL_1": 1,
+    "LABEL_2": 2,
+    "LABEL_3": 3
+  },
+  "parity": {
+    "fixture": "tests/fixtures/aqua/parity_report.json",
+    "fixture_sha256": "d431b24db5d876e51b568db9f20f51c92736d728c9575123c37b13d60b40f46f",
+    "status": "verified"
+  },
+  "schema_version": 1,
+  "upstream": {
+    "commit": "637914dcd62491766ff478dc21632813780d005d",
+    "repository": "https://github.com/mabehrendt/AQuA"
   }
 }
