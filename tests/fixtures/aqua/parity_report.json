@@ -1,0 +1,177 @@
+{
+  "adapter_results": {
+    "addknowledge": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "address": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "discrimination": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "fact": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "insult": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "justification": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "opinion": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "question": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "refcontents": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "refformat": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "refmedium": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "refpersonal": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "refusers": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "relevance": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "respect": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "sarcasm": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "screaming": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "solproposal": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "storytelling": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    },
+    "vulgar": {
+      "exact": true,
+      "matching_hard_labels": 16,
+      "rows": 16
+    }
+  },
+  "comparisons": {
+    "repeat_cpu": {
+      "adapter_maximum_absolute_logit_differences": {
+        "addknowledge": 0.0,
+        "address": 0.0,
+        "discrimination": 0.0,
+        "fact": 0.0,
+        "insult": 0.0,
+        "justification": 0.0,
+        "opinion": 0.0,
+        "question": 0.0,
+        "refcontents": 0.0,
+        "refformat": 0.0,
+        "refmedium": 0.0,
+        "refpersonal": 0.0,
+        "refusers": 0.0,
+        "relevance": 0.0,
+        "respect": 0.0,
+        "sarcasm": 0.0,
+        "screaming": 0.0,
+        "solproposal": 0.0,
+        "storytelling": 0.0,
+        "vulgar": 0.0
+      },
+      "hard_labels_exact": true,
+      "logit_absolute_tolerance": 2e-06,
+      "logit_relative_tolerance": 1e-06,
+      "logits_within_tolerance": true,
+      "maximum_absolute_logit_difference": 0.0,
+      "sha256": "b93cf51190fabc0ab3846be5edf60e433f9d9ea5dc2ab5e451641e89b160b3a8"
+    },
+    "sequential": {
+      "adapter_maximum_absolute_logit_differences": {
+        "addknowledge": 7.152557373046875e-07,
+        "address": 9.5367431640625e-07,
+        "discrimination": 2.2724270820617676e-07,
+        "fact": 7.152557373046875e-07,
+        "insult": 2.5331974029541016e-07,
+        "justification": 4.76837158203125e-07,
+        "opinion": 5.662441253662109e-07,
+        "question": 9.5367431640625e-07,
+        "refcontents": 7.152557373046875e-07,
+        "refformat": 7.152557373046875e-07,
+        "refmedium": 4.76837158203125e-07,
+        "refpersonal": 1.1920928955078125e-06,
+        "refusers": 8.344650268554688e-07,
+        "relevance": 3.0547380447387695e-07,
+        "respect": 4.76837158203125e-07,
+        "sarcasm": 3.7997961044311523e-07,
+        "screaming": 9.5367431640625e-07,
+        "solproposal": 4.3213367462158203e-07,
+        "storytelling": 1.2069940567016602e-06,
+        "vulgar": 9.5367431640625e-07
+      },
+      "hard_labels_exact": true,
+      "logit_absolute_tolerance": 2e-06,
+      "logit_relative_tolerance": 1e-06,
+      "logits_within_tolerance": true,
+      "maximum_absolute_logit_difference": 1.2069940567016602e-06,
+      "sha256": "0f197b90f154e013257ae52bc6eaa46674da4ec59ce08d25077acc775d2cf64c"
+    }
+  },
+  "contains_raw_comment_text": false,
+  "files": {
+    "runtime_output_sha256": "b93cf51190fabc0ab3846be5edf60e433f9d9ea5dc2ab5e451641e89b160b3a8",
+    "upstream_output_sha256": "7f3caf76585eee7f09e6cb682fbffbb496a199806794493fdb6364aace0b37ac"
+  },
+  "maximum_hard_score_difference": 8.881784197001252e-16,
+  "platform": "Linux-6.14.0-32-generic-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "rows": 16,
+  "status": "verified",
+  "upstream_commit": "637914dcd62491766ff478dc21632813780d005d"
+}
