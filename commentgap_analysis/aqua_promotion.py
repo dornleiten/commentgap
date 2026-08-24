@@ -31,6 +31,7 @@ from .aqua import (
     _write_qa_table,
     validate_aqua_frame,
 )
+from .aqua_parity import PARITY_LOGIT_ATOL, PARITY_LOGIT_RTOL
 from .features import (
     _atomic_json,
     _atomic_parquet,
@@ -155,7 +156,9 @@ def _validated_parity(
         comparison = comparisons.get(comparison_name, {})
         if (
             comparison.get("hard_labels_exact") is not True
-            or comparison.get("logits_within_1e_6") is not True
+            or comparison.get("logits_within_tolerance") is not True
+            or comparison.get("logit_absolute_tolerance") != PARITY_LOGIT_ATOL
+            or comparison.get("logit_relative_tolerance") != PARITY_LOGIT_RTOL
             or not _is_sha256(comparison.get("sha256"))
         ):
             raise ValueError(

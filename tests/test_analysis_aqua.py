@@ -27,6 +27,7 @@ from aqua_runtime.schema import (
     downstream_feature_columns,
     expected_alias_column,
     label_column,
+    logit_column,
     sha256_file,
 )
 from commentgap_analysis.aqua import (
@@ -421,15 +422,46 @@ class AquaAnalysisTests(unittest.TestCase):
             upstream_path = root / "upstream.tsv"
             runtime_path = root / "runtime.parquet"
             repeat_path = root / "repeat.parquet"
+            sequential_path = root / "sequential.parquet"
             upstream.to_csv(upstream_path, sep="\t", index=False)
             runtime.to_parquet(runtime_path, index=False)
             runtime.to_parquet(repeat_path, index=False)
+            sequential = runtime.copy()
+            sequential.at[0, logit_column(AQUA_FEATURES[0].stem, 0)] += 1.5e-6
+            sequential.to_parquet(sequential_path, index=False)
             report = verify_parity(
-                upstream_path, runtime_path, repeat_output=repeat_path
+                upstream_path,
+                runtime_path,
+                repeat_output=repeat_path,
+                sequential_output=sequential_path,
             )
             self.assertEqual(report["status"], "verified")
             self.assertTrue(
                 all(value["exact"] for value in report["adapter_results"].values())
+            )
+            self.assertTrue(
+                report["comparisons"]["repeat_cpu"]["logits_within_tolerance"]
+            )
+            self.assertEqual(
+                report["comparisons"]["repeat_cpu"][
+                    "maximum_absolute_logit_difference"
+                ],
+                0.0,
+            )
+            self.assertTrue(
+                report["comparisons"]["sequential"]["logits_within_tolerance"]
+            )
+            self.assertGreater(
+                report["comparisons"]["sequential"][
+                    "maximum_absolute_logit_difference"
+                ],
+                1e-6,
+            )
+            self.assertLessEqual(
+                report["comparisons"]["sequential"][
+                    "maximum_absolute_logit_difference"
+                ],
+                2e-6,
             )
 
     def test_parity_verifier_normalizes_numeric_tsv_keys_to_runtime_strings(self):

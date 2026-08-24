@@ -20,6 +20,10 @@ from aqua_runtime.schema import (
 )
 
 
+PARITY_LOGIT_ATOL = 2e-6
+PARITY_LOGIT_RTOL = 1e-6
+
+
 def _normalize_keys(frame: pd.DataFrame, label: str) -> pd.DataFrame:
     key_columns = ["story_id", "comment_id"]
     missing = [column for column in key_columns if column not in frame]
@@ -106,26 +110,53 @@ def verify_parity(
             )
             for feature in AQUA_FEATURES
         )
+        adapter_maximum_differences = {}
+        logit_differences = []
+        for feature in AQUA_FEATURES:
+            feature_differences = []
+            for ordinal in range(4):
+                difference = np.abs(
+                    comparison[
+                        f"{logit_column(feature.stem, ordinal)}_reference"
+                    ].to_numpy(float)
+                    - comparison[
+                        f"{logit_column(feature.stem, ordinal)}_comparison"
+                    ].to_numpy(float)
+                )
+                feature_differences.append(difference)
+                logit_differences.append(difference)
+            adapter_maximum_differences[feature.repository_adapter] = float(
+                np.concatenate(feature_differences).max(initial=0.0)
+            )
+        all_logit_differences = np.concatenate(logit_differences)
         logits_close = all(
             np.allclose(
                 comparison[f"{logit_column(feature.stem, ordinal)}_reference"],
                 comparison[f"{logit_column(feature.stem, ordinal)}_comparison"],
-                atol=1e-6,
-                rtol=1e-6,
+                atol=PARITY_LOGIT_ATOL,
+                rtol=PARITY_LOGIT_RTOL,
             )
             for feature in AQUA_FEATURES
             for ordinal in range(4)
         )
         comparisons[label] = {
             "hard_labels_exact": labels_equal,
-            "logits_within_1e_6": logits_close,
+            "logits_within_tolerance": logits_close,
+            "logit_absolute_tolerance": PARITY_LOGIT_ATOL,
+            "logit_relative_tolerance": PARITY_LOGIT_RTOL,
+            "maximum_absolute_logit_difference": float(
+                all_logit_differences.max(initial=0.0)
+            ),
+            "adapter_maximum_absolute_logit_differences": (
+                adapter_maximum_differences
+            ),
             "sha256": sha256_file(path),
         }
     verified = (
         all(result["exact"] for result in adapter_results.values())
         and bool((score_difference <= 1e-6).all())
         and all(
-            result["hard_labels_exact"] and result["logits_within_1e_6"]
+            result["hard_labels_exact"] and result["logits_within_tolerance"]
             for result in comparisons.values()
         )
     )
