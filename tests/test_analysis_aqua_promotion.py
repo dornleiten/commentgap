@@ -155,7 +155,10 @@ class AquaPromotionTests(unittest.TestCase):
                         "comparisons": {
                             name: {
                                 "hard_labels_exact": True,
-                                "logits_within_1e_6": True,
+                                "logits_within_tolerance": True,
+                                "logit_absolute_tolerance": 2e-6,
+                                "logit_relative_tolerance": 1e-6,
+                                "maximum_absolute_logit_difference": 0.0,
                                 "sha256": "a" * 64,
                             }
                             for name in ("repeat_cpu", "sequential")
