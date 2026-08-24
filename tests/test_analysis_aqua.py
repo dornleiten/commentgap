@@ -432,6 +432,33 @@ class AquaAnalysisTests(unittest.TestCase):
                 all(value["exact"] for value in report["adapter_results"].values())
             )
 
+    def test_parity_verifier_normalizes_numeric_tsv_keys_to_runtime_strings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            keys = pd.DataFrame(
+                {
+                    "story_id": ["3000000234650", "3000000234650"],
+                    "comment_id": ["987654321", "987654322"],
+                    "effective_text_hash": ["h1", "h2"],
+                }
+            )
+            runtime = _fixture_output_for_keys(keys)
+            upstream = runtime[["story_id", "comment_id"]].astype("int64")
+            for feature in AQUA_FEATURES:
+                upstream[f"{feature.repository_adapter}_ad"] = runtime[
+                    label_column(feature.stem)
+                ]
+            upstream["score"] = runtime["aqua_score_hard"]
+            upstream_path = root / "upstream.tsv"
+            runtime_path = root / "runtime.parquet"
+            upstream.to_csv(upstream_path, sep="\t", index=False)
+            runtime.to_parquet(runtime_path, index=False)
+
+            report = verify_parity(upstream_path, runtime_path)
+
+            self.assertEqual(report["status"], "verified")
+            self.assertEqual(report["rows"], 2)
+
     def test_completed_store_merges_aliases_and_rejects_pilot_for_inference(self):
         from aqua_runtime.schema import text_hash
 

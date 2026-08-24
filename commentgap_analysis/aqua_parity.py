@@ -20,6 +20,19 @@ from aqua_runtime.schema import (
 )
 
 
+def _normalize_keys(frame: pd.DataFrame, label: str) -> pd.DataFrame:
+    key_columns = ["story_id", "comment_id"]
+    missing = [column for column in key_columns if column not in frame]
+    if missing:
+        raise ValueError(f"{label} parity input is missing keys: {missing}")
+    if frame[key_columns].isna().any().any():
+        raise ValueError(f"{label} parity input contains null keys")
+    normalized = frame.copy()
+    for column in key_columns:
+        normalized[column] = normalized[column].astype(str)
+    return normalized
+
+
 def _atomic_json(value: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -34,11 +47,11 @@ def verify_parity(
     repeat_output: Path | None = None,
     sequential_output: Path | None = None,
 ) -> dict:
-    upstream = pd.read_csv(upstream_output, sep="\t")
-    runtime = pd.read_parquet(runtime_output)
+    upstream = _normalize_keys(
+        pd.read_csv(upstream_output, sep="\t"), "Upstream"
+    )
+    runtime = _normalize_keys(pd.read_parquet(runtime_output), "Runtime")
     key_columns = ["story_id", "comment_id"]
-    if any(column not in upstream or column not in runtime for column in key_columns):
-        raise ValueError("Parity inputs must retain story_id and comment_id")
     if upstream.duplicated(key_columns).any() or runtime.duplicated(key_columns).any():
         raise ValueError("Parity inputs contain duplicate keys")
     merged = upstream.merge(
@@ -71,7 +84,7 @@ def verify_parity(
     for label, path in (("repeat_cpu", repeat_output), ("sequential", sequential_output)):
         if path is None:
             continue
-        other = pd.read_parquet(path)
+        other = _normalize_keys(pd.read_parquet(path), label)
         if other.duplicated(key_columns).any():
             raise ValueError(f"{label} parity output contains duplicate keys")
         comparison = runtime.merge(
