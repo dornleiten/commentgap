@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from aqua_runtime.schema import text_hash
+from aqua_runtime.schema import AQUA_FEATURES, expected_alias_column, text_hash
 
 from .nlp import (
     DEFAULT_EMBEDDING_MODEL_ID,
@@ -87,6 +87,25 @@ ALL_MODEL_FEATURES = [
     "log_branch_prior_comments",
     "log_branch_comments_prev_hour",
 ]
+
+# The primary models use the continuous expected ordinal score for each AQuA
+# dimension. The published weighted composites and hard labels remain available
+# for descriptive and sensitivity analyses, but are not entered alongside their
+# constituent expected dimensions.
+AQUA_EXPECTED_MODEL_FEATURES = [
+    expected_alias_column(feature.stem) for feature in AQUA_FEATURES
+]
+
+
+def primary_model_features(scope: str, *, aqua_available: bool) -> list[str]:
+    if scope == "root":
+        base = ROOT_MODEL_FEATURES
+    elif scope == "all":
+        base = ALL_MODEL_FEATURES
+    else:
+        raise ValueError(f"Unknown candidate scope: {scope}")
+    return list(base) + (list(AQUA_EXPECTED_MODEL_FEATURES) if aqua_available else [])
+
 
 BINARY_FEATURES = {
     "url_present",
@@ -1023,7 +1042,8 @@ def _feature_registry(*, aqua_available: bool = False) -> dict[str, Any]:
             "label": f"AQuA {feature.description} (raw expected ordinal score)",
             "standardize": True,
             "deferred": not aqua_available,
-            "descriptive_only": True,
+            "descriptive_only": False,
+            "primary_model_feature": True,
             "scale": "0..3",
             "probability_status": "uncalibrated",
         }
@@ -1047,10 +1067,18 @@ def _feature_registry(*, aqua_available: bool = False) -> dict[str, Any]:
         }
     )
     return {
-        "version": 3,
+        "version": 4,
         "models": {
-            "root": {"features": ROOT_MODEL_FEATURES},
-            "all": {"features": ALL_MODEL_FEATURES},
+            "root": {
+                "features": primary_model_features(
+                    "root", aqua_available=aqua_available
+                )
+            },
+            "all": {
+                "features": primary_model_features(
+                    "all", aqua_available=aqua_available
+                )
+            },
         },
         "features": {
             name: {
@@ -1160,7 +1188,9 @@ def _finalize_choice_set(
     output, ties = assign_audience_labels(
         output, draws=config.tie_draws, seed=config.seed
     )
-    features_used = ROOT_MODEL_FEATURES if scope == "root" else ALL_MODEL_FEATURES
+    features_used = primary_model_features(
+        scope, aqua_available="aqua_score_hard" in output.columns
+    )
     missingness = output[features_used].isna().sum()
     if int(missingness.sum()):
         raise ValueError(
@@ -1840,6 +1870,12 @@ def build_analysis_features(
             "seed": config.seed,
             "require_page_publication_time": config.require_page_publication_time,
             "exclude_january_without_lookback": config.exclude_january_without_lookback,
+            "primary_model_features": {
+                scope: primary_model_features(
+                    scope, aqua_available=aqua_manifest is not None
+                )
+                for scope in ("root", "all")
+            },
         },
         "inference_mode": config.inference_mode,
         "nlp_mode": config.nlp_mode,

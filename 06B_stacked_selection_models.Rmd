@@ -12,7 +12,8 @@ Fit two common-scale conditional-logit models: one whose candidates are root
 comments and one whose candidates are all published comments. Each comment is
 stacked once for the audience selector and once for the curator selector.
 Article-by-selector strata provide the article controls; standard errors are
-clustered by article.
+clustered by article. Both primary specifications include the 20 continuous
+AQuA expected ordinal dimensions; neither includes the derived AQuA composite.
 
 ```{r setup, message=FALSE, warning=FALSE}
 required_packages <- c(
@@ -57,7 +58,18 @@ if (!file.exists(manifest_path)) stop("Missing feature manifest: ", manifest_pat
 if (!file.exists(provenance_path)) stop("Missing provenance manifest: ", provenance_path)
 feature_manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
 provenance <- jsonlite::fromJSON(provenance_path, simplifyVector = FALSE)
+aqua_expected_features <- setdiff(
+  grep("^aqua_.*_expected$", names(feature_manifest$features), value = TRUE),
+  "aqua_score_expected"
+)
+if (length(aqua_expected_features) != 20L) {
+  stop(
+    "The primary model contract must expose exactly 20 AQuA expected dimensions; found ",
+    length(aqua_expected_features)
+  )
+}
 cat("Feature watermark:", provenance$watermark, "\n")
+cat("Primary AQuA expected dimensions:", length(aqua_expected_features), "\n")
 ```
 
 # Model helpers
@@ -247,6 +259,17 @@ run_scope <- function(scope) {
   if (!file.exists(input_path)) stop("Missing choice set: ", input_path)
   choice_set <- as.data.table(arrow::read_parquet(input_path))
   features <- unlist(feature_manifest$models[[scope]]$features, use.names = FALSE)
+  missing_aqua <- setdiff(aqua_expected_features, features)
+  if (length(missing_aqua)) {
+    stop(
+      "The ", scope, " primary model manifest omits AQuA expected dimensions: ",
+      paste(missing_aqua, collapse = ", "),
+      ". Re-run commentgap-features with the production AQuA store."
+    )
+  }
+  if ("aqua_score_expected" %in% features) {
+    stop("The derived AQuA composite must not accompany its 20 constituent dimensions")
+  }
   missing <- setdiff(
     c("story_id", "comment_id", "n_candidates", "n_picks", "curator_selected", features),
     names(choice_set)

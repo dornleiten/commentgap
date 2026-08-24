@@ -157,7 +157,13 @@ def build_reporting_outputs(
     _save_table(folds, table_root / "fold_balance")
 
     labels = registry["features"]
-    fig, axes = plt.subplots(1, 2, figsize=(11, 7), sharex=True)
+    maximum_regression_terms = max(
+        int((regression["scope"] == scope).sum()) for scope in ("root", "all")
+    )
+    regression_figure_height = max(7.0, 0.27 * maximum_regression_terms)
+    fig, axes = plt.subplots(
+        1, 2, figsize=(11, regression_figure_height), sharex=True
+    )
     for axis, scope in zip(axes, ("root", "all")):
         subset = regression[regression["scope"] == scope].copy()
         subset["label"] = subset["term"].map(lambda x: labels.get(x, {}).get("label", x))

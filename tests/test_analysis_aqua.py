@@ -718,6 +718,10 @@ class AquaAnalysisTests(unittest.TestCase):
         for column in downstream_feature_columns():
             self.assertIn(column, root)
             self.assertIn(column, all_comments)
+        for feature in AQUA_FEATURES:
+            expected = expected_alias_column(feature.stem)
+            self.assertIn(expected, root)
+            self.assertIn(expected, all_comments)
 
 
 if __name__ == "__main__":

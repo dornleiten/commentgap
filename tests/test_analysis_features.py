@@ -8,8 +8,11 @@ import numpy as np
 import pandas as pd
 
 from commentgap_analysis.features import (
+    AQUA_EXPECTED_MODEL_FEATURES,
     ROOT_MODEL_FEATURES,
     FeatureBuildConfig,
+    _feature_registry,
+    primary_model_features,
     _adapter_implementation_signature,
     _build_choice_sets_bounded,
     _identity_signature,
@@ -274,6 +277,29 @@ class AnalysisFeatureTests(unittest.TestCase):
         self.assertEqual(config.toxicity_model_id, DEFAULT_TOXICITY_MODEL_ID)
         self.assertEqual(config.toxicity_revision, DEFAULT_TOXICITY_MODEL_REVISION)
         self.assertIn("toxicity_probability", ROOT_MODEL_FEATURES)
+
+    def test_aqua_expected_dimensions_enter_aqua_backed_primary_models(self):
+        self.assertEqual(len(AQUA_EXPECTED_MODEL_FEATURES), 20)
+        self.assertNotIn("aqua_score_expected", AQUA_EXPECTED_MODEL_FEATURES)
+        for scope, baseline_size in (("root", 20), ("all", 24)):
+            baseline = primary_model_features(scope, aqua_available=False)
+            primary = primary_model_features(scope, aqua_available=True)
+            self.assertEqual(len(baseline), baseline_size)
+            self.assertEqual(len(primary), baseline_size + 20)
+            self.assertEqual(primary[-20:], AQUA_EXPECTED_MODEL_FEATURES)
+
+        registry = _feature_registry(aqua_available=True)
+        self.assertEqual(registry["version"], 4)
+        for scope in ("root", "all"):
+            self.assertEqual(
+                registry["models"][scope]["features"][-20:],
+                AQUA_EXPECTED_MODEL_FEATURES,
+            )
+        for feature in AQUA_EXPECTED_MODEL_FEATURES:
+            metadata = registry["features"][feature]
+            self.assertTrue(metadata["primary_model_feature"])
+            self.assertFalse(metadata["descriptive_only"])
+            self.assertTrue(metadata["standardize"])
 
     def test_production_nlp_cache_signatures_survive_diagnostic_code_changes(self):
         from commentgap_analysis.features import _adapter_implementation_signature
