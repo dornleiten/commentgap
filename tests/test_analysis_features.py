@@ -13,6 +13,7 @@ from commentgap_analysis.features import (
     _adapter_implementation_signature,
     _build_choice_sets_bounded,
     _identity_signature,
+    _invalid_sticky_story_sets_from_frame,
     _length_residual,
     _local_text_identity,
     _make_choice_set,
@@ -135,6 +136,7 @@ class AnalysisFeatureTests(unittest.TestCase):
                     data_root=root / "data",
                     output_root=root / "output",
                     config=config,
+                    invalid_stories=_invalid_sticky_story_sets_from_frame(raw),
                 )
             )
             actual_root = pd.read_parquet(root / "output" / "choice_set_root.parquet")

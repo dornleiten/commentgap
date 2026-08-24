@@ -248,12 +248,15 @@ The family identity and counters are recorded in
 
 Final choice-set assembly is also bounded in ordinary RAM. It fits the global
 CTTR and SMOG length adjustments from only `log_words`, `cttr`, and `smog_de`,
-then releases that compact table and processes full scalar features one story
-at a time. Root/all choice sets and tie diagnostics are written through
-25,000-row buffered Parquet writers. A terminated assembly can be rerun with
-the same command: completed scalar, local-text, sentiment, and toxicity story
+then releases that compact table and processes scalar features in 250-story
+read windows. Invalid sticky-story IDs are derived while the raw comment table
+is already resident, avoiding another scan over the 44,000 source shards.
+Root/all choice sets and tie diagnostics are written through 25,000-row
+buffered Parquet writers. A terminated assembly can be rerun with the same
+command: completed scalar, local-text, sentiment, and toxicity story
 checkpoints are reused, and the final `.parquet.tmp` files are replaced
-atomically only after a complete pass.
+atomically only after a complete pass. On Linux, unused Arrow and glibc
+allocations are explicitly released before assembly.
 
 ### Isolated AQuA deliberative-quality store
 

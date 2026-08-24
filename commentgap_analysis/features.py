@@ -52,6 +52,7 @@ DEFAULT_TIE_DRAWS = 10
 LOCAL_TEXT_OUTPUT_SEMANTICS_VERSION = 1
 LOCAL_TEXT_COLUMNS = ["word_count", "log_words", "cttr", "smog_de", "url_present"]
 CHOICE_WRITE_BATCH_ROWS = 25_000
+CHOICE_READ_WINDOW_STORIES = 250
 
 
 ROOT_MODEL_FEATURES = [
@@ -243,6 +244,24 @@ def _linux_rss_gib() -> float | None:
     except (OSError, ValueError, IndexError):
         return None
     return None
+
+
+def _release_unused_memory() -> None:
+    """Return unused Arrow/glibc allocations to the OS when supported."""
+    gc.collect()
+    try:
+        import pyarrow as pa
+
+        pa.default_memory_pool().release_unused()
+    except (ImportError, AttributeError):
+        pass
+    if platform.system() == "Linux":
+        try:
+            import ctypes
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (AttributeError, OSError):
+            pass
 
 
 def _progress_line(
@@ -1395,12 +1414,80 @@ def _invalid_sticky_story_sets(
     return {"root": invalid_root, "all": invalid_all}
 
 
+def _invalid_sticky_story_sets_from_frame(
+    comments: pd.DataFrame,
+) -> dict[str, set[str]]:
+    """Derive invalid curator stories while the raw frame is already resident."""
+    required = {
+        "story_id",
+        "comment_id",
+        "is_root",
+        "is_sticky",
+        "lifecycle_status",
+        "effective_text",
+        "created_at",
+    }
+    missing = required - set(comments.columns)
+    if missing:
+        raise ValueError(f"Missing invalid-sticky columns: {sorted(missing)}")
+    sticky = comments.loc[
+        comments["is_sticky"].fillna(False).astype(bool),
+        list(required - {"is_sticky"}),
+    ].copy()
+    if sticky.empty:
+        return {"root": set(), "all": set()}
+    sticky["story_id"] = sticky["story_id"].astype(str)
+    invalid = sticky[
+        ~sticky["lifecycle_status"].eq("Published")
+        | sticky["effective_text"].fillna("").str.strip().eq("")
+        | _as_utc(sticky["created_at"]).isna()
+        | sticky["comment_id"].fillna("").astype(str).str.strip().eq("")
+    ]
+    invalid_all = set(invalid["story_id"])
+    invalid_root = set(
+        invalid.loc[invalid["is_root"].astype(bool), "story_id"]
+    )
+    return {"root": invalid_root, "all": invalid_all}
+
+
+def _story_path_windows(
+    paths: list[Path], window_stories: int = CHOICE_READ_WINDOW_STORIES
+) -> Iterable[list[Path]]:
+    for start in range(0, len(paths), window_stories):
+        yield paths[start : start + window_stories]
+
+
+def _read_scalar_window(
+    paths: list[Path], columns: list[str] | None = None
+) -> pd.DataFrame:
+    """Read many story shards concurrently with one Arrow-to-pandas conversion."""
+    import pyarrow.dataset as ds
+
+    table = ds.dataset(
+        [str(path) for path in paths],
+        format="parquet",
+        partitioning=None,
+    ).to_table(columns=columns, use_threads=True)
+    frame = table.to_pandas(split_blocks=True)
+    del table
+    expected = {path.stem for path in paths}
+    actual = set(frame["story_id"].astype(str).unique())
+    if actual != expected:
+        raise ValueError(
+            "Scalar read-window story coverage mismatch: "
+            f"missing={sorted(expected - actual)[:5]} "
+            f"unexpected={sorted(actual - expected)[:5]}"
+        )
+    return frame
+
+
 def _build_choice_sets_bounded(
     *,
     checkpoint_root: Path,
     data_root: Path,
     output_root: Path,
     config: FeatureBuildConfig,
+    invalid_stories: dict[str, set[str]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """Fit global adjustments and stream final choice sets by story."""
     import pyarrow.dataset as ds
@@ -1430,19 +1517,31 @@ def _build_choice_sets_bounded(
     reading_model, reading_meta = _fit_length_adjuster(length_frame, "smog_de")
     length_rows = len(length_frame)
     del length_frame
-    gc.collect()
+    _release_unused_memory()
     print(
         "Feature assembly: length adjustments fitted | "
         f"rows={length_rows:,}",
         flush=True,
     )
 
-    print("Feature assembly: scanning invalid sticky comments", flush=True)
-    invalid_stories = _invalid_sticky_story_sets(
-        data_root,
-        config.year,
-        included_story_ids,
-    )
+    if invalid_stories is None:
+        print("Feature assembly: scanning invalid sticky comments", flush=True)
+        invalid_stories = _invalid_sticky_story_sets(
+            data_root,
+            config.year,
+            included_story_ids,
+        )
+    else:
+        invalid_stories = {
+            scope: set(values) & included_story_ids
+            for scope, values in invalid_stories.items()
+        }
+        print(
+            "Feature assembly: reusing invalid-sticky results from source load | "
+            f"root={len(invalid_stories['root']):,} "
+            f"all={len(invalid_stories['all']):,}",
+            flush=True,
+        )
     compact_columns = [
         "story_id",
         "comment_id",
@@ -1459,38 +1558,46 @@ def _build_choice_sets_bounded(
     novelty_sums = {"root": 0.0, "all": 0.0}
     novelty_counts = {"root": 0, "all": 0}
     eligibility_started = time.monotonic()
-    for index, path in enumerate(scalar_paths, start=1):
-        compact = pd.read_parquet(path, columns=compact_columns)
-        story_id = str(compact["story_id"].iloc[0])
-        for scope, novelty_column in (
-            ("root", "novelty_prior_roots"),
-            ("all", "novelty_prior_all"),
-        ):
-            eligible = _eligible_story_scope(
-                compact,
-                scope=scope,
-                invalid_sticky_stories=invalid_stories[scope],
-                config=config,
-            )
-            if eligible is None:
-                continue
-            eligible_ids[scope].add(story_id)
-            values = eligible[novelty_column].to_numpy(dtype=float)
-            finite = np.isfinite(values)
-            novelty_sums[scope] += float(values[finite].sum())
-            novelty_counts[scope] += int(finite.sum())
-        if index % config.progress_every_stories == 0 or index == len(scalar_paths):
-            _progress_line(
-                "Choice eligibility",
-                index,
-                len(scalar_paths),
-                eligibility_started,
-                unit="stories",
-                detail=(
-                    f"eligible(root/all)={len(eligible_ids['root']):,}/"
-                    f"{len(eligible_ids['all']):,}"
-                ),
-            )
+    processed_stories = 0
+    for window_paths in _story_path_windows(scalar_paths):
+        compact_window = _read_scalar_window(window_paths, compact_columns)
+        compact_groups = {
+            str(story_id): story
+            for story_id, story in compact_window.groupby("story_id", sort=False)
+        }
+        for path in window_paths:
+            compact = compact_groups[path.stem]
+            story_id = str(compact["story_id"].iloc[0])
+            for scope, novelty_column in (
+                ("root", "novelty_prior_roots"),
+                ("all", "novelty_prior_all"),
+            ):
+                eligible = _eligible_story_scope(
+                    compact,
+                    scope=scope,
+                    invalid_sticky_stories=invalid_stories[scope],
+                    config=config,
+                )
+                if eligible is None:
+                    continue
+                eligible_ids[scope].add(story_id)
+                values = eligible[novelty_column].to_numpy(dtype=float)
+                finite = np.isfinite(values)
+                novelty_sums[scope] += float(values[finite].sum())
+                novelty_counts[scope] += int(finite.sum())
+        processed_stories += len(window_paths)
+        del compact_groups, compact_window
+        _progress_line(
+            "Choice eligibility",
+            processed_stories,
+            len(scalar_paths),
+            eligibility_started,
+            unit="stories",
+            detail=(
+                f"eligible(root/all)={len(eligible_ids['root']):,}/"
+                f"{len(eligible_ids['all']):,}"
+            ),
+        )
     novelty_means: dict[str, float] = {}
     for scope in ("root", "all"):
         if novelty_counts[scope] == 0:
@@ -1531,30 +1638,49 @@ def _build_choice_sets_bounded(
     }
     writing_started = time.monotonic()
     try:
-        for index, path in enumerate(scalar_paths, start=1):
-            story = pd.read_parquet(path)
-            story_id = str(story["story_id"].iloc[0])
-            story["lexdiv_length_adjusted"] = _apply_length_adjuster(
-                story, "cttr", lex_model
+        processed_stories = 0
+        for window_paths in _story_path_windows(scalar_paths):
+            story_window = _read_scalar_window(window_paths)
+            story_window["lexdiv_length_adjusted"] = _apply_length_adjuster(
+                story_window, "cttr", lex_model
             )
-            story["reading_level_length_adjusted"] = _apply_length_adjuster(
-                story, "smog_de", reading_model
+            story_window["reading_level_length_adjusted"] = _apply_length_adjuster(
+                story_window, "smog_de", reading_model
             )
-            for scope in ("root", "all"):
-                if story_id not in eligible_ids[scope]:
-                    continue
-                eligible = _eligible_story_scope(
-                    story,
-                    scope=scope,
-                    invalid_sticky_stories=invalid_stories[scope],
-                    config=config,
-                )
-                if eligible is None:
-                    raise RuntimeError(
-                        f"Choice eligibility changed between passes for {scope} {story_id}"
+            story_groups = {
+                str(story_id): story
+                for story_id, story in story_window.groupby("story_id", sort=False)
+            }
+            eligible_frames: dict[str, list[pd.DataFrame]] = {
+                "root": [],
+                "all": [],
+            }
+            for path in window_paths:
+                story = story_groups[path.stem]
+                story_id = str(story["story_id"].iloc[0])
+                for scope in ("root", "all"):
+                    if story_id not in eligible_ids[scope]:
+                        continue
+                    eligible = _eligible_story_scope(
+                        story,
+                        scope=scope,
+                        invalid_sticky_stories=invalid_stories[scope],
+                        config=config,
                     )
-                output, ties, story_summary = _finalize_choice_set(
-                    eligible,
+                    if eligible is None:
+                        raise RuntimeError(
+                            "Choice eligibility changed between passes for "
+                            f"{scope} {story_id}"
+                        )
+                    eligible_frames[scope].append(eligible)
+            for scope in ("root", "all"):
+                if not eligible_frames[scope]:
+                    continue
+                eligible_window = pd.concat(
+                    eligible_frames[scope], ignore_index=True
+                )
+                output, ties, window_summary = _finalize_choice_set(
+                    eligible_window,
                     scope=scope,
                     config=config,
                     novelty_fill_value=novelty_means[scope],
@@ -1569,19 +1695,20 @@ def _build_choice_sets_bounded(
                     "sticky_comments",
                     "ambiguous_vote_cutoffs",
                 ):
-                    summaries[scope][field] += story_summary[field]
-            if index % config.progress_every_stories == 0 or index == len(scalar_paths):
-                _progress_line(
-                    "Choice-set writing",
-                    index,
-                    len(scalar_paths),
-                    writing_started,
-                    unit="stories",
-                    detail=(
-                        f"rows(root/all)={summaries['root']['candidate_rows']:,}/"
-                        f"{summaries['all']['candidate_rows']:,}"
-                    ),
-                )
+                    summaries[scope][field] += window_summary[field]
+            processed_stories += len(window_paths)
+            del eligible_frames, story_groups, story_window
+            _progress_line(
+                "Choice-set writing",
+                processed_stories,
+                len(scalar_paths),
+                writing_started,
+                unit="stories",
+                detail=(
+                    f"rows(root/all)={summaries['root']['candidate_rows']:,}/"
+                    f"{summaries['all']['candidate_rows']:,}"
+                ),
+            )
         for sink in sinks.values():
             sink.close()
         for sink in sinks.values():
@@ -1816,6 +1943,13 @@ def build_analysis_features(
         & target_raw["created_at"].notna()
     )
     target_raw["_candidate"] = candidate_mask.to_numpy(dtype=bool)
+    invalid_sticky_stories = _invalid_sticky_story_sets_from_frame(target_raw)
+    print(
+        "Feature preflight: invalid sticky stories identified during source load | "
+        f"root={len(invalid_sticky_stories['root']):,} "
+        f"all={len(invalid_sticky_stories['all']):,}",
+        flush=True,
+    )
 
     history_checkpoint_root = (
         config.output_root
@@ -2361,7 +2495,7 @@ def build_analysis_features(
     del grouped_stories, base
     story = None
     texts = None
-    gc.collect()
+    _release_unused_memory()
 
     local_text_manifest = {
         "status": "complete",
@@ -2434,6 +2568,7 @@ def build_analysis_features(
         data_root=config.data_root,
         output_root=config.output_root,
         config=config,
+        invalid_stories=invalid_sticky_stories,
     )
     print(
         "Feature stage complete: choice sets | "
@@ -2517,8 +2652,9 @@ def build_analysis_features(
         },
         "execution": {
             "elapsed_seconds": time.monotonic() - build_started,
-            "choice_assembly_strategy": "bounded_story_stream",
+            "choice_assembly_strategy": "bounded_cross_story_windows",
             "choice_write_batch_rows": CHOICE_WRITE_BATCH_ROWS,
+            "choice_read_window_stories": CHOICE_READ_WINDOW_STORIES,
             "length_fit_columns": ["log_words", "cttr", "smog_de"],
             "new_story_checkpoints": written_stories,
             "skipped_story_checkpoints": skipped_stories,
