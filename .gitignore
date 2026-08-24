@@ -1,4 +1,3 @@
-
 .DS_Store
 /figs
 /data
@@ -9,6 +8,7 @@ scrap*
 .Rhistory
 /*.html
 /.cache/
+/.venv/
 /.venv-aqua/
 /Capstone Code
 /submissions
