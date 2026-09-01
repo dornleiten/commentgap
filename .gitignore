@@ -7,6 +7,7 @@ scrap*
 
 .Rhistory
 /*.html
+/html/
 /.cache/
 /.venv/
 /.venv-aqua/
@@ -27,3 +28,8 @@ __pycache__/
 *.py[cod]
 
 commentgap_scraper.egg-info
+.Rprofile
+/renv/
+
+# Runtime and experiment logs
+/logs/

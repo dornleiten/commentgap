@@ -20,6 +20,7 @@ commentgap-features = "commentgap_analysis.feature_cli:main"
 commentgap-aqua = "commentgap_analysis.aqua_cli:main"
 commentgap-aqua-parity = "commentgap_analysis.aqua_parity:main"
 commentgap-aqua-promote = "commentgap_analysis.aqua_promotion:main"
+commentgap-neural-ranker = "commentgap_analysis.neural_ranker_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["commentgap_scraper*", "commentgap_analysis*", "aqua_runtime*"]

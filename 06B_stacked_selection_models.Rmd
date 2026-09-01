@@ -14,10 +14,12 @@ stacked once for the audience selector and once for the curator selector.
 Article-by-selector strata provide the article controls; standard errors are
 clustered by article. Both primary specifications include the 20 continuous
 AQuA expected ordinal dimensions; neither includes the derived AQuA composite.
+Models and feature scaling are fitted on the same 50% development articles used
+by 06C; the other 50% are used only for sealed Paper 2 prediction.
 
 ```{r setup, message=FALSE, warning=FALSE}
 required_packages <- c(
-  "arrow", "data.table", "jsonlite", "survival", "MASS", "knitr"
+  "arrow", "data.table", "digest", "jsonlite", "survival", "MASS", "knitr"
 )
 missing_packages <- required_packages[!vapply(
   required_packages, requireNamespace, logical(1), quietly = TRUE
@@ -36,26 +38,107 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 # Configuration and shared feature contract
 
 ```{r configuration}
-feature_root <- Sys.getenv(
+source_feature_root <- Sys.getenv(
   "COMMENTGAP_FEATURE_ROOT",
   "model_output/selection_2025/features"
+)
+feature_root <- Sys.getenv(
+  "COMMENTGAP_MODEL_DATA_ROOT",
+  "model_output/selection_2025/model_data"
 )
 output_root <- Sys.getenv(
   "COMMENTGAP_REGRESSION_ROOT",
   "model_output/selection_2025/regression"
 )
+split_path <- file.path(feature_root, "master_article_split.parquet")
 tie_draws_requested <- as.integer(Sys.getenv("COMMENTGAP_TIE_DRAWS", "10"))
 probability_draws <- as.integer(Sys.getenv("COMMENTGAP_PROBABILITY_DRAWS", "5000"))
+test_bootstrap_draws <- as.integer(Sys.getenv("COMMENTGAP_TEST_BOOTSTRAP_DRAWS", "1000"))
 base_seed <- as.integer(Sys.getenv("COMMENTGAP_MODEL_SEED", "20260813"))
+fit_cache_root <- Sys.getenv(
+  "COMMENTGAP_REGRESSION_CACHE_ROOT",
+  file.path(output_root, "fit_cache")
+)
+log_root <- Sys.getenv("COMMENTGAP_LOG_ROOT", "logs")
+force_recompute <- tolower(Sys.getenv(
+  "COMMENTGAP_REGRESSION_FORCE_RECOMPUTE", "0"
+)) %in% c("1", "true", "yes")
+fit_cache_schema <- "stacked-clogit-efron-shared-preprocessing-v4"
 
 if (tie_draws_requested < 1L) stop("COMMENTGAP_TIE_DRAWS must be positive")
 if (probability_draws < 100L) stop("COMMENTGAP_PROBABILITY_DRAWS must be at least 100")
+if (test_bootstrap_draws < 100L) {
+  stop("COMMENTGAP_TEST_BOOTSTRAP_DRAWS must be at least 100")
+}
+if (!file.exists(split_path)) {
+  stop("Run 06A2_shared_model_preprocessing.ipynb first; missing shared split: ", split_path)
+}
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
+dir.create(fit_cache_root, recursive = TRUE, showWarnings = FALSE)
+progress_log_path <- Sys.getenv(
+  "COMMENTGAP_REGRESSION_PROGRESS_LOG",
+  file.path(log_root, "06B_progress.log")
+)
+dir.create(dirname(progress_log_path), recursive = TRUE, showWarnings = FALSE)
+progress_state <- new.env(parent = emptyenv())
+progress_state$run_started <- Sys.time()
+progress_state$completed_fits <- 0L
+progress_state$total_fits <- 2L * tie_draws_requested
+progress_state$fit_seconds <- numeric()
+
+format_duration <- function(seconds) {
+  if (!is.finite(seconds)) return("unknown")
+  seconds <- max(0, round(seconds))
+  sprintf(
+    "%02d:%02d:%02d",
+    seconds %/% 3600L,
+    (seconds %% 3600L) %/% 60L,
+    seconds %% 60L
+  )
+}
+
+progress_message <- function(message) {
+  elapsed <- as.numeric(difftime(
+    Sys.time(), progress_state$run_started, units = "secs"
+  ))
+  line <- sprintf(
+    "[%s] elapsed=%s | %s",
+    format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+    format_duration(elapsed),
+    message
+  )
+  cat(line, "\n")
+  cat(line, "\n", file = progress_log_path, append = TRUE)
+  flush.console()
+}
+
+progress_message(sprintf(
+  paste0(
+    "Run started; planned conditional-logit fits=%d (two scopes x %d tie draws); ",
+    "cache=%s; force_recompute=%s"
+  ),
+  progress_state$total_fits, tie_draws_requested,
+  normalizePath(fit_cache_root, mustWork = FALSE), force_recompute
+))
+
+article_split <- as.data.table(arrow::read_parquet(split_path))
+required_split <- c("story_id", "split_role", "development_fold", "split_stratum")
+missing_split <- setdiff(required_split, names(article_split))
+if (length(missing_split)) stop("Shared split is missing: ", paste(missing_split, collapse = ", "))
+article_split[, story_id := as.character(story_id)]
+if (article_split[, anyDuplicated(story_id)]) stop("Shared split contains duplicate articles")
+if (!setequal(unique(article_split$split_role), c("development", "paper2_test"))) {
+  stop("Shared split must contain development and paper2_test roles")
+}
 
 manifest_path <- file.path(feature_root, "feature_manifest.json")
-provenance_path <- file.path(feature_root, "provenance_manifest.json")
+parameters_path <- file.path(feature_root, "preprocessing_parameters.json")
+provenance_path <- file.path(source_feature_root, "provenance_manifest.json")
 if (!file.exists(manifest_path)) stop("Missing feature manifest: ", manifest_path)
+if (!file.exists(parameters_path)) stop("Missing preprocessing parameters: ", parameters_path)
 if (!file.exists(provenance_path)) stop("Missing provenance manifest: ", provenance_path)
+preprocessing_parameters <- jsonlite::fromJSON(parameters_path, simplifyVector = FALSE)
+if (!identical(as.integer(preprocessing_parameters$version), 4L)) stop("Expected shared preprocessing version 4; force-rerun 06A2")
 feature_manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
 provenance <- jsonlite::fromJSON(provenance_path, simplifyVector = FALSE)
 aqua_expected_features <- setdiff(
@@ -83,6 +166,67 @@ safe_scale <- function(x, name) {
     stop("Cannot standardize feature with no variation: ", name)
   }
   list(value = (x - center) / spread, mean = center, sd = spread)
+}
+
+file_fingerprint <- function(path) {
+  information <- file.info(path)
+  if (!nrow(information) || is.na(information$size)) {
+    stop("Cannot fingerprint missing file: ", path)
+  }
+  list(
+    path = normalizePath(path, mustWork = TRUE),
+    size = unname(information$size),
+    md5 = unname(tools::md5sum(path))
+  )
+}
+
+atomic_save_rds <- function(object, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary <- tempfile(pattern = "model-", tmpdir = dirname(path))
+  on.exit(unlink(temporary), add = TRUE)
+  saveRDS(object, temporary, compress = "gzip")
+  if (!file.rename(temporary, path)) {
+    stop("Could not atomically publish cached model: ", path)
+  }
+}
+
+coef.commentgap_cached_clogit <- function(object, ...) {
+  object$coefficients
+}
+
+atomic_write_json <- function(object, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary <- tempfile(pattern = "manifest-", tmpdir = dirname(path))
+  on.exit(unlink(temporary), add = TRUE)
+  writeLines(
+    jsonlite::toJSON(object, auto_unbox = TRUE, pretty = TRUE, null = "null"),
+    temporary
+  )
+  if (!file.rename(temporary, path)) {
+    stop("Could not atomically publish cache manifest: ", path)
+  }
+}
+
+record_completed_fit <- function(scope, draw, fit_seconds = NULL, cached = FALSE) {
+  progress_state$completed_fits <- progress_state$completed_fits + 1L
+  if (!is.null(fit_seconds)) {
+    progress_state$fit_seconds <- c(progress_state$fit_seconds, fit_seconds)
+  }
+  remaining_fits <- progress_state$total_fits - progress_state$completed_fits
+  rough_eta_seconds <- if (length(progress_state$fit_seconds)) {
+    mean(progress_state$fit_seconds) * remaining_fits
+  } else {
+    NA_real_
+  }
+  progress_message(sprintf(
+    paste0(
+      "%s scope=%s tie_draw=%d completed=%d/%d rough_ETA=%s ",
+      "(fit-average; improves after first all-comments fit)"
+    ),
+    if (cached) "CACHE HIT" else "DONE",
+    scope, draw, progress_state$completed_fits, progress_state$total_fits,
+    format_duration(rough_eta_seconds)
+  ))
 }
 
 interaction_name <- function(fit, feature) {
@@ -127,9 +271,53 @@ build_stacked <- function(choice_set, features, draw) {
   stacked
 }
 
-fit_stacked <- function(choice_set, features, formula, draw) {
+fit_stacked <- function(
+    choice_set, features, formula, draw, scope, cache_fingerprint) {
+  cache_directory <- file.path(
+    fit_cache_root, scope, sprintf("tie_draw_%02d", draw)
+  )
+  model_path <- file.path(cache_directory, "model.rds")
+  cache_manifest_path <- file.path(cache_directory, "cache_manifest.json")
+  if (!force_recompute && file.exists(model_path) && file.exists(cache_manifest_path)) {
+    cache_manifest <- tryCatch(
+      jsonlite::fromJSON(cache_manifest_path, simplifyVector = TRUE),
+      error = function(condition) NULL
+    )
+    if (!is.null(cache_manifest) &&
+        identical(cache_manifest$fingerprint, cache_fingerprint)) {
+      cached_fit <- tryCatch(readRDS(model_path), error = function(condition) NULL)
+      if (!is.null(cached_fit) &&
+          length(stats::coef(cached_fit)) == 2L * length(features) &&
+          all(is.finite(stats::coef(cached_fit)))) {
+        cached_seconds <- suppressWarnings(as.numeric(cache_manifest$fit_seconds))
+        record_completed_fit(
+          scope, draw,
+          fit_seconds = if (length(cached_seconds) && is.finite(cached_seconds)) {
+            cached_seconds
+          } else {
+            NULL
+          },
+          cached = TRUE
+        )
+        return(cached_fit)
+      }
+      progress_message(sprintf(
+        "CACHE INVALID scope=%s tie_draw=%d; cached model could not be validated",
+        scope, draw
+      ))
+    } else {
+      progress_message(sprintf(
+        "CACHE MISS scope=%s tie_draw=%d; fingerprint changed", scope, draw
+      ))
+    }
+  }
   stacked <- build_stacked(choice_set, features, draw)
-  cat("Fitting tie draw", draw, "on", format(nrow(stacked), big.mark = ","), "rows\n")
+  fit_started <- Sys.time()
+  progress_message(sprintf(
+    "START scope=%s tie_draw=%d rows=%s fit=%d/%d",
+    scope, draw, format(nrow(stacked), big.mark = ","),
+    progress_state$completed_fits + 1L, progress_state$total_fits
+  ))
   fit_warnings <- character()
   fit <- withCallingHandlers(
     survival::clogit(
@@ -159,7 +347,229 @@ fit_stacked <- function(choice_set, features, formula, draw) {
       paste(unique(convergence_warnings), collapse = " | ")
     )
   }
+  fit_seconds <- as.numeric(difftime(Sys.time(), fit_started, units = "secs"))
+  environment(fit$terms) <- baseenv()
+  cache_object <- if (draw == 1L) {
+    fit
+  } else {
+    structure(
+      list(
+        coefficients = stats::coef(fit),
+        fit_warnings = attr(fit, "fit_warnings")
+      ),
+      class = "commentgap_cached_clogit"
+    )
+  }
+  artifact_kind <- if (draw == 1L) "full_primary_fit" else "tie_draw_coefficients"
+  atomic_save_rds(cache_object, model_path)
+  atomic_write_json(
+    list(
+      fingerprint = cache_fingerprint,
+      cache_schema = fit_cache_schema,
+      scope = scope,
+      tie_draw = draw,
+      artifact_kind = artifact_kind,
+      stacked_rows = nrow(stacked),
+      fitted_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+      fit_seconds = fit_seconds,
+      r_version = R.version.string,
+      survival_version = as.character(utils::packageVersion("survival"))
+    ),
+    cache_manifest_path
+  )
+  progress_message(sprintf(
+    "CACHE WRITE scope=%s tie_draw=%d fit_time=%s path=%s",
+    scope, draw, format_duration(fit_seconds), model_path
+  ))
+  record_completed_fit(scope, draw, fit_seconds = fit_seconds)
   fit
+}
+
+
+score_frozen_model <- function(fit, choice_set, features, audience_draw = 1L) {
+  audience_label <- sprintf("audience_selected_draw_%02d", audience_draw)
+  if (!audience_label %in% names(choice_set)) {
+    stop("Missing audience tie-draw label: ", audience_label)
+  }
+  audience_beta <- vapply(features, function(feature) unname(stats::coef(fit)[[feature]]), numeric(1))
+  interaction_beta <- vapply(features, function(feature) {
+    unname(stats::coef(fit)[[interaction_name(fit, feature)]])
+  }, numeric(1))
+  matrix_x <- as.matrix(choice_set[, ..features])
+  audience_score <- drop(matrix_x %*% audience_beta)
+  curator_score <- drop(matrix_x %*% (audience_beta + interaction_beta))
+  rbindlist(list(
+    choice_set[, .(story_id, comment_id, n_picks, selector = "audience",
+      selected = as.integer(get(audience_label)), score = audience_score)],
+    choice_set[, .(story_id, comment_id, n_picks, selector = "curator",
+      selected = as.integer(curator_selected), score = curator_score)]
+  ))
+}
+
+evaluate_frozen_scores <- function(scores) {
+  scores[, {
+    k <- first(n_picks)
+    ranked <- order(-score, comment_id)
+    ideal <- order(-selected, comment_id)
+    predicted <- ranked[seq_len(k)]
+    ideal_top <- ideal[seq_len(k)]
+    discounts <- 1 / log2(seq_len(k) + 1)
+    dcg <- sum(selected[predicted] * discounts)
+    idcg <- sum(selected[ideal_top] * discounts)
+    actual <- which(selected == 1L)
+    overlap <- length(intersect(predicted, actual))
+    .(n_candidates = .N, n_picks = k,
+      ndcg_at_k = if (idcg > 0) dcg / idcg else NA_real_,
+      top_k_overlap = overlap / k,
+      jaccard = overlap / length(union(predicted, actual)))
+  }, by = .(story_id, selector)]
+}
+
+chance_ranking_metrics <- function(scores) {
+  article_structure <- scores[, .(
+    n_candidates = .N,
+    n_picks = first(n_picks)
+  ), by = .(story_id, selector)]
+  article_structure[, chance_rate := n_picks / n_candidates]
+  article_structure[, expected_jaccard := vapply(
+    seq_len(.N),
+    function(index) {
+      n <- n_candidates[[index]]
+      k <- n_picks[[index]]
+      overlap <- seq.int(max(0L, 2L * k - n), k)
+      probabilities <- stats::dhyper(overlap, k, n - k, k)
+      sum(probabilities * overlap / (2L * k - overlap))
+    },
+    numeric(1)
+  )]
+  article_structure[, .(
+    story_id,
+    selector,
+    n_candidates,
+    n_picks,
+    ndcg_at_k = chance_rate,
+    top_k_overlap = chance_rate,
+    jaccard = expected_jaccard
+  )]
+}
+
+bootstrap_metric_summary <- function(article_metrics, draws, seed) {
+  metric_names <- c("ndcg_at_k", "top_k_overlap", "jaccard")
+  rbindlist(lapply(seq_along(metric_names), function(metric_index) {
+    metric <- metric_names[[metric_index]]
+    rbindlist(lapply(c("audience", "curator"), function(selector_name) {
+      values <- article_metrics[selector == selector_name][[metric]]
+      if (!length(values) || any(!is.finite(values))) {
+        stop("Non-finite or missing test metric: ", selector_name, " / ", metric)
+      }
+      set.seed(seed + metric_index * 100L + match(selector_name, c("audience", "curator")))
+      bootstrap_estimates <- replicate(
+        draws,
+        mean(sample(values, length(values), replace = TRUE))
+      )
+      interval <- unname(stats::quantile(bootstrap_estimates, c(0.025, 0.975)))
+      data.table(
+        selector = selector_name,
+        metric = metric,
+        estimate = mean(values),
+        conf_low = interval[[1L]],
+        conf_high = interval[[2L]],
+        articles = length(values),
+        bootstrap_draws = draws
+      )
+    }))
+  }))
+}
+
+bootstrap_above_chance <- function(model_metrics, chance_metrics, draws, seed) {
+  keys <- c("story_id", "selector")
+  model_keys <- model_metrics[, ..keys]
+  chance_keys <- chance_metrics[, ..keys]
+  setorder(model_keys, story_id, selector)
+  setorder(chance_keys, story_id, selector)
+  if (anyDuplicated(model_keys) || anyDuplicated(chance_keys) ||
+      !identical(model_keys, chance_keys)) {
+    stop("Model and chance metrics do not contain identical article-selector keys")
+  }
+  merged <- merge(
+    model_metrics,
+    chance_metrics,
+    by = keys,
+    suffixes = c("_model", "_chance"),
+    sort = FALSE
+  )
+  metric_names <- c("ndcg_at_k", "top_k_overlap", "jaccard")
+  rbindlist(lapply(seq_along(metric_names), function(metric_index) {
+    metric <- metric_names[[metric_index]]
+    rbindlist(lapply(c("audience", "curator"), function(selector_name) {
+      subset <- merged[selector == selector_name]
+      differences <- subset[[paste0(metric, "_model")]] -
+        subset[[paste0(metric, "_chance")]]
+      set.seed(
+        seed + metric_index * 100L +
+          match(selector_name, c("audience", "curator"))
+      )
+      bootstrap_estimates <- replicate(
+        draws,
+        mean(sample(differences, length(differences), replace = TRUE))
+      )
+      interval <- unname(stats::quantile(
+        bootstrap_estimates, c(0.025, 0.975)
+      ))
+      data.table(
+        selector = selector_name,
+        metric = metric,
+        model_estimate = mean(
+          subset[[paste0(metric, "_model")]]
+        ),
+        chance_estimate = mean(
+          subset[[paste0(metric, "_chance")]]
+        ),
+        estimate_above_chance = mean(differences),
+        conf_low = interval[[1L]],
+        conf_high = interval[[2L]],
+        articles = length(differences),
+        bootstrap_draws = draws
+      )
+    }))
+  }))
+}
+
+model_diagnostics <- function(fit) {
+  fit_summary <- summary(fit)
+  concordance <- fit_summary$concordance
+  covariance <- stats::vcov(fit)
+  eigenvalues <- eigen(covariance, symmetric = TRUE, only.values = TRUE)$values
+  positive_eigenvalues <- eigenvalues[eigenvalues > .Machine$double.eps]
+  data.table(
+    statistic = c(
+      "iterations", "null_log_likelihood", "fitted_log_likelihood",
+      "likelihood_ratio_chisq", "likelihood_ratio_df", "likelihood_ratio_p_value",
+      "concordance", "concordance_se", "maximum_absolute_coefficient",
+      "maximum_clustered_standard_error", "covariance_condition_number",
+      "fit_warning_count", "all_coefficients_finite", "all_standard_errors_finite"
+    ),
+    value = c(
+      paste(fit$iter, collapse = ","),
+      fit$loglik[[1L]],
+      fit$loglik[[2L]],
+      fit_summary$logtest[["test"]],
+      fit_summary$logtest[["df"]],
+      fit_summary$logtest[["pvalue"]],
+      concordance[["C"]],
+      concordance[["se(C)"]],
+      max(abs(stats::coef(fit))),
+      max(sqrt(diag(covariance))),
+      if (length(positive_eigenvalues)) {
+        max(positive_eigenvalues) / min(positive_eigenvalues)
+      } else {
+        Inf
+      },
+      length(attr(fit, "fit_warnings")),
+      all(is.finite(stats::coef(fit))),
+      all(is.finite(sqrt(diag(covariance))))
+    )
+  )
 }
 
 selector_summary <- function(fit, features, labels, standardize) {
@@ -189,11 +599,13 @@ selector_summary <- function(fit, features, labels, standardize) {
       audience_conf_low = audience_ci[[1L]],
       audience_conf_high = audience_ci[[2L]],
       audience_odds_ratio = exp(beta),
+      audience_p_value = 2 * stats::pnorm(-abs(beta / audience_se)),
       curator_log_odds = unname(beta + gamma),
       curator_se = curator_se,
       curator_conf_low = curator_ci[[1L]],
       curator_conf_high = curator_ci[[2L]],
       curator_odds_ratio = exp(beta + gamma),
+      curator_p_value = 2 * stats::pnorm(-abs((beta + gamma) / curator_se)),
       curator_minus_audience_log_odds = unname(gamma),
       difference_se = difference_se,
       difference_conf_low = difference_ci[[1L]],
@@ -202,7 +614,11 @@ selector_summary <- function(fit, features, labels, standardize) {
     )
   })
   output <- rbindlist(rows)
-  output[, difference_q_value_bh := stats::p.adjust(difference_p_value, method = "BH")]
+  output[, `:=`(
+    audience_q_value_bh = stats::p.adjust(audience_p_value, method = "BH"),
+    curator_q_value_bh = stats::p.adjust(curator_p_value, method = "BH"),
+    difference_q_value_bh = stats::p.adjust(difference_p_value, method = "BH")
+  )]
   output
 }
 
@@ -232,6 +648,7 @@ probability_summary <- function(
       term = feature,
       feature = labels[[feature]],
       unit = if (standardize[[feature]]) "One standard deviation" else "Absent to present",
+      interpretation = "Heuristic logistic translation; not an exact fixed-k inclusion probability",
       reference_probability_mean = mean(p0),
       audience_change_pp = 100 * probability_change(estimates[[1L]]),
       audience_conf_low_pp = 100 * audience_ci[[1L]],
@@ -254,11 +671,42 @@ probability_summary <- function(
 
 ```{r run-scope}
 run_scope <- function(scope) {
-  cat("\n---", toupper(scope), "CANDIDATE MODEL ---\n")
+  progress_message(paste("Starting candidate scope:", scope))
   input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
   if (!file.exists(input_path)) stop("Missing choice set: ", input_path)
   choice_set <- as.data.table(arrow::read_parquet(input_path))
   features <- unlist(feature_manifest$models[[scope]]$features, use.names = FALSE)
+  required_author_features <- c(
+    "log_author_prior_30d_comments",
+    "author_prior_30d_upvote_reception",
+    "author_prior_30d_downvote_reception",
+    "log_author_prior_comments_story"
+  )
+  missing_author <- setdiff(required_author_features, features)
+  if (length(missing_author)) {
+    stop("The shared author-history contract is incomplete: ",
+         paste(missing_author, collapse = ", "))
+  }
+  retired_author_features <- c(
+    "log_author_prior_30d_snapshot_upvotes",
+    "log_author_prior_30d_snapshot_downvotes"
+  )
+  if (any(retired_author_features %in% features)) {
+    stop("Retired total author-vote features remain in the primary contract")
+  }
+  required_activity_features <- "discussion_pace"
+  missing_activity <- setdiff(required_activity_features, features)
+  if (length(missing_activity)) {
+    stop("The shared activity contract is incomplete: ",
+         paste(missing_activity, collapse = ", "))
+  }
+  retired_activity_features <- c(
+    "log_prior_comments", "log_comments_prev_hour", "recent_activity_share",
+    "log_branch_prior_comments", "log_branch_comments_prev_hour"
+  )
+  if (any(retired_activity_features %in% features)) {
+    stop("Retired activity-count features remain in the primary contract")
+  }
   missing_aqua <- setdiff(aqua_expected_features, features)
   if (length(missing_aqua)) {
     stop(
@@ -278,6 +726,18 @@ run_scope <- function(scope) {
   if (choice_set[, anyDuplicated(paste(story_id, comment_id))]) {
     stop("Candidate keys are not unique in ", scope)
   }
+  choice_set[, story_id := as.character(story_id)]
+  choice_set <- merge(
+    choice_set,
+    article_split[, .(story_id, split_role, development_fold, split_stratum)],
+    by = "story_id", all = FALSE, sort = FALSE
+  )
+  if (uniqueN(choice_set$story_id) != nrow(article_split)) {
+    stop(scope, " choice set does not contain every article in the shared split")
+  }
+  development <- choice_set[split_role == "development"]
+  test <- choice_set[split_role == "paper2_test"]
+  if (!nrow(development) || !nrow(test)) stop("Development and test rows are both required")
 
   labels <- setNames(
     vapply(features, function(feature) feature_manifest$features[[feature]]$label, character(1)),
@@ -291,11 +751,14 @@ run_scope <- function(scope) {
     if (!standardize[[feature]]) {
       return(data.table(term = feature, mean = NA_real_, sd = NA_real_, standardized = FALSE))
     }
-    scaled <- safe_scale(choice_set[[feature]], feature)
-    set(choice_set, j = feature, value = scaled$value)
+    scaled <- safe_scale(development[[feature]], feature)
+    set(development, j = feature, value = scaled$value)
+    set(test, j = feature, value = (as.numeric(test[[feature]]) - scaled$mean) / scaled$sd)
     data.table(term = feature, mean = scaled$mean, sd = scaled$sd, standardized = TRUE)
   }))
-  if (choice_set[, anyNA(.SD), .SDcols = features]) stop("Missing values remain after scaling")
+  if (development[, anyNA(.SD), .SDcols = features] || test[, anyNA(.SD), .SDcols = features]) {
+    stop("Missing values remain after development-fitted scaling")
+  }
 
   right_hand_side <- c(
     features,
@@ -306,7 +769,39 @@ run_scope <- function(scope) {
   model_formula <- stats::as.formula(
     paste("selected ~", paste(right_hand_side, collapse = " + "))
   )
-  primary <- fit_stacked(choice_set, features, model_formula, 1L)
+  cache_context <- list(
+    cache_schema = fit_cache_schema,
+    scope = scope,
+    input = file_fingerprint(input_path),
+    split = file_fingerprint(split_path),
+    feature_manifest = file_fingerprint(manifest_path),
+    provenance_manifest = file_fingerprint(provenance_path),
+    features = features,
+    standardize = standardize,
+    scaling = as.data.frame(scaling),
+    formula = paste(deparse(model_formula), collapse = " "),
+    method = "efron",
+    r_version = R.version.string,
+    package_versions = vapply(
+      c("data.table", "survival"),
+      function(package) as.character(utils::packageVersion(package)),
+      character(1)
+    )
+  )
+  fit_fingerprint <- function(draw) {
+    digest::digest(
+      c(cache_context, list(
+        tie_draw = draw,
+        audience_label = sprintf("audience_selected_draw_%02d", draw)
+      )),
+      algo = "sha256",
+      serialize = TRUE
+    )
+  }
+  primary <- fit_stacked(
+    development, features, model_formula, 1L, scope, fit_fingerprint(1L)
+  )
+  diagnostics <- model_diagnostics(primary)
   covariance <- stats::vcov(primary)
   coefficients <- data.table(
     term = names(stats::coef(primary)),
@@ -319,17 +814,17 @@ run_scope <- function(scope) {
     p_value = 2 * stats::pnorm(-abs(estimate / std_error_article_clustered))
   )]
   associations <- selector_summary(primary, features, labels, standardize)
-  article_rates <- unique(choice_set[, .(story_id, n_candidates, n_picks)])
+  article_rates <- unique(development[, .(story_id, n_candidates, n_picks)])
   probabilities <- probability_summary(
     primary, features, labels, standardize, article_rates,
     probability_draws, base_seed
   )
 
-  available_draws <- length(grep("^audience_selected_draw_[0-9]+$", names(choice_set)))
+  available_draws <- length(grep("^audience_selected_draw_[0-9]+$", names(development)))
   tie_draws <- min(tie_draws_requested, available_draws)
   sensitivity <- rbindlist(lapply(seq_len(tie_draws), function(draw) {
     fit <- if (draw == 1L) primary else fit_stacked(
-      choice_set, features, model_formula, draw
+      development, features, model_formula, draw, scope, fit_fingerprint(draw)
     )
     output <- data.table(
       draw = draw,
@@ -356,18 +851,21 @@ run_scope <- function(scope) {
 
   summary <- data.table(
     statistic = c(
-      "candidate_scope", "eligible_articles", "candidate_comments",
-      "curator_selections", "stacked_rows", "tie_draws_fitted",
+      "candidate_scope", "development_articles", "paper2_test_articles",
+      "development_candidate_comments", "paper2_test_candidate_comments",
+      "development_curator_selections", "development_stacked_rows", "tie_draws_fitted",
       "article_selector_strata", "watermark"
     ),
     value = c(
       scope,
-      uniqueN(choice_set$story_id),
-      nrow(choice_set),
-      sum(choice_set$curator_selected),
-      2L * nrow(choice_set),
+      uniqueN(development$story_id),
+      uniqueN(test$story_id),
+      nrow(development),
+      nrow(test),
+      sum(development$curator_selected),
+      2L * nrow(development),
       tie_draws,
-      2L * uniqueN(choice_set$story_id),
+      2L * uniqueN(development$story_id),
       provenance$watermark
     )
   )
@@ -378,21 +876,97 @@ run_scope <- function(scope) {
   fwrite(coefficients, file.path(scope_output, "model_coefficients.csv"))
   fwrite(associations, file.path(scope_output, "selector_associations.csv"))
   fwrite(probabilities, file.path(scope_output, "probability_contrasts.csv"))
+  fwrite(diagnostics, file.path(scope_output, "model_diagnostics.csv"))
   fwrite(sensitivity, file.path(scope_output, "tie_sensitivity_draws.csv"))
   fwrite(sensitivity_summary, file.path(scope_output, "tie_sensitivity_summary.csv"))
   fwrite(summary, file.path(scope_output, "sample_summary.csv"))
-  environment(primary$terms) <- baseenv()
+  test_scores <- score_frozen_model(primary, test, features)
+  set(test_scores, j = "split_role", value = "paper2_test")
+  set(test_scores, j = "score_source", value = "sealed_paper2_test")
+  test_metrics <- evaluate_frozen_scores(test_scores)
+  set(test_metrics, j = "split_role", value = "paper2_test")
+  test_metric_summary <- bootstrap_metric_summary(
+    test_metrics, test_bootstrap_draws, base_seed + if (scope == "root") 0L else 10000L
+  )
+  set(test_metric_summary, j = "split_role", value = "paper2_test")
+  chance_metrics <- chance_ranking_metrics(test_scores)
+  set(chance_metrics, j = "split_role", value = "paper2_test")
+  chance_metric_summary <- bootstrap_metric_summary(
+    chance_metrics,
+    test_bootstrap_draws,
+    base_seed + if (scope == "root") 20000L else 30000L
+  )
+  set(chance_metric_summary, j = "split_role", value = "paper2_test")
+  above_chance_summary <- bootstrap_above_chance(
+    test_metrics,
+    chance_metrics,
+    test_bootstrap_draws,
+    base_seed + if (scope == "root") 40000L else 50000L
+  )
+  set(above_chance_summary, j = "split_role", value = "paper2_test")
+  test_tie_sensitivity <- rbindlist(lapply(seq_len(tie_draws), function(draw) {
+    draw_scores <- score_frozen_model(primary, test, features, audience_draw = draw)
+    draw_metrics <- evaluate_frozen_scores(draw_scores)[selector == "audience"]
+    set(draw_metrics, j = "audience_tie_draw", value = draw)
+    draw_metrics
+  }))
+  set(test_tie_sensitivity, j = "split_role", value = "paper2_test")
+  arrow::write_parquet(test_scores, file.path(scope_output, "test_scores_long.parquet"))
+  test_scores_wide <- dcast(test_scores, story_id + comment_id ~ selector, value.var = "score")
+  setnames(test_scores_wide, c("audience", "curator"),
+    c("regression_audience_score", "regression_curator_score"))
+  set(test_scores_wide, j = "split_role", value = "paper2_test")
+  set(test_scores_wide, j = "score_source", value = "sealed_paper2_test")
+  arrow::write_parquet(test_scores_wide, file.path(scope_output, "test_scores_wide.parquet"))
+  arrow::write_parquet(test_metrics, file.path(scope_output, "test_article_metrics.parquet"))
+  arrow::write_parquet(
+    test_metric_summary, file.path(scope_output, "test_metric_summary.parquet")
+  )
+  arrow::write_parquet(
+    chance_metrics, file.path(scope_output, "test_chance_article_metrics.parquet")
+  )
+  arrow::write_parquet(
+    chance_metric_summary,
+    file.path(scope_output, "test_chance_metric_summary.parquet")
+  )
+  arrow::write_parquet(
+    above_chance_summary,
+    file.path(scope_output, "test_above_chance_summary.parquet")
+  )
+  arrow::write_parquet(
+    test_tie_sensitivity,
+    file.path(scope_output, "test_tie_sensitivity_metrics.parquet")
+  )
+  arrow::write_parquet(article_split, file.path(scope_output, "article_split.parquet"))
   saveRDS(primary, file.path(scope_output, "stacked_selection_model.rds"))
   writeLines(
     c(
       paste("Candidate scope:", scope),
       paste("Feature watermark:", provenance$watermark),
-      paste("Eligible articles:", uniqueN(choice_set$story_id)),
-      paste("Candidate comments:", nrow(choice_set)),
+      paste("Development articles:", uniqueN(development$story_id)),
+      paste("Paper 2 test articles:", uniqueN(test$story_id)),
+      paste("Development candidate comments:", nrow(development)),
+      paste("Paper 2 test candidate comments:", nrow(test)),
       paste("Tie draws fitted:", tie_draws),
+      paste("Shared split:", split_path),
+      paste("Fit cache:", normalizePath(fit_cache_root, mustWork = FALSE)),
+      paste("Fit cache schema:", fit_cache_schema),
+      "Feature scaling and coefficients: development articles only.",
+      "Paper 2 scores: frozen coefficients applied once to sealed test articles.",
+      paste("Paper 2 metric uncertainty:", test_bootstrap_draws,
+        "article-bootstrap draws conditional on the fitted model."),
+      "Chance baseline: exact expectation under an article-specific random",
+      "permutation preserving n candidates and k selections; model-minus-chance",
+      "uncertainty uses paired article bootstrap draws.",
+      paste("Paper 2 audience tie-sensitivity draws:", tie_draws,
+        "(fixed scores; labels varied without refitting)."),
       "Article controls: article-by-selector conditional-logit strata.",
       "Uncertainty: standard errors clustered by article.",
       "Audience outcome: top-k final relative-vote selection.",
+      paste("Covariance condition number:",
+        diagnostics[statistic == "covariance_condition_number", value]),
+      "Probability contrasts: heuristic logistic translations; exact fixed-k",
+      "counterfactual inclusion probabilities are deferred for possible future work.",
       "Interpretation: retrospective within-discussion associations, not causal effects.",
       if (length(attr(primary, "fit_warnings"))) {
         paste("Fit warnings:", paste(attr(primary, "fit_warnings"), collapse = " | "))
@@ -402,10 +976,12 @@ run_scope <- function(scope) {
     ),
     file.path(scope_output, "diagnostics.txt")
   )
+  progress_message(paste("Completed candidate scope:", scope))
   list(scope = scope, associations = associations, probabilities = probabilities, summary = summary)
 }
 
 results <- lapply(c("root", "all"), run_scope)
+progress_message("Analysis and artifact generation completed successfully")
 ```
 
 # Compact results
@@ -437,4 +1013,6 @@ reflects exposure, position, social influence, and retrospective survival as
 well as preference. Author-history vote variables are also collection-snapshot
 reputation measures. Curators include journalists, community-management staff,
 and volunteer guides. The models estimate associations only within discussions
-where at least one usable sticky selection was observed.
+where at least one usable sticky selection was observed. Association estimates
+now describe the development half; predictive metrics describe only the sealed
+Paper 2 test half.

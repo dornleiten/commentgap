@@ -44,6 +44,78 @@ def _save_figure(fig: plt.Figure, stem: Path) -> None:
     plt.close(fig)
 
 
+def _bootstrap_article_metrics(
+    frame: pd.DataFrame, *, draws: int = 1000, seed: int = 20260813
+) -> pd.DataFrame:
+    """Summarise article-level metrics with an article bootstrap."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for selector, subset in frame.groupby("selector", sort=True):
+        subset = subset.sort_values("story_id")
+        for metric in ("ndcg_at_k", "top_k_overlap", "jaccard"):
+            values = subset[metric].to_numpy(dtype=float)
+            boot = np.mean(
+                values[rng.integers(0, len(values), size=(draws, len(values)))], axis=1
+            )
+            rows.append(
+                {
+                    "selector": selector,
+                    "metric": metric,
+                    "estimate": float(values.mean()),
+                    "conf_low": float(np.quantile(boot, 0.025)),
+                    "conf_high": float(np.quantile(boot, 0.975)),
+                    "articles": len(values),
+                    "bootstrap_draws": draws,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _paired_model_differences(
+    regression: pd.DataFrame,
+    xgboost: pd.DataFrame,
+    *,
+    draws: int = 1000,
+    seed: int = 20260813,
+) -> pd.DataFrame:
+    """Estimate XGBoost minus regression differences on identical test articles."""
+    keys = ["story_id", "selector"]
+    regression_keys = regression[keys].sort_values(keys).reset_index(drop=True)
+    xgboost_keys = xgboost[keys].sort_values(keys).reset_index(drop=True)
+    if regression_keys.duplicated().any() or xgboost_keys.duplicated().any():
+        raise ValueError("Test metrics must contain one row per story and selector")
+    if not regression_keys.equals(xgboost_keys):
+        raise ValueError(
+            "Regression and XGBoost test metrics do not contain identical story/selector keys"
+        )
+    merged = regression.merge(xgboost, on=keys, suffixes=("_regression", "_xgboost"))
+    rng = np.random.default_rng(seed)
+    rows = []
+    for selector, subset in merged.groupby("selector", sort=True):
+        for metric in ("ndcg_at_k", "top_k_overlap", "jaccard"):
+            differences = (
+                subset[f"{metric}_xgboost"] - subset[f"{metric}_regression"]
+            ).to_numpy(dtype=float)
+            boot = np.mean(
+                differences[
+                    rng.integers(0, len(differences), size=(draws, len(differences)))
+                ],
+                axis=1,
+            )
+            rows.append(
+                {
+                    "selector": selector,
+                    "metric": metric,
+                    "estimate_xgboost_minus_regression": float(differences.mean()),
+                    "conf_low": float(np.quantile(boot, 0.025)),
+                    "conf_high": float(np.quantile(boot, 0.975)),
+                    "articles": len(differences),
+                    "bootstrap_draws": draws,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def build_reporting_outputs(
     feature_root: Path,
     regression_root: Path,
@@ -65,6 +137,12 @@ def build_reporting_outputs(
     regression_rows = []
     probability_rows = []
     metric_rows = []
+    regression_metric_rows = []
+    paired_difference_rows = []
+    regression_diagnostic_rows = []
+    regression_tie_rows = []
+    regression_chance_rows = []
+    regression_above_chance_rows = []
     importance_rows = []
     shap_rows = []
     tie_rows = []
@@ -100,14 +178,53 @@ def build_reporting_outputs(
         probabilities = _read_csv(regression_root / scope / "probability_contrasts.csv")
         probabilities["scope"] = scope
         probability_rows.append(probabilities)
-        metrics = _read_parquet(ranker_root / scope / "metric_summary.parquet")
+        regression_article_metrics = _read_parquet(
+            regression_root / scope / "test_article_metrics.parquet"
+        )
+        xgb_article_metrics = _read_parquet(
+            ranker_root / scope / "test_article_metrics.parquet"
+        )
+        scope_seed = 20260813 + (0 if scope == "root" else 100)
+        regression_metric_summary = _read_parquet(
+            regression_root / scope / "test_metric_summary.parquet"
+        )
+        regression_metric_summary["scope"] = scope
+        regression_metric_rows.append(regression_metric_summary)
+        regression_chance = _read_parquet(
+            regression_root / scope / "test_chance_metric_summary.parquet"
+        )
+        regression_chance["scope"] = scope
+        regression_chance_rows.append(regression_chance)
+        regression_above_chance = _read_parquet(
+            regression_root / scope / "test_above_chance_summary.parquet"
+        )
+        regression_above_chance["scope"] = scope
+        regression_above_chance_rows.append(regression_above_chance)
+        regression_diagnostics = _read_csv(
+            regression_root / scope / "model_diagnostics.csv"
+        )
+        regression_diagnostics["scope"] = scope
+        regression_diagnostic_rows.append(regression_diagnostics)
+        regression_ties = _read_parquet(
+            regression_root / scope / "test_tie_sensitivity_metrics.parquet"
+        )
+        regression_ties["scope"] = scope
+        regression_tie_rows.append(regression_ties)
+        paired_differences = _paired_model_differences(
+            regression_article_metrics, xgb_article_metrics, seed=scope_seed
+        )
+        paired_differences["scope"] = scope
+        paired_difference_rows.append(paired_differences)
+        metrics = _read_parquet(ranker_root / scope / "test_metric_summary.parquet")
         metrics["scope"] = scope
         metric_rows.append(metrics)
-        importance = _read_parquet(ranker_root / scope / "grouped_permutation_importance.parquet")
+        importance = _read_parquet(
+            ranker_root / scope / "test_grouped_permutation_importance.parquet"
+        )
         importance["scope"] = scope
         importance_rows.append(importance)
-        shap = _read_parquet(ranker_root / scope / "oof_treeshap_sample.parquet")
-        id_columns = {"story_id", "comment_id", "selector", "outer_fold"}
+        shap = _read_parquet(ranker_root / scope / "test_treeshap_sample.parquet")
+        id_columns = {"story_id", "comment_id", "selector", "split_role"}
         shap_long = shap.melt(
             id_vars=list(id_columns),
             value_vars=[column for column in shap if column not in id_columns and column != "selector_code"],
@@ -116,12 +233,12 @@ def build_reporting_outputs(
         )
         shap_long["scope"] = scope
         shap_rows.append(shap_long)
-        ties = _read_parquet(ranker_root / scope / "tie_sensitivity_metrics.parquet")
+        ties = _read_parquet(ranker_root / scope / "test_tie_sensitivity_metrics.parquet")
         ties["scope"] = scope
         tie_rows.append(ties)
-        splits = _read_parquet(ranker_root / scope / "article_splits.parquet")
+        splits = _read_parquet(ranker_root / scope / "article_split.parquet")
         folds = (
-            splits.groupby(["is_tuning", "outer_fold"], as_index=False)
+            splits.groupby(["split_role", "development_fold"], as_index=False)
             .agg(articles=("story_id", "nunique"), candidates=("n_candidates", "sum"))
         )
         folds["scope"] = scope
@@ -132,16 +249,44 @@ def build_reporting_outputs(
     regression = pd.concat(regression_rows, ignore_index=True)
     probability = pd.concat(probability_rows, ignore_index=True)
     metrics = pd.concat(metric_rows, ignore_index=True)
+    regression_metrics = pd.concat(regression_metric_rows, ignore_index=True)
+    paired_differences = pd.concat(paired_difference_rows, ignore_index=True)
+    regression_diagnostics = pd.concat(regression_diagnostic_rows, ignore_index=True)
+    regression_ties = pd.concat(regression_tie_rows, ignore_index=True)
+    regression_chance = pd.concat(regression_chance_rows, ignore_index=True)
+    regression_above_chance = pd.concat(
+        regression_above_chance_rows, ignore_index=True
+    )
     importance = pd.concat(importance_rows, ignore_index=True)
     shap = pd.concat(shap_rows, ignore_index=True)
     ties = pd.concat(tie_rows, ignore_index=True)
     folds = pd.concat(fold_rows, ignore_index=True)
+    split_balance = _read_csv(feature_root / "split_balance_diagnostics.csv")
 
     _save_table(sample, table_root / "sample_accounting")
     _save_table(descriptive, table_root / "feature_descriptives")
     _save_table(regression, table_root / "regression_associations")
     _save_table(probability, table_root / "regression_probability_contrasts")
-    _save_table(metrics, table_root / "xgb_oof_performance")
+    _save_table(regression_metrics, table_root / "regression_test_performance")
+    _save_table(
+        regression_chance, table_root / "regression_test_chance_baseline"
+    )
+    _save_table(
+        regression_above_chance, table_root / "regression_test_above_chance"
+    )
+    _save_table(regression_diagnostics, table_root / "regression_model_diagnostics")
+    _save_table(metrics, table_root / "xgb_test_performance")
+    model_metrics = pd.concat(
+        [
+            regression_metrics.assign(model="Conditional logit"),
+            metrics.assign(model="XGBoost"),
+        ],
+        ignore_index=True,
+    )
+    _save_table(model_metrics, table_root / "model_test_performance")
+    _save_table(
+        paired_differences, table_root / "regression_vs_xgb_test_differences"
+    )
     importance_table = (
         importance.groupby(["scope", "feature"])["importance"]
         .agg(mean="mean", std="std")
@@ -154,7 +299,26 @@ def build_reporting_outputs(
         ].mean(),
         table_root / "tie_sensitivity",
     )
-    _save_table(folds, table_root / "fold_balance")
+    regression_tie_summary = regression_ties.groupby(
+        ["scope", "selector", "audience_tie_draw"], as_index=False
+    )[["ndcg_at_k", "top_k_overlap", "jaccard"]].mean()
+    _save_table(
+        regression_tie_summary, table_root / "regression_test_tie_sensitivity"
+    )
+    combined_ties = pd.concat(
+        [
+            regression_tie_summary.assign(model="Conditional logit"),
+            ties.groupby(
+                ["scope", "selector", "audience_tie_draw"], as_index=False
+            )[["ndcg_at_k", "top_k_overlap", "jaccard"]]
+            .mean()
+            .assign(model="XGBoost"),
+        ],
+        ignore_index=True,
+    )
+    _save_table(combined_ties, table_root / "model_test_tie_sensitivity")
+    _save_table(folds, table_root / "paper2_split_balance")
+    _save_table(split_balance, table_root / "paper2_covariate_balance")
 
     labels = registry["features"]
     maximum_regression_terms = max(
@@ -240,11 +404,50 @@ def build_reporting_outputs(
     upper = min(1.0, max(0.1, float(plot_metrics["conf_high"].max()) * 1.2))
     axis.set_ylim(0, upper)
     axis.set_xticks(x, metric_labels)
-    axis.set_ylabel("Article-weighted OOF estimate")
+    axis.set_ylabel("Article-weighted sealed-test estimate")
     axis.set_xlabel("")
     axis.legend(title="Model / selector", frameon=False)
     fig.tight_layout()
-    _save_figure(fig, figure_root / "xgb_oof_performance")
+    _save_figure(fig, figure_root / "xgb_test_performance")
+
+    comparison = paired_differences.copy()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), sharey=True)
+    for axis, scope in zip(axes, ("root", "all")):
+        subset = comparison[comparison["scope"] == scope].copy()
+        subset["series"] = subset["selector"].str.title()
+        x = np.arange(len(metric_order), dtype=float)
+        for offset, selector, color in zip(
+            (-0.08, 0.08),
+            ("Audience", "Curator"),
+            sns.color_palette("deep", 2),
+        ):
+            values = (
+                subset[subset["series"] == selector]
+                .set_index("metric")
+                .loc[metric_order]
+            )
+            estimate = values["estimate_xgboost_minus_regression"]
+            axis.errorbar(
+                x + offset,
+                estimate,
+                yerr=[
+                    estimate - values["conf_low"],
+                    values["conf_high"] - estimate,
+                ],
+                marker="o",
+                linestyle="none",
+                capsize=3,
+                color=color,
+                label=selector,
+            )
+        axis.axhline(0, color="black", linewidth=0.8)
+        axis.set_xticks(x, metric_labels)
+        axis.set_title("Root candidates" if scope == "root" else "All comments")
+        axis.set_xlabel("")
+        axis.legend(frameon=False)
+    axes[0].set_ylabel("Sealed-test difference (XGBoost − conditional logit)")
+    fig.tight_layout()
+    _save_figure(fig, figure_root / "regression_vs_xgb_test_performance")
 
     importance_summary = importance.groupby(["scope", "feature"], as_index=False)["importance"].mean()
     importance_summary["label"] = importance_summary["feature"].map(

@@ -1,0 +1,1101 @@
+---
+title: "Development-only collinearity sensitivity for stacked selection models"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+
+# Purpose
+
+This analysis diagnoses dependence among terms in the stacked conditional-logit
+models and tests prespecified reduced specifications. It is deliberately limited
+to the 50% development partition. The shared choice-set parquet contains both
+partitions, so test rows are present during initial file loading, but they are
+immediately removed by an inner join to development article IDs. No Paper 2 test
+row enters scaling, fitting, scoring, diagnostics, or model comparison, and no
+sealed-test performance artifact is read.
+
+The primary full models in `06B_stacked_selection_models.Rmd` remain the fixed
+reference. Reduced models are robustness checks, not data-driven replacements.
+The analysis uses audience tie draw 1 and Efron's tied-likelihood approximation,
+matching the primary model.
+
+```{r setup, message=FALSE, warning=FALSE}
+required_packages <- c(
+  "arrow", "data.table", "digest", "jsonlite", "survival", "MASS", "knitr"
+)
+missing_packages <- required_packages[!vapply(
+  required_packages, requireNamespace, logical(1), quietly = TRUE
+)]
+if (length(missing_packages)) {
+  stop("Restore the R environment before knitting. Missing: ",
+       paste(missing_packages, collapse = ", "))
+}
+library(data.table)
+library(survival)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Configuration and sealed-test guard
+
+```{r configuration}
+feature_root <- Sys.getenv(
+  "COMMENTGAP_MODEL_DATA_ROOT", "model_output/selection_2025/model_data"
+)
+regression_root <- Sys.getenv(
+  "COMMENTGAP_REGRESSION_ROOT", "model_output/selection_2025/regression"
+)
+
+output_root <- Sys.getenv(
+  "COMMENTGAP_COLLINEARITY_ROOT",
+  "model_output/selection_2025/regression_sensitivity/collinearity_shared_preprocessing_v4"
+)
+cache_root <- file.path(output_root, "fit_cache")
+split_path <- file.path(feature_root, "master_article_split.parquet")
+parameters_path <- file.path(feature_root, "preprocessing_parameters.json")
+manifest_path <- file.path(feature_root, "feature_manifest.json")
+requested_scopes <- strsplit(
+  Sys.getenv("COMMENTGAP_COLLINEARITY_SCOPES", "root,all"), ",", fixed = TRUE
+)[[1L]]
+requested_scopes <- trimws(requested_scopes)
+run_cv <- tolower(Sys.getenv("COMMENTGAP_COLLINEARITY_RUN_CV", "1")) %in%
+  c("1", "true", "yes")
+bootstrap_draws <- as.integer(Sys.getenv(
+  "COMMENTGAP_COLLINEARITY_BOOTSTRAP_DRAWS", "1000"
+))
+base_seed <- as.integer(Sys.getenv("COMMENTGAP_MODEL_SEED", "20260813"))
+force_recompute <- tolower(Sys.getenv(
+  "COMMENTGAP_COLLINEARITY_FORCE_RECOMPUTE", "0"
+)) %in% c("1", "true", "yes")
+high_correlation_threshold <- as.numeric(Sys.getenv(
+  "COMMENTGAP_COLLINEARITY_CORRELATION_THRESHOLD", "0.70"
+))
+
+if (!all(requested_scopes %in% c("root", "all"))) {
+  stop("COMMENTGAP_COLLINEARITY_SCOPES must contain only root and/or all")
+}
+if (!length(requested_scopes)) stop("At least one scope is required")
+if (!is.finite(bootstrap_draws) || bootstrap_draws < 100L) {
+  stop("COMMENTGAP_COLLINEARITY_BOOTSTRAP_DRAWS must be at least 100")
+}
+if (!file.exists(split_path) || !file.exists(manifest_path) || !file.exists(parameters_path)) {
+  stop("Missing shared preprocessing artifacts; run 06A2_shared_model_preprocessing.ipynb first")
+}
+dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
+dir.create(cache_root, recursive = TRUE, showWarnings = FALSE)
+
+article_split <- as.data.table(arrow::read_parquet(split_path))
+required_split <- c("story_id", "split_role", "development_fold")
+missing_split <- setdiff(required_split, names(article_split))
+if (length(missing_split)) {
+  stop("Shared split is missing: ", paste(missing_split, collapse = ", "))
+}
+article_split[, story_id := as.character(story_id)]
+if (article_split[, anyDuplicated(story_id)]) stop("Duplicate article split keys")
+if (!setequal(unique(article_split$split_role), c("development", "paper2_test"))) {
+  stop("Expected development and paper2_test split roles")
+}
+development_split <- article_split[split_role == "development",
+  .(story_id, development_fold)]
+sealed_test_ids <- article_split[split_role == "paper2_test", story_id]
+if (development_split[, any(development_fold < 0L)]) {
+  stop("Development articles contain invalid fold assignments")
+}
+if (length(intersect(development_split$story_id, sealed_test_ids))) {
+  stop("Development and sealed-test article IDs overlap")
+}
+expected_folds <- sort(unique(development_split$development_fold))
+if (!identical(expected_folds, 0:4)) {
+  stop("Expected the shared five development folds 0:4")
+}
+
+feature_manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
+preprocessing_parameters <- jsonlite::fromJSON(parameters_path, simplifyVector = FALSE)
+if (!identical(as.integer(preprocessing_parameters$version), 4L)) {
+  stop("Expected shared preprocessing version 4; force-rerun 06A2")
+}
+fold_feature_columns <- preprocessing_parameters$fold_feature_columns
+if (!setequal(as.integer(names(fold_feature_columns)), expected_folds)) {
+  stop("Fold-specific feature mappings do not match development folds")
+}
+aqua_features <- setdiff(
+  grep("^aqua_.*_expected$", names(feature_manifest$features), value = TRUE),
+  "aqua_score_expected"
+)
+if (length(aqua_features) != 20L) stop("Expected exactly 20 AQuA dimensions")
+
+cat("Scopes:", paste(requested_scopes, collapse = ", "), "\n")
+cat("Development articles:", nrow(development_split), "\n")
+cat("Sealed test articles excluded:", length(sealed_test_ids), "\n")
+cat("Five-fold development comparison:", run_cv, "\n")
+```
+
+# Helpers
+
+```{r helpers}
+elapsed_start <- Sys.time()
+progress_message <- function(...) {
+  elapsed <- as.numeric(difftime(Sys.time(), elapsed_start, units = "mins"))
+  cat(sprintf("[%s; %.1f min] %s\n", format(Sys.time(), "%H:%M:%S"), elapsed,
+              paste0(..., collapse = "")))
+  flush.console()
+}
+
+file_signature <- function(path) {
+  information <- file.info(path)
+  list(
+    path = normalizePath(path, mustWork = TRUE),
+    size = unname(information$size),
+    modified = format(information$mtime, tz = "UTC", usetz = TRUE)
+  )
+}
+
+atomic_save_rds <- function(object, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary <- tempfile(pattern = "fit-", tmpdir = dirname(path))
+  on.exit(unlink(temporary), add = TRUE)
+  saveRDS(object, temporary, compress = "gzip")
+  if (!file.rename(temporary, path)) stop("Could not publish cache: ", path)
+}
+
+interaction_name <- function(coefficient_names, feature, interaction_variable) {
+  candidates <- c(
+    paste0(feature, ":", interaction_variable),
+    paste0(interaction_variable, ":", feature)
+  )
+  found <- candidates[candidates %in% coefficient_names]
+  if (length(found) != 1L) {
+    stop("Cannot identify interaction coefficient for ", feature)
+  }
+  found[[1L]]
+}
+
+compact_fit <- function(fit, coding, features, variant) {
+  model_covariance <- if (!is.null(fit$naive.var)) fit$naive.var else fit$var
+  output <- list(
+    coefficients = stats::coef(fit),
+    robust_covariance = fit$var,
+    model_covariance = model_covariance,
+    loglik = fit$loglik,
+    iterations = fit$iter,
+    warnings = unique(attr(fit, "fit_warnings")),
+    coding = coding,
+    features = features,
+    variant = variant
+  )
+  coefficient_names <- names(output$coefficients)
+  dimnames(output$robust_covariance) <- list(coefficient_names, coefficient_names)
+  dimnames(output$model_covariance) <- list(coefficient_names, coefficient_names)
+  output
+}
+
+build_stacked <- function(choice_set, features, coding = "reference") {
+  required <- c(
+    "story_id", "comment_id", "n_picks", "curator_selected",
+    "audience_selected_draw_01", features
+  )
+  missing <- setdiff(required, names(choice_set))
+  if (length(missing)) stop("Choice set is missing: ", paste(missing, collapse = ", "))
+  keep <- c("story_id", "comment_id", "n_picks", features)
+  audience <- copy(choice_set[, ..keep])
+  curator_rows <- copy(choice_set[, ..keep])
+  audience[, selected := as.integer(choice_set$audience_selected_draw_01)]
+  curator_rows[, selected := as.integer(choice_set$curator_selected)]
+  if (coding == "reference") {
+    audience[, curator := 0]
+    curator_rows[, curator := 1]
+  } else if (coding == "effect") {
+    audience[, selector_code := -0.5]
+    curator_rows[, selector_code := 0.5]
+  } else {
+    stop("Unknown selector coding: ", coding)
+  }
+  audience[, selector := "audience"]
+  curator_rows[, selector := "curator"]
+  stacked <- rbindlist(list(audience, curator_rows), use.names = TRUE, fill = TRUE)
+  stacked[, stratum := paste(story_id, selector, sep = "::")]
+  checks <- stacked[, .(
+    selected_n = sum(selected), expected_n = first(n_picks), candidates_n = .N
+  ), by = stratum]
+  if (checks[, any(selected_n != expected_n)]) {
+    stop("A development choice set does not contain exactly k selections")
+  }
+  if (checks[, any(selected_n <= 0L | selected_n >= candidates_n)]) {
+    stop("A development choice set lacks outcome variation")
+  }
+  stacked
+}
+
+model_formula <- function(features, coding) {
+  interaction_variable <- if (coding == "reference") "curator" else "selector_code"
+  stats::as.formula(paste(
+    "selected ~",
+    paste(c(features, paste0(interaction_variable, ":", features),
+            "strata(stratum)", "cluster(story_id)"), collapse = " + ")
+  ))
+}
+
+fit_compact <- function(
+    choice_set, features, coding, scope, variant, fold = "full",
+    allow_convergence_warnings = FALSE
+) {
+  cache_path <- file.path(
+    cache_root, scope, variant, paste0("fold_", fold, ".rds")
+  )
+  fingerprint <- digest::digest(list(
+    schema = "collinearity-sensitivity-shared-preprocessing-v4",
+    scope = scope,
+    variant = variant,
+    fold = as.character(fold),
+    coding = coding,
+    features = features,
+    stories = sort(unique(choice_set$story_id)),
+    split = file_signature(split_path),
+    input = file_signature(file.path(
+      feature_root, paste0("choice_set_", scope, ".parquet"))),
+    manifest = file_signature(manifest_path),
+    survival = as.character(utils::packageVersion("survival")),
+    r = paste(R.version$major, R.version$minor, sep = ".")
+  ), algo = "sha256")
+  if (!force_recompute && file.exists(cache_path)) {
+    cached <- readRDS(cache_path)
+    if (identical(cached$fingerprint, fingerprint)) {
+      cached_warnings <- if (is.null(cached$fit$warnings)) {
+        character()
+      } else {
+        unique(cached$fit$warnings)
+      }
+      cached_serious <- grep(
+        "infinite|did not converge|ran out of iterations",
+        cached_warnings, ignore.case = TRUE, value = TRUE
+      )
+      if (!length(cached_serious) || allow_convergence_warnings) {
+        progress_message("CACHE HIT ", scope, "/", variant, " fold=", fold)
+        return(cached$fit)
+      }
+      progress_message("CACHE WARNING REJECTED ", scope, "/", variant,
+                       " fold=", fold, " under strict convergence mode")
+    }
+  }
+  progress_message("FITTING ", scope, "/", variant, " fold=", fold,
+                   " rows=", format(2L * nrow(choice_set), big.mark = ","))
+  stacked <- build_stacked(choice_set, features, coding)
+  fit_warnings <- character()
+  fit <- withCallingHandlers(
+    survival::clogit(
+      model_formula(features, coding), data = stacked, method = "efron",
+      model = FALSE, x = FALSE, y = FALSE
+    ),
+    warning = function(condition) {
+      fit_warnings <<- c(fit_warnings, conditionMessage(condition))
+      invokeRestart("muffleWarning")
+    }
+  )
+  attr(fit, "fit_warnings") <- unique(fit_warnings)
+  if (anyNA(stats::coef(fit)) || any(!is.finite(stats::coef(fit)))) {
+    stop("Unidentified or non-finite coefficients in ", scope, "/", variant)
+  }
+  if (any(!is.finite(fit$var)) ||
+      (!is.null(fit$naive.var) && any(!is.finite(fit$naive.var)))) {
+    stop("Non-finite covariance matrix in ", scope, "/", variant)
+  }
+  serious <- grep(
+    "infinite|did not converge|ran out of iterations", fit_warnings,
+    ignore.case = TRUE, value = TRUE
+  )
+  if (length(serious) && !allow_convergence_warnings) {
+    stop("Convergence failure: ", paste(serious, collapse = " | "))
+  }
+  if (length(serious)) {
+    progress_message(
+      "WARNING RETAINED ", scope, "/", variant, " fold=", fold, ": ",
+      paste(serious, collapse = " | ")
+    )
+  }
+  result <- compact_fit(fit, coding, features, variant)
+  atomic_save_rds(list(fingerprint = fingerprint, fit = result), cache_path)
+  rm(stacked, fit)
+  gc(verbose = FALSE)
+  result
+}
+
+prepare_features <- function(training, validation, features, standardize) {
+  training <- copy(training)
+  validation <- if (is.null(validation)) NULL else copy(validation)
+  working_features <- as.character(features)
+  if (is.null(names(standardize)) || any(!nzchar(names(standardize)))) {
+    stop("Standardization contract must be a named logical vector")
+  }
+  missing_standardize <- setdiff(working_features, names(standardize))
+  if (length(missing_standardize)) {
+    stop("Missing standardization flags for active feature(s): ",
+         paste(missing_standardize, collapse = ", "))
+  }
+  working_standardize <- standardize[working_features]
+  scaling <- rbindlist(lapply(working_features, function(feature) {
+    do_scale <- isTRUE(unname(working_standardize[feature]))
+    if (!do_scale) {
+      return(data.table(term = feature, mean = NA_real_, sd = NA_real_))
+    }
+    center <- mean(as.numeric(training[[feature]]))
+    spread <- stats::sd(as.numeric(training[[feature]]))
+    if (!is.finite(spread) || spread <= 0) stop("No variation in ", feature)
+    set(training, j = feature,
+        value = (as.numeric(training[[feature]]) - center) / spread)
+    if (!is.null(validation)) {
+      set(validation, j = feature,
+          value = (as.numeric(validation[[feature]]) - center) / spread)
+    }
+    data.table(term = feature, mean = center, sd = spread)
+  }))
+  if (training[, anyNA(.SD), .SDcols = working_features] ||
+      (!is.null(validation) && validation[, anyNA(.SD), .SDcols = working_features])) {
+    stop("Missing values remain after development-only scaling")
+  }
+  list(
+    training = training,
+    validation = validation,
+    features = working_features,
+    scaling = scaling
+  )
+}
+
+selector_coefficients <- function(fit) {
+  coefficient_names <- names(fit$coefficients)
+  interaction_variable <- if (fit$coding == "reference") "curator" else "selector_code"
+  rbindlist(lapply(fit$features, function(feature) {
+    interaction <- interaction_name(coefficient_names, feature, interaction_variable)
+    main <- unname(fit$coefficients[[feature]])
+    difference <- unname(fit$coefficients[[interaction]])
+    if (fit$coding == "reference") {
+      audience <- main
+      curator_value <- main + difference
+    } else {
+      audience <- main - 0.5 * difference
+      curator_value <- main + 0.5 * difference
+    }
+    data.table(
+      term = feature, audience = audience, curator = curator_value,
+      curator_minus_audience = difference
+    )
+  }))
+}
+
+score_compact <- function(fit, choice_set) {
+  associations <- selector_coefficients(fit)
+  features <- fit$features
+  matrix_x <- as.matrix(choice_set[, ..features])
+  audience_score <- drop(matrix_x %*% associations$audience)
+  curator_score <- drop(matrix_x %*% associations$curator)
+  rbindlist(list(
+    choice_set[, .(
+      story_id, comment_id, development_fold, n_picks,
+      selector = "audience", selected = as.integer(audience_selected_draw_01),
+      score = audience_score
+    )],
+    choice_set[, .(
+      story_id, comment_id, development_fold, n_picks,
+      selector = "curator", selected = as.integer(curator_selected),
+      score = curator_score
+    )]
+  ))
+}
+
+evaluate_scores <- function(scores) {
+  scores[, {
+    k <- first(n_picks)
+    ranked <- order(-score, comment_id)
+    ideal <- order(-selected, comment_id)
+    predicted <- ranked[seq_len(k)]
+    actual <- which(selected == 1L)
+    discounts <- 1 / log2(seq_len(k) + 1)
+    dcg <- sum(selected[predicted] * discounts)
+    idcg <- sum(selected[ideal[seq_len(k)]] * discounts)
+    overlap <- length(intersect(predicted, actual))
+    .(
+      development_fold = first(development_fold),
+      n_candidates = .N, n_picks = k,
+      ndcg_at_k = dcg / idcg,
+      top_k_overlap = overlap / k,
+      jaccard = overlap / length(union(predicted, actual))
+    )
+  }, by = .(story_id, selector)]
+}
+
+make_variants <- function(scope, full_features) {
+  remove <- function(x) setdiff(full_features, x)
+  variants <- list(
+    full_reference = list(features = full_features, coding = "reference"),
+    no_author_history = list(
+      features = remove(c(
+        "log_author_prior_30d_comments",
+        "author_prior_30d_upvote_reception",
+        "author_prior_30d_downvote_reception",
+        "log_author_prior_comments_story"
+      )), coding = "reference"
+    ),
+    no_aqua = list(features = remove(aqua_features), coding = "reference")
+  )
+  if (scope == "all") {
+    variants <- c(variants, list(
+      reply_indicator_only = list(
+        features = remove("reply_depth_centered"), coding = "reference"
+      ),
+      reply_depth_only = list(
+        features = remove("is_reply"), coding = "reference"
+      ),
+      reduced_activity = list(
+        features = remove(c(
+          "discussion_pace", "prior_reply_composition"
+        )), coding = "reference"
+      )
+    ))
+  }
+  variants
+}
+
+feature_blocks <- function(scope, features) {
+  blocks <- list(
+    global_activity = intersect(features, c(
+      "log_hours_since_article", "prior_reply_composition", "discussion_pace"
+    )),
+    author_history = intersect(features, c(
+      "log_author_prior_30d_comments",
+      "author_prior_30d_upvote_reception",
+      "author_prior_30d_downvote_reception",
+      "log_author_prior_comments_story"
+    )),
+    aqua_dimensions = intersect(features, aqua_features),
+    sentiment_and_safety = intersect(features, c(
+      "sentiment_positive", "sentiment_negative", "toxicity_probability"
+    ))
+  )
+  if (scope == "all") {
+    blocks <- c(list(
+      reply_structure = intersect(features, c("is_reply", "reply_depth_centered"))
+    ), blocks)
+  }
+  blocks[vapply(blocks, length, integer(1)) > 0L]
+}
+
+wald_block_test <- function(fit, block, family) {
+  coefficient_names <- names(fit$coefficients)
+  p <- length(coefficient_names)
+  interaction_variable <- if (fit$coding == "reference") "curator" else "selector_code"
+  rows <- list()
+  if (family == "all_parameters") {
+    for (feature in block) {
+      interaction <- interaction_name(coefficient_names, feature, interaction_variable)
+      first <- numeric(p); names(first) <- coefficient_names; first[[feature]] <- 1
+      second <- numeric(p); names(second) <- coefficient_names; second[[interaction]] <- 1
+      rows <- c(rows, list(first, second))
+    }
+  } else {
+    for (feature in block) {
+      interaction <- interaction_name(coefficient_names, feature, interaction_variable)
+      row <- numeric(p); names(row) <- coefficient_names
+      if (family == "audience") row[[feature]] <- 1
+      if (family == "difference") row[[interaction]] <- 1
+      if (family == "curator") {
+        row[[feature]] <- 1
+        row[[interaction]] <- 1
+      }
+      rows <- c(rows, list(row))
+    }
+  }
+  contrast <- do.call(rbind, rows)
+  estimate <- drop(contrast %*% fit$coefficients)
+  covariance <- contrast %*% fit$robust_covariance %*% t(contrast)
+  degrees <- qr(covariance)$rank
+  statistic <- drop(t(estimate) %*% MASS::ginv(covariance) %*% estimate)
+  data.table(
+    family = family, terms = length(block), df = degrees,
+    chisq = statistic,
+    p_value = stats::pchisq(statistic, df = degrees, lower.tail = FALSE)
+  )
+}
+
+within_story_gram <- function(choice_set, features, coding) {
+  x <- as.matrix(choice_set[, ..features])
+  storage.mode(x) <- "double"
+  if (any(!is.finite(x))) stop("Non-finite design values")
+  story_factor <- match(choice_set$story_id, unique(choice_set$story_id))
+  group_sums <- rowsum(x, story_factor, reorder = FALSE)
+  group_n <- tabulate(story_factor)
+  centered_gram <- crossprod(x) - crossprod(group_sums / sqrt(group_n))
+  centered_gram <- (centered_gram + t(centered_gram)) / 2
+  p <- length(features)
+  if (coding == "reference") {
+    expanded <- rbind(cbind(2 * centered_gram, centered_gram),
+                      cbind(centered_gram, centered_gram))
+    interaction_suffix <- ":curator"
+  } else {
+    zero <- matrix(0, p, p)
+    expanded <- rbind(cbind(2 * centered_gram, zero),
+                      cbind(zero, 0.5 * centered_gram))
+    interaction_suffix <- ":selector_code"
+  }
+  terms <- c(features, paste0(features, interaction_suffix))
+  dimnames(expanded) <- list(terms, terms)
+  expanded
+}
+
+gram_diagnostics <- function(gram, scope, variant) {
+  diagonal <- diag(gram)
+  if (any(!is.finite(diagonal) | diagonal <= .Machine$double.eps)) {
+    bad <- names(diagonal)[!is.finite(diagonal) | diagonal <= .Machine$double.eps]
+    stop("No within-story information for: ", paste(bad, collapse = ", "))
+  }
+  correlation <- gram / sqrt(outer(diagonal, diagonal))
+  correlation <- (correlation + t(correlation)) / 2
+  eig <- eigen(correlation, symmetric = TRUE)
+  tolerance <- max(eig$values) * .Machine$double.eps * nrow(correlation)
+  safe_values <- pmax(eig$values, tolerance)
+  condition_index <- sqrt(max(safe_values) / safe_values)
+  components <- sweep(eig$vectors^2, 2L, safe_values, "/")
+  proportions <- components / rowSums(components)
+  dimension_names <- paste0("dimension_", seq_along(safe_values))
+  dimnames(proportions) <- list(rownames(correlation), dimension_names)
+  condition <- data.table(
+    scope = scope, variant = variant,
+    dimension = dimension_names,
+    eigenvalue = eig$values,
+    condition_index = condition_index
+  )
+  variance <- as.data.table(as.table(proportions))
+  setnames(variance, c("term", "dimension", "variance_proportion"))
+  variance[, `:=`(scope = scope, variant = variant)]
+  upper <- which(upper.tri(correlation), arr.ind = TRUE)
+  pairs <- data.table(
+    scope = scope, variant = variant,
+    term_1 = rownames(correlation)[upper[, 1L]],
+    term_2 = colnames(correlation)[upper[, 2L]],
+    correlation = correlation[upper]
+  )
+  pairs <- pairs[order(-abs(correlation))]
+  list(
+    correlation = correlation,
+    condition = condition,
+    variance = variance,
+    pairs = pairs[abs(correlation) >= high_correlation_threshold]
+  )
+}
+
+covariance_diagnostics <- function(fit, scope) {
+  rbindlist(lapply(c("model_based", "cluster_robust"), function(kind) {
+    covariance <- if (kind == "model_based") {
+      fit$model_covariance
+    } else {
+      fit$robust_covariance
+    }
+    covariance <- (covariance + t(covariance)) / 2
+    covariance_correlation <- stats::cov2cor(covariance)
+    values <- eigen(
+      covariance_correlation, symmetric = TRUE, only.values = TRUE
+    )$values
+    positive <- values[values > max(values) * .Machine$double.eps * length(values)]
+    data.table(
+      scope = scope, covariance = kind,
+      raw_covariance_condition_number = kappa(covariance, exact = TRUE),
+      correlation_scale_condition_number = kappa(
+        covariance_correlation, exact = TRUE
+      ),
+      corresponding_max_condition_index = sqrt(max(positive) / min(positive)),
+      coefficients = length(fit$coefficients)
+    )
+  }))
+}
+
+coefficient_correlation_pairs <- function(fit, scope) {
+  rbindlist(lapply(c("model_based", "cluster_robust"), function(kind) {
+    covariance <- if (kind == "model_based") {
+      fit$model_covariance
+    } else {
+      fit$robust_covariance
+    }
+    correlation <- stats::cov2cor(covariance)
+    upper <- which(upper.tri(correlation), arr.ind = TRUE)
+    output <- data.table(
+      scope = scope, covariance = kind,
+      term_1 = rownames(correlation)[upper[, 1L]],
+      term_2 = colnames(correlation)[upper[, 2L]],
+      correlation = correlation[upper]
+    )
+    output[abs(correlation) >= high_correlation_threshold][
+      order(-abs(correlation))]
+  }))
+}
+
+paired_cv_summary <- function(metrics, full_name, draws, seed) {
+  metric_names <- c("ndcg_at_k", "top_k_overlap", "jaccard")
+  full <- metrics[variant == full_name]
+  comparisons <- setdiff(unique(metrics$variant), full_name)
+  rbindlist(lapply(seq_along(comparisons), function(variant_index) {
+    variant_name <- comparisons[[variant_index]]
+    candidate <- metrics[variant == variant_name]
+    merged <- merge(
+      candidate, full,
+      by = c("scope", "story_id", "selector", "development_fold"),
+      suffixes = c("_variant", "_full"), sort = FALSE
+    )
+    if (nrow(merged) != nrow(full)) {
+      stop("CV variants do not contain identical article-selector keys")
+    }
+    rbindlist(lapply(seq_along(metric_names), function(metric_index) {
+      metric <- metric_names[[metric_index]]
+      rbindlist(lapply(c("audience", "curator"), function(selector_name) {
+        subset <- merged[selector == selector_name]
+        difference <- subset[[paste0(metric, "_variant")]] -
+          subset[[paste0(metric, "_full")]]
+        set.seed(seed + variant_index * 10000L + metric_index * 100L +
+                   match(selector_name, c("audience", "curator")))
+        bootstrap <- replicate(
+          draws, mean(sample(difference, length(difference), replace = TRUE))
+        )
+        interval <- unname(stats::quantile(bootstrap, c(0.025, 0.975)))
+        data.table(
+          variant = variant_name, selector = selector_name, metric = metric,
+          full_estimate = mean(subset[[paste0(metric, "_full")]]),
+          variant_estimate = mean(subset[[paste0(metric, "_variant")]]),
+          variant_minus_full = mean(difference),
+          conf_low = interval[[1L]], conf_high = interval[[2L]],
+          articles = nrow(subset), bootstrap_draws = draws
+        )
+      }))
+    }))
+  }))
+}
+```
+
+# Run one scope
+
+```{r run-scope}
+run_scope <- function(scope) {
+  progress_message("Starting scope=", scope)
+  input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
+  primary_path <- file.path(regression_root, scope, "stacked_selection_model.rds")
+  if (!file.exists(input_path) || !file.exists(primary_path)) {
+    stop("Missing choice set or primary 06B fit for ", scope)
+  }
+  full_features <- unlist(
+    feature_manifest$models[[scope]]$features, use.names = FALSE
+  )
+  missing_metadata <- setdiff(full_features, names(feature_manifest$features))
+  if (length(missing_metadata)) {
+    stop("Missing feature metadata for active feature(s): ",
+         paste(missing_metadata, collapse = ", "))
+  }
+  standardize <- setNames(vapply(
+    full_features,
+    function(feature) isTRUE(feature_manifest$features[[feature]]$standardize),
+    logical(1)
+  ), full_features)
+  active_fold_mappings <- lapply(fold_feature_columns, function(mapping) {
+    mapping[intersect(names(mapping), full_features)]
+  })
+  fold_source_columns <- if (run_cv) unique(unlist(active_fold_mappings, use.names = FALSE)) else character()
+  required_columns <- c(
+    "story_id", "comment_id", "n_picks", "curator_selected",
+    "audience_selected_draw_01", full_features, fold_source_columns
+  )
+  source <- as.data.table(arrow::read_parquet(input_path, col_select = required_columns))
+  source[, story_id := as.character(story_id)]
+  if (source[, anyDuplicated(paste(story_id, comment_id, sep = "::"))]) {
+    stop("Duplicate candidate keys in ", scope)
+  }
+  # The source parquet contains both partitions. Only development rows survive
+  # this merge, and every downstream object is checked against the sealed IDs.
+  development <- merge(
+    source, development_split, by = "story_id", all = FALSE, sort = FALSE
+  )
+  rm(source)
+  gc(verbose = FALSE)
+  if (uniqueN(development$story_id) != nrow(development_split)) {
+    stop(scope, " does not contain every development article")
+  }
+  if (development[, any(story_id %in% sealed_test_ids)]) {
+    stop("SEALED-TEST GUARD: test rows entered the development object")
+  }
+  if (!setequal(unique(development$development_fold), expected_folds)) {
+    stop("Development fold mismatch in ", scope)
+  }
+
+  prepared_full <- prepare_features(
+    development, NULL, full_features, standardize
+  )
+  primary_large <- readRDS(primary_path)
+  primary <- compact_fit(primary_large, "reference", full_features, "full_reference")
+  rm(primary_large)
+  gc(verbose = FALSE)
+  expected_interactions <- vapply(
+    full_features,
+    function(feature) interaction_name(
+      names(primary$coefficients), feature, "curator"
+    ), character(1)
+  )
+  if (!all(c(full_features, expected_interactions) %in%
+           names(primary$coefficients))) {
+    stop("Saved primary model does not match the feature contract")
+  }
+
+  covariance_summary <- covariance_diagnostics(primary, scope)
+  coefficient_pairs <- coefficient_correlation_pairs(primary, scope)
+  blocks <- feature_blocks(scope, full_features)
+  block_tests <- rbindlist(lapply(names(blocks), function(block_name) {
+    output <- rbindlist(lapply(
+      c("audience", "curator", "difference", "all_parameters"),
+      function(family) wald_block_test(primary, blocks[[block_name]], family)
+    ))
+    output[, `:=`(scope = scope, block = block_name)]
+    output
+  }))
+  block_tests[, q_value_bh := stats::p.adjust(p_value, method = "BH"),
+              by = family]
+
+  ordinary_variants <- make_variants(scope, full_features)
+  analysis_variants <- ordinary_variants
+  analysis_variants$selector_effect_coding_exact <- list(
+    features = full_features, coding = "effect"
+  )
+  invalid_variants <- names(Filter(
+    function(specification) {
+      length(setdiff(specification$features, full_features)) > 0L ||
+        anyDuplicated(specification$features) > 0L
+    },
+    analysis_variants
+  ))
+  if (length(invalid_variants)) {
+    stop("Sensitivity variants must use unique subsets of primary features: ",
+         paste(invalid_variants, collapse = ", "))
+  }
+
+  association_rows <- list()
+  fit_rows <- list()
+  condition_rows <- list()
+  variance_rows <- list()
+  design_pair_rows <- list()
+  exact_rows <- list()
+  full_scores <- score_compact(primary, prepared_full$training)
+
+  for (variant_name in names(analysis_variants)) {
+    specification <- analysis_variants[[variant_name]]
+    if (variant_name == "full_reference") {
+      prepared <- prepared_full
+      fit <- primary
+    } else {
+      prepared <- prepare_features(
+        development, NULL, specification$features, standardize
+      )
+      fit <- fit_compact(
+        prepared$training, prepared$features, specification$coding,
+        scope, variant_name
+      )
+    }
+    association <- selector_coefficients(fit)
+    association[, `:=`(
+      scope = scope, variant = variant_name,
+      comparison_term = term
+    )]
+    association_rows[[variant_name]] <- association
+    fit_rows[[variant_name]] <- data.table(
+      scope = scope, variant = variant_name, coding = fit$coding,
+      parameters = length(fit$coefficients),
+      fitted_log_likelihood = fit$loglik[[2L]],
+      iterations = paste(fit$iterations, collapse = ","),
+      warning_count = length(fit$warnings)
+    )
+
+    design <- gram_diagnostics(
+      within_story_gram(prepared$training, prepared$features, specification$coding),
+      scope, variant_name
+    )
+    condition_rows[[variant_name]] <- design$condition
+    variance_rows[[variant_name]] <- design$variance
+    design_pair_rows[[variant_name]] <- design$pairs
+
+    if (grepl("_exact$", variant_name)) {
+      variant_scores <- score_compact(fit, prepared$training)
+      comparison <- merge(
+        variant_scores[, .(story_id, comment_id, selector, variant_score = score)],
+        full_scores[, .(story_id, comment_id, selector, full_score = score)],
+        by = c("story_id", "comment_id", "selector"), sort = FALSE
+      )
+      comparison[, score_difference := variant_score - full_score]
+      comparison[, centred_difference :=
+        score_difference - mean(score_difference), by = .(story_id, selector)]
+      rank_check <- comparison[, .(
+        same = identical(
+          order(-full_score, comment_id), order(-variant_score, comment_id)
+        )
+      ), by = .(story_id, selector)]
+      exact_rows[[variant_name]] <- data.table(
+        scope = scope, variant = variant_name,
+        log_likelihood_difference = fit$loglik[[2L]] - primary$loglik[[2L]],
+        maximum_absolute_within_stratum_score_difference =
+          max(abs(comparison$centred_difference)),
+        ranking_identical = all(rank_check$same)
+      )
+      rm(variant_scores, comparison, rank_check)
+    }
+    rm(prepared, fit, design)
+    gc(verbose = FALSE)
+  }
+
+  associations <- rbindlist(association_rows, use.names = TRUE, fill = TRUE)
+  fit_summaries <- rbindlist(fit_rows, use.names = TRUE, fill = TRUE)
+  design_conditions <- rbindlist(condition_rows)
+  design_variance <- rbindlist(variance_rows)
+  design_pairs <- rbindlist(design_pair_rows, use.names = TRUE, fill = TRUE)
+  exact_checks <- rbindlist(exact_rows, use.names = TRUE, fill = TRUE)
+
+  full_associations <- associations[variant == "full_reference",
+    .(comparison_term, full_audience = audience, full_curator = curator,
+      full_difference = curator_minus_audience)]
+  coefficient_stability <- merge(
+    associations[!grepl("_exact$", variant),
+      .(scope, variant, comparison_term, audience, curator,
+        difference = curator_minus_audience)],
+    full_associations, by = "comparison_term", all.x = TRUE, sort = FALSE
+  )
+  coefficient_stability <- melt(
+    coefficient_stability,
+    id.vars = c("scope", "variant", "comparison_term"),
+    measure.vars = list(
+      estimate = c("audience", "curator", "difference"),
+      full_estimate = c("full_audience", "full_curator", "full_difference")
+    ),
+    variable.name = "estimand"
+  )
+  coefficient_stability[, estimand := c(
+    "audience", "curator", "curator_minus_audience"
+  )[estimand]]
+  coefficient_stability[, `:=`(
+    estimate_change = estimate - full_estimate,
+    absolute_estimate_change = abs(estimate - full_estimate),
+    relative_absolute_change = fifelse(
+      abs(full_estimate) >= 0.05,
+      abs(estimate - full_estimate) / abs(full_estimate), NA_real_
+    ),
+    sign_change = sign(estimate) != sign(full_estimate),
+    material_sign_change = sign(estimate) != sign(full_estimate) &
+      abs(full_estimate) >= 0.05 & abs(estimate) >= 0.05
+  )]
+
+  cv_metrics <- data.table()
+  cv_summary <- data.table()
+  cv_differences <- data.table()
+  cv_fit_warnings <- data.table(
+    scope = character(), variant = character(), fold = integer(),
+    warning_count = integer(), warnings = character(),
+    maximum_absolute_coefficient = numeric()
+  )
+  if (run_cv) {
+    cv_rows <- list()
+    cv_warning_rows <- list()
+    for (variant_name in names(ordinary_variants)) {
+      specification <- ordinary_variants[[variant_name]]
+      for (fold in expected_folds) {
+        training_raw <- development[development_fold != fold]
+        validation_raw <- development[development_fold == fold]
+        replacements <- active_fold_mappings[[as.character(fold)]]
+        replacements <- replacements[
+          intersect(names(replacements), specification$features)
+        ]
+        for (feature in names(replacements)) {
+          fold_column <- unname(unlist(replacements[[feature]]))
+          if (!fold_column %in% names(development)) stop("Missing ", fold_column)
+          set(training_raw, j = feature, value = training_raw[[fold_column]])
+          set(validation_raw, j = feature, value = validation_raw[[fold_column]])
+        }
+        if (training_raw[, any(story_id %in% validation_raw$story_id)]) {
+          stop("CV training-validation article overlap")
+        }
+        prepared <- prepare_features(
+          training_raw, validation_raw, specification$features, standardize
+        )
+        fit <- fit_compact(
+          prepared$training, prepared$features, specification$coding,
+          scope, variant_name, fold = fold,
+          allow_convergence_warnings = TRUE
+        )
+        scores <- score_compact(fit, prepared$validation)
+        if (any(!is.finite(scores$score))) {
+          stop("Non-finite validation scores in ", scope, "/", variant_name,
+               " fold=", fold)
+        }
+        fold_metrics <- evaluate_scores(scores)
+        warning_text <- paste(fit$warnings, collapse = " | ")
+        fold_metrics[, `:=`(
+          scope = scope, variant = variant_name,
+          fit_warning_count = length(fit$warnings),
+          fit_warning = warning_text
+        )]
+        if (length(fit$warnings)) {
+          cv_warning_rows[[paste(variant_name, fold, sep = "::")]] <- data.table(
+            scope = scope, variant = variant_name, fold = as.integer(fold),
+            warning_count = length(fit$warnings), warnings = warning_text,
+            maximum_absolute_coefficient = max(abs(fit$coefficients))
+          )
+        }
+        cv_rows[[paste(variant_name, fold, sep = "::")]] <- fold_metrics
+        rm(training_raw, validation_raw, prepared, fit, scores, fold_metrics)
+        gc(verbose = FALSE)
+      }
+    }
+    if (length(cv_warning_rows)) cv_fit_warnings <- rbindlist(cv_warning_rows)
+    cv_metrics <- rbindlist(cv_rows)
+    metric_long <- melt(
+      cv_metrics,
+      id.vars = c("scope", "variant", "story_id", "selector", "development_fold"),
+      measure.vars = c("ndcg_at_k", "top_k_overlap", "jaccard"),
+      variable.name = "metric", value.name = "value"
+    )
+    cv_summary <- metric_long[, {
+      set.seed(base_seed + .GRP)
+      estimates <- replicate(
+        bootstrap_draws, mean(sample(value, .N, replace = TRUE))
+      )
+      interval <- unname(stats::quantile(estimates, c(0.025, 0.975)))
+      .(estimate = mean(value), conf_low = interval[[1L]],
+        conf_high = interval[[2L]], articles = .N,
+        bootstrap_draws = bootstrap_draws)
+    }, by = .(scope, variant, selector, metric)]
+    cv_differences <- paired_cv_summary(
+      cv_metrics, "full_reference", bootstrap_draws,
+      base_seed + if (scope == "root") 100000L else 200000L
+    )
+    cv_differences[, scope := scope]
+  }
+
+  condition_summary <- design_conditions[, .(
+    maximum_condition_index = max(condition_index),
+    dimensions_over_30 = sum(condition_index >= 30),
+    dimensions_over_15 = sum(condition_index >= 15)
+  ), by = .(scope, variant)]
+
+  scope_output <- file.path(output_root, scope)
+  dir.create(scope_output, recursive = TRUE, showWarnings = FALSE)
+  fwrite(covariance_summary, file.path(scope_output, "covariance_conditioning.csv"))
+  fwrite(coefficient_pairs,
+         file.path(scope_output, "high_coefficient_correlations.csv"))
+  fwrite(block_tests, file.path(scope_output, "joint_block_wald_tests.csv"))
+  fwrite(fit_summaries, file.path(scope_output, "variant_fit_summary.csv"))
+  fwrite(associations, file.path(scope_output, "variant_selector_coefficients.csv"))
+  fwrite(coefficient_stability,
+         file.path(scope_output, "variant_coefficient_stability.csv"))
+  fwrite(design_conditions, file.path(scope_output, "design_condition_indices.csv"))
+  fwrite(condition_summary, file.path(scope_output, "design_condition_summary.csv"))
+  fwrite(design_pairs, file.path(scope_output, "high_design_correlations.csv"))
+  arrow::write_parquet(
+    design_variance, file.path(scope_output, "design_variance_decomposition.parquet")
+  )
+  fwrite(exact_checks,
+         file.path(scope_output, "exact_reparameterisation_checks.csv"))
+  if (run_cv) {
+    arrow::write_parquet(
+      cv_metrics, file.path(scope_output, "development_cv_article_metrics.parquet")
+    )
+    fwrite(cv_fit_warnings,
+           file.path(scope_output, "development_cv_fit_warnings.csv"))
+    fwrite(cv_summary, file.path(scope_output, "development_cv_metric_summary.csv"))
+    fwrite(cv_differences,
+           file.path(scope_output, "development_cv_paired_differences.csv"))
+  }
+  jsonlite::write_json(list(
+    analysis = "development-only collinearity sensitivity",
+    scope = scope,
+    shared_preprocessing_version = as.integer(preprocessing_parameters$version),
+    feature_manifest = file_signature(manifest_path),
+    created_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+    development_articles = uniqueN(development$story_id),
+    sealed_test_articles_excluded = length(sealed_test_ids),
+    sealed_test_performance_read = FALSE,
+    audience_tie_draw = 1L, method = "efron",
+    cv_enabled = run_cv, cv_folds = expected_folds,
+    bootstrap_draws = if (run_cv) bootstrap_draws else 0L,
+    cv_warning_fits = nrow(cv_fit_warnings),
+    variants = names(analysis_variants),
+    primary_model_status = "fixed reference; reduced variants are sensitivities"
+  ), file.path(scope_output, "analysis_manifest.json"),
+  auto_unbox = TRUE, pretty = TRUE)
+
+  progress_message("Completed scope=", scope)
+  list(
+    scope = scope, covariance = covariance_summary,
+    coefficient_pairs = coefficient_pairs, block_tests = block_tests,
+    condition_summary = condition_summary, exact_checks = exact_checks,
+    cv_summary = cv_summary, cv_differences = cv_differences,
+    cv_fit_warnings = cv_fit_warnings
+  )
+}
+
+results <- lapply(requested_scopes, run_scope)
+progress_message("Collinearity sensitivity completed successfully")
+```
+
+# Results
+
+```{r results, echo=FALSE}
+for (result in results) {
+  cat("\n##", if (result$scope == "root") "Root candidates" else "All comments",
+      "\n\n")
+  print(knitr::kable(
+    result$covariance, digits = 2,
+    caption = "Raw and correlation-scale covariance conditioning"
+  ))
+  cat("\n### Strongest coefficient correlations\n\n")
+  print(knitr::kable(
+    head(result$coefficient_pairs, 20L), digits = 3,
+    caption = "Coefficient correlations above the configured threshold"
+  ))
+  cat("\n### Within-choice-set design conditioning\n\n")
+  print(knitr::kable(
+    result$condition_summary, digits = 2,
+    caption = "Condition indices for the expanded within-story-centred design"
+  ))
+  if (nrow(result$exact_checks)) {
+    cat("\n### Equivalent parameterisation checks\n\n")
+    print(knitr::kable(
+      result$exact_checks, digits = 8,
+      caption = "Likelihood and ranking equivalence checks"
+    ))
+  }
+  cat("\n### Joint block tests\n\n")
+  print(knitr::kable(
+    result$block_tests, digits = 4,
+    caption = "Cluster-robust development-set joint Wald tests"
+  ))
+  if (run_cv) {
+    if (nrow(result$cv_fit_warnings)) {
+      cat("\n### CV fit warnings retained for review\n\n")
+      print(knitr::kable(result$cv_fit_warnings, digits = 4))
+    }
+    cat("\n### Five-fold development performance\n\n")
+    print(knitr::kable(result$cv_summary, digits = 4))
+    cat("\n### Paired reduced-minus-full comparisons\n\n")
+    print(knitr::kable(
+      result$cv_differences, digits = 4,
+      caption = "Positive values favour the sensitivity model"
+    ))
+  }
+}
+```
+
+# Interpretation rules
+
+The unscaled covariance condition number is retained for continuity with 06B,
+but conclusions should rely on correlation-scale conditioning, within-choice-set
+condition indices, variance-decomposition proportions, and coefficient stability
+together.
+
+A condition index above 30 prompts inspection; it is not an automatic model
+failure. Stronger evidence is a high-index dimension on which several terms have
+large variance-decomposition proportions. Such terms should be interpreted
+jointly, especially if individual estimates change across reduced models.
+
+Selector effect coding and centred reply depth are exact reparameterisations.
+If their likelihoods and within-stratum rankings agree, they may replace the
+presentation parameterisation without constituting a new model choice. Other
+variants omit information. They remain post-hoc development sensitivities, and
+the already-opened Paper 2 test partition must not be used to choose among them.

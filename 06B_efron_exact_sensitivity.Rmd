@@ -1,0 +1,478 @@
+---
+title: "Conditional-logit Efron versus exact sensitivity (2025)"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+# Objective
+
+Assess whether the Efron approximation used by the primary stacked
+conditional-logit models materially changes coefficient signs, magnitudes, or
+within-query rankings. This is a development-only sensitivity analysis, not a
+replacement model and not a second test-set evaluation.
+
+Exact conditional likelihood becomes expensive as `choose(n_candidates,
+n_picks)` grows. The analysis therefore uses a deterministic subset of
+development articles whose strata satisfy a prespecified combination limit and
+a reduced, substantively representative feature set.
+
+```{r setup, message=FALSE, warning=FALSE}
+required_packages <- c("arrow", "data.table", "jsonlite", "survival", "knitr")
+missing_packages <- required_packages[!vapply(
+  required_packages, requireNamespace, logical(1), quietly = TRUE
+)]
+if (length(missing_packages)) {
+  stop("Restore the R environment before knitting. Missing: ",
+       paste(missing_packages, collapse = ", "))
+}
+library(data.table)
+library(survival)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Configuration
+
+```{r configuration}
+feature_root <- Sys.getenv(
+  "COMMENTGAP_MODEL_DATA_ROOT",
+  "model_output/selection_2025/model_data"
+)
+
+output_root <- Sys.getenv(
+  "COMMENTGAP_REGRESSION_SENSITIVITY_ROOT",
+  "model_output/selection_2025/regression_sensitivity/efron_exact_shared_preprocessing_v4"
+)
+sample_articles <- as.integer(Sys.getenv(
+  "COMMENTGAP_EXACT_SAMPLE_ARTICLES", "100"
+))
+max_combinations <- as.numeric(Sys.getenv(
+  "COMMENTGAP_EXACT_MAX_COMBINATIONS", "5000"
+))
+base_seed <- as.integer(Sys.getenv("COMMENTGAP_MODEL_SEED", "20260813"))
+
+if (sample_articles < 25L) {
+  stop("COMMENTGAP_EXACT_SAMPLE_ARTICLES must be at least 25")
+}
+if (!is.finite(max_combinations) || max_combinations < 100) {
+  stop("COMMENTGAP_EXACT_MAX_COMBINATIONS must be at least 100")
+}
+dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
+
+split_path <- file.path(feature_root, "master_article_split.parquet")
+manifest_path <- file.path(feature_root, "feature_manifest.json")
+if (!file.exists(split_path)) stop("Missing shared split: ", split_path)
+parameters_path <- file.path(feature_root, "preprocessing_parameters.json")
+if (!file.exists(manifest_path)) stop("Missing feature manifest: ", manifest_path)
+if (!file.exists(parameters_path)) stop("Missing preprocessing parameters: ", parameters_path)
+
+article_split <- as.data.table(arrow::read_parquet(split_path))
+article_split[, story_id := as.character(story_id)]
+if (article_split[, anyDuplicated(story_id)]) {
+  stop("Shared split contains duplicate articles")
+}
+if (!setequal(unique(article_split$split_role),
+              c("development", "paper2_test"))) {
+  stop("Shared split roles are invalid")
+}
+if (article_split[split_role == "paper2_test",
+                  any(development_fold != -1L)]) {
+  stop("Paper 2 test articles must not have development folds")
+}
+development_ids <- article_split[
+  split_role == "development", unique(story_id)
+]
+if (!length(development_ids)) stop("Shared split has no development articles")
+
+feature_manifest <- jsonlite::fromJSON(
+  manifest_path, simplifyVector = FALSE
+)
+preprocessing_parameters <- jsonlite::fromJSON(parameters_path, simplifyVector = FALSE)
+if (!identical(as.integer(preprocessing_parameters$version), 4L)) {
+  stop("Expected shared preprocessing version 4; force-rerun 06A2")
+}
+```
+
+# Prespecified reduced specification
+
+The reduced specification retains text form, affect/toxicity, article
+relationship, timing/order, discussion pace, recent activity share, prior reply composition,
+author history, and four AQuA dimensions. The all-comment model additionally
+retains reply status and development-mean-centred reply depth. Scope-specific
+novelty variables are used. Every sensitivity feature must belong to the
+corresponding primary production model.
+
+```{r feature-contract}
+common_features <- c(
+  "log_words",
+  "sentiment_positive",
+  "sentiment_negative",
+  "toxicity_probability",
+  "lexdiv_length_adjusted",
+  "url_present",
+  "article_similarity_top3",
+  "log_hours_since_article",
+  "prior_reply_composition",
+  "discussion_pace",
+  "log_author_prior_30d_comments",
+  "author_prior_30d_upvote_reception",
+  "aqua_relevance_expected",
+  "aqua_fact_expected",
+  "aqua_justification_expected",
+  "aqua_respect_expected"
+)
+features_by_scope <- list(
+  root = c(common_features, "novelty_prior_roots_model"),
+  all = c(
+    common_features,
+    "novelty_prior_all_model",
+    "is_reply",
+    "reply_depth_centered"
+  )
+)
+retired_features <- c("log_prior_roots", "log_depth")
+for (scope in names(features_by_scope)) {
+  production_features <- unlist(
+    feature_manifest$models[[scope]]$features,
+    use.names = FALSE
+  )
+  retired <- intersect(features_by_scope[[scope]], retired_features)
+  if (length(retired)) {
+    stop(scope, " sensitivity specification contains retired features: ",
+         paste(retired, collapse = ", "))
+  }
+  missing <- setdiff(features_by_scope[[scope]], production_features)
+  if (length(missing)) {
+    stop(scope, " reduced sensitivity features are absent from the ",
+         "production contract: ", paste(missing, collapse = ", "))
+  }
+}
+```
+
+# Helpers
+
+```{r helpers}
+safe_scale <- function(x, name) {
+  x <- as.numeric(x)
+  spread <- stats::sd(x)
+  if (!is.finite(spread) || spread <= 0) {
+    stop("Cannot standardize feature with no variation: ", name)
+  }
+  list(value = (x - mean(x)) / spread, mean = mean(x), sd = spread)
+}
+
+build_stacked <- function(choice_set, features) {
+  keep <- c(
+    "story_id", "comment_id", "n_candidates", "n_picks", features
+  )
+  audience <- copy(choice_set[, ..keep])
+  audience[, selector := "audience"]
+  audience[, curator := 0L]
+  audience[, selected := as.integer(
+    choice_set$audience_selected_draw_01
+  )]
+
+  curator_rows <- copy(choice_set[, ..keep])
+  curator_rows[, selector := "curator"]
+  curator_rows[, curator := 1L]
+  curator_rows[, selected := as.integer(choice_set$curator_selected)]
+
+  stacked <- rbindlist(list(audience, curator_rows), use.names = TRUE)
+  stacked[, stratum := paste(story_id, selector, sep = "::")]
+  setorder(stacked, stratum, comment_id)
+  checks <- stacked[, .(
+    selected_n = sum(selected),
+    expected_n = first(n_picks),
+    candidates_n = .N
+  ), by = stratum]
+  if (checks[, any(selected_n != expected_n)]) {
+    stop("A sensitivity stratum does not contain exactly k selections")
+  }
+  if (checks[, any(selected_n <= 0L | selected_n >= candidates_n)]) {
+    stop("A sensitivity stratum lacks outcome variation")
+  }
+  stacked
+}
+
+fit_method <- function(stacked, formula, method) {
+  warnings <- character()
+  elapsed <- system.time({
+    fit <- withCallingHandlers(
+      survival::clogit(
+        formula,
+        data = stacked,
+        method = method,
+        model = TRUE,
+        x = TRUE,
+        y = TRUE
+      ),
+      warning = function(condition) {
+        warnings <<- c(warnings, conditionMessage(condition))
+        invokeRestart("muffleWarning")
+      }
+    )
+  })
+  if (anyNA(stats::coef(fit))) {
+    stop(method, " sensitivity fit contains unidentified coefficients")
+  }
+  list(
+    fit = fit,
+    warnings = unique(warnings),
+    elapsed_seconds = unname(elapsed[["elapsed"]])
+  )
+}
+
+coefficient_comparison <- function(efron, exact) {
+  efron_coef <- stats::coef(efron)
+  exact_coef <- stats::coef(exact)
+  if (!identical(sort(names(efron_coef)), sort(names(exact_coef)))) {
+    stop("Efron and exact fits expose different coefficient sets")
+  }
+  terms <- names(efron_coef)
+  output <- data.table(
+    term = terms,
+    efron = unname(efron_coef[terms]),
+    exact = unname(exact_coef[terms])
+  )
+  output[, difference_exact_minus_efron := exact - efron]
+  output[, absolute_difference := abs(difference_exact_minus_efron)]
+  output[, sign_agreement := sign(efron) == sign(exact)]
+  output[, material_sign_flip := !sign_agreement &
+    pmax(abs(efron), abs(exact)) >= 0.10]
+  output
+}
+```
+
+# Run one candidate scope
+
+```{r run-scope}
+run_scope <- function(scope) {
+  cat("\n---", toupper(scope), "EFRON/EXACT SENSITIVITY ---\n")
+  features <- features_by_scope[[scope]]
+  input_path <- file.path(
+    feature_root, paste0("choice_set_", scope, ".parquet")
+  )
+  if (!file.exists(input_path)) stop("Missing choice set: ", input_path)
+  choice_set <- as.data.table(arrow::read_parquet(input_path))
+  choice_set[, story_id := as.character(story_id)]
+  choice_set <- choice_set[story_id %in% development_ids]
+
+  required <- c(
+    "story_id", "comment_id", "article_month", "n_candidates",
+    "n_picks", "curator_selected", "audience_selected_draw_01",
+    features
+  )
+  missing <- setdiff(required, names(choice_set))
+  if (length(missing)) {
+    stop(scope, " sensitivity input is missing: ",
+         paste(missing, collapse = ", "))
+  }
+
+  article <- unique(choice_set[, .(
+    story_id, article_month, n_candidates, n_picks
+  )])
+  article[, log_combinations := lchoose(n_candidates, n_picks)]
+  article[, exact_eligible :=
+    log_combinations <= log(max_combinations)]
+  eligible <- article[exact_eligible == TRUE]
+  if (nrow(eligible) < 25L) {
+    stop(scope, " has too few exact-likelihood-eligible articles")
+  }
+
+  eligible[, size_tercile := pmin(
+    2L,
+    as.integer(3 * (frank(
+      n_candidates, ties.method = "average"
+    ) - 1) / .N)
+  )]
+  set.seed(base_seed + if (scope == "root") 101L else 202L)
+  eligible[, random_order := runif(.N)]
+  setorder(eligible, article_month, size_tercile, random_order, story_id)
+
+  # Round-robin through month-by-size cells to retain broad coverage.
+  eligible[, cell_position := seq_len(.N),
+           by = .(article_month, size_tercile)]
+  setorder(eligible, cell_position, random_order, story_id)
+  sampled_articles <- eligible[
+    seq_len(min(sample_articles, .N))
+  ]
+  sampled_ids <- sampled_articles$story_id
+  sensitivity <- choice_set[story_id %in% sampled_ids]
+
+  scaling <- rbindlist(lapply(features, function(feature) {
+    if (!isTRUE(feature_manifest$features[[feature]]$standardize)) {
+      return(data.table(
+        term = feature, mean = NA_real_, sd = NA_real_,
+        standardized = FALSE
+      ))
+    }
+    scaled <- safe_scale(sensitivity[[feature]], feature)
+    set(sensitivity, j = feature, value = scaled$value)
+    data.table(
+      term = feature, mean = scaled$mean, sd = scaled$sd,
+      standardized = TRUE
+    )
+  }))
+  if (sensitivity[, anyNA(.SD), .SDcols = features]) {
+    stop("Missing values remain in sensitivity features")
+  }
+
+  stacked <- build_stacked(sensitivity, features)
+  formula <- stats::as.formula(paste(
+    "selected ~",
+    paste(c(
+      features,
+      paste0("curator:", features),
+      "strata(stratum)"
+    ), collapse = " + ")
+  ))
+
+  efron_result <- fit_method(stacked, formula, "efron")
+  exact_result <- fit_method(stacked, formula, "exact")
+  comparison <- coefficient_comparison(
+    efron_result$fit, exact_result$fit
+  )
+
+  efron_lp <- as.numeric(stats::predict(
+    efron_result$fit, type = "lp", reference = "zero"
+  ))
+  exact_lp <- as.numeric(stats::predict(
+    exact_result$fit, type = "lp", reference = "zero"
+  ))
+  prediction_agreement <- copy(stacked[, .(
+    story_id, comment_id, selector, stratum
+  )])
+  prediction_agreement[, efron_score := efron_lp]
+  prediction_agreement[, exact_score := exact_lp]
+  query_agreement <- prediction_agreement[, .(
+    spearman = suppressWarnings(stats::cor(
+      efron_score, exact_score,
+      method = "spearman", use = "complete.obs"
+    )),
+    top_comment_agreement = (
+      comment_id[which.max(efron_score)] ==
+      comment_id[which.max(exact_score)]
+    )
+  ), by = .(story_id, selector)]
+
+  summary <- data.table(
+    statistic = c(
+      "scope",
+      "development_articles_available",
+      "exact_eligible_articles",
+      "sampled_articles",
+      "candidate_rows",
+      "stacked_rows",
+      "maximum_choose_n_k",
+      "reduced_features",
+      "coefficients",
+      "coefficient_sign_agreement",
+      "material_sign_flips",
+      "coefficient_spearman",
+      "median_absolute_coefficient_difference",
+      "maximum_absolute_coefficient_difference",
+      "median_query_score_spearman",
+      "top_comment_agreement",
+      "efron_elapsed_seconds",
+      "exact_elapsed_seconds",
+      "efron_warnings",
+      "exact_warnings"
+    ),
+    value = c(
+      scope,
+      nrow(article),
+      nrow(eligible),
+      nrow(sampled_articles),
+      nrow(sensitivity),
+      nrow(stacked),
+      max(exp(sampled_articles$log_combinations)),
+      length(features),
+      nrow(comparison),
+      mean(comparison$sign_agreement),
+      sum(comparison$material_sign_flip),
+      stats::cor(
+        comparison$efron, comparison$exact,
+        method = "spearman"
+      ),
+      stats::median(comparison$absolute_difference),
+      max(comparison$absolute_difference),
+      stats::median(query_agreement$spearman, na.rm = TRUE),
+      mean(query_agreement$top_comment_agreement),
+      efron_result$elapsed_seconds,
+      exact_result$elapsed_seconds,
+      paste(efron_result$warnings, collapse = " | "),
+      paste(exact_result$warnings, collapse = " | ")
+    )
+  )
+
+  scope_output <- file.path(output_root, scope)
+  dir.create(scope_output, recursive = TRUE, showWarnings = FALSE)
+  fwrite(scaling, file.path(scope_output, "feature_scaling.csv"))
+  fwrite(sampled_articles, file.path(
+    scope_output, "sampled_articles.csv"
+  ))
+  jsonlite::write_json(list(
+    analysis = "development-only Efron versus exact sensitivity",
+    scope = scope,
+    created_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+    shared_preprocessing_version = as.integer(preprocessing_parameters$version),
+    feature_manifest_path = normalizePath(manifest_path, mustWork = TRUE),
+    feature_manifest_md5 = unname(tools::md5sum(manifest_path)),
+    development_articles_available = length(development_ids),
+    sampled_articles = nrow(sampled_articles),
+    features = features,
+    sealed_test_performance_read = FALSE
+  ), file.path(scope_output, "analysis_manifest.json"), auto_unbox = TRUE, pretty = TRUE)
+  fwrite(comparison, file.path(
+    scope_output, "coefficient_comparison.csv"
+  ))
+  fwrite(query_agreement, file.path(
+    scope_output, "query_ranking_agreement.csv"
+  ))
+  fwrite(summary, file.path(scope_output, "sensitivity_summary.csv"))
+  saveRDS(efron_result$fit, file.path(
+    scope_output, "efron_reduced_model.rds"
+  ))
+  saveRDS(exact_result$fit, file.path(
+    scope_output, "exact_reduced_model.rds"
+  ))
+
+  list(scope = scope, summary = summary, comparison = comparison)
+}
+
+results <- lapply(c("root", "all"), run_scope)
+```
+
+# Results
+
+```{r results, echo=FALSE}
+for (result in results) {
+  cat("\n##", if (result$scope == "root") {
+    "Root candidates"
+  } else {
+    "All comments"
+  }, "\n\n")
+  print(knitr::kable(
+    result$summary,
+    caption = "Efron versus exact sensitivity summary"
+  ))
+  print(knitr::kable(
+    head(result$comparison[order(-absolute_difference)], 15),
+    digits = 4,
+    caption = "Largest coefficient differences"
+  ))
+}
+```
+
+# Interpretation
+
+This analysis addresses approximation sensitivity only. Strong evidence of
+robustness consists of high coefficient and within-query score correlations,
+few material sign reversals, and high top-comment agreement. Differences do not
+invalidate the primary Efron model automatically: the exact analysis uses a
+smaller, lower-complexity article sample and a reduced specification.
+
+Neither fit uses Paper 2 test articles. Standard errors are not compared because
+article clustering changes uncertainty estimates but not point estimates, while
+the purpose here is to isolate the likelihood approximation.

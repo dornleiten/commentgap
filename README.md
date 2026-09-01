@@ -177,11 +177,28 @@ model, plus matching article-grouped XGBoost rankers:
 
 1. `06A_build_model_features.ipynb` creates resumable scalar features and
    matched choice sets from the normalized Parquet collection.
-2. `06B_stacked_selection_models.Rmd` fits both conditional-logit regressions
-   with article-by-selector strata and article-clustered standard errors.
-3. `06C_xgboost_rankers.ipynb` performs separate tuning, five-fold
-   article-grouped OOF evaluation, and final full-data fits for both scopes.
-4. `06D_model_tables_plots.ipynb` exports CSV/LaTeX tables and SVG/PDF figures.
+2. `06C_xgboost_rankers.ipynb` creates one shared month-by-joint-size
+   stratified 50/50 development/Paper 2 split. Within development it runs a
+   reproducible 32-configuration broad random search and a 27-point local grid
+   on the same five article folds, then applies one frozen model per scope to
+   the sealed test half.
+3. `06B_stacked_selection_models.Rmd` uses that exact split, estimates feature
+   scaling and both conditional-logit models on development articles only, and
+   applies the frozen coefficients to the sealed test articles. Its fitted
+   conditional-logit models are cached separately by candidate scope and
+   audience tie draw under `regression/fit_cache/`. Cache fingerprints include
+   the input choice set, shared split, feature/provenance manifests, scaling,
+   formula, R version, and relevant package versions, but not the requested
+   total draw count. A completed one-draw benchmark is therefore reused by a
+   later ten-draw run. Set
+   `COMMENTGAP_REGRESSION_FORCE_RECOMPUTE=1` to bypass valid fit caches.
+   Draw 1 retains the complete fitted model required for diagnostics and sealed
+   prediction; subsequent draws retain compact coefficient artifacts because
+   they are used only for coefficient tie-sensitivity. Cache writes are
+   gzip-compressed and atomic.
+4. `06B_efron_exact_sensitivity.Rmd` compares Efron and exact conditional
+   likelihoods on a deterministic, complexity-bounded development subset.
+5. `06D_model_tables_plots.ipynb` exports CSV/LaTeX tables and SVG/PDF figures.
 
 Install the tested Python environment and restore the R environment before a
 production run:
@@ -190,6 +207,14 @@ production run:
 python -m pip install -r requirements-analysis.txt
 python -m pip install -e .
 Rscript -e 'if (!requireNamespace("renv", quietly=TRUE)) install.packages("renv"); renv::restore()'
+```
+
+Render R Markdown documents from the repository root with the project wrapper;
+compiled HTML and any supporting files are written under `html/`:
+
+```bash
+Rscript scripts/render_rmd.R 06B_stacked_selection_models.Rmd
+Rscript scripts/render_rmd.R legacy/02F_stacked-selection-model.Rmd
 ```
 
 The default notebook settings are inference-safe: feature extraction refuses
@@ -384,11 +409,33 @@ signatures, a completed validation report, and a production watermark. AQuA
 features remain descriptive/sensitivity features and are not automatically
 added to the confirmatory root/all model specifications.
 
-Outputs are written below `model_output/selection_2025/`. Only
-`oof_scores_wide.parquet` is eligible for predictive-performance claims or the
-Paper 2 ranking-policy evaluation. Predictions from
-`final_deployable_model.json` are full-data scores and must not be presented as
-held-out results.
+Before fitting either Paper 2 model, run
+`06A2_shared_model_preprocessing.ipynb`. It validates and preserves the existing
+50/50 Paper 2 article split under `model_data/`, replaces `log_prior_roots`
+with the smoothed `prior_reply_composition`, and replaces all-comment
+`log_depth` with development-mean `reply_depth_centered`. Five fold-training
+depth centres are materialized for leakage-free development CV. Both 06B and
+06C consume the resulting choice sets and feature manifest; 06D uses the same
+manifest for labels and descriptive summaries.
+
+Outputs are written below `model_output/selection_2025/`. Exploratory OOF
+artifacts remain under `xgboost/`; the sealed-test workflow writes separately
+under `xgboost_paper2/`. Only each scope's `test_scores_wide.parquet`
+and corresponding test metrics are eligible for Paper 2 predictive-performance
+or ranking-policy claims. Paper 2 reporting is written separately under
+`reporting_paper2/`. The saved `development_model.json` is fitted only
+on development articles. Broad and narrow CV histories are checkpointed after
+every fold under each scope, so interrupted searches can resume. Set
+`COMMENTGAP_XGB_BROAD_CONFIGS` to change the broad draw count and
+`COMMENTGAP_XGB_REFINEMENT_TOP` to change how many leading broad
+configurations define the local grid. Matching development models, test scores,
+metrics, permutation importance, TreeSHAP, and tie-sensitivity outputs are
+reused through fingerprinted per-stage metadata in each scope's
+`workflow_cache.json`. Set `COMMENTGAP_XGB_FORCE_RECOMPUTE=1` to
+deliberately bypass those caches. The split manifest records that upstream
+length adjustments and novelty imputation predate the split; those transformations
+must also be development-fitted before describing the entire preprocessing
+pipeline as fully sealed.
 
 ### Reusable embedding store
 
@@ -526,3 +573,61 @@ these scalars using `story_id, comment_id`. It never reruns the embedding model 
 recalculates cosine similarities. Set `COMMENTGAP_SIMILARITY_STORE` only when an
 explicit build directory is needed; otherwise the compatible store is discovered
 below `COMMENTGAP_SIMILARITY_ROOT`.
+
+### Neural preference rankers
+
+The neural rankers reuse the exact root/all feature lists, five development folds,
+fixed 50/50 article split, labels, scaling registry, and sealed-test metrics created
+by `06A2_shared_model_preprocessing.ipynb`:
+
+* `06C2_frozen_bge_rankers.ipynb`: frozen production BGE-M3 vectors plus a
+  two-head metadata fusion network;
+* `06C3_metadata_mlp_rankers.ipynb`: a lightweight two-selector MLP using only
+  the fold-safe XGBoost/tabular features.
+
+Install the analysis environment (the metadata-only model needs no additional
+large-model or quantization dependencies):
+
+```bash
+python -m pip install -r requirements-analysis.txt
+python -m pip install -e .
+```
+
+The notebooks are thin, inspectable entry points. Long production runs can instead
+use the equivalent scripts:
+
+```bash
+python scripts/run_frozen_bge_rankers.py --device cuda
+python scripts/run_metadata_mlp_rankers.py --training-mode cv
+# Alternatives: --training-mode fixed_split or --training-mode full
+```
+
+Training and inference print a progress line after the first article, every 100
+articles by default, and at completion. Each line includes the phase, fold/epoch,
+article percentage, candidates processed, elapsed time, throughput, and ETA. Change
+the interval with `--progress-every-stories N` in the scripts or
+`COMMENTGAP_NEURAL_PROGRESS_EVERY_STORIES=N` in the notebooks.
+
+Both recipes are fixed before the sealed test is scored. Pairwise training
+samples negatives only within the same article and selector. Early stopping uses
+the five development folds; the final development-only refit uses the median selected
+epoch. Separate audience and curator heads share the relevant input projection.
+The frozen model reads the existing complete BGE-M3 store; the metadata-only model
+reads only the fold-safe XGBoost feature matrix. Model branches or tags are resolved
+to immutable Hub commits before cache signatures and checkpoints are written.
+
+Every output scope writes development histories, fold
+checkpoints, the final development checkpoint, feature scaler, sealed-test scores,
+article metrics, bootstrap summaries, audience tie sensitivity, and a signed model
+manifest below `model_output/selection_2025/neural_rankers/`.
+
+After both neural runs complete, include them in `06D_model_tables_plots.ipynb` with:
+
+```bash
+export COMMENTGAP_INCLUDE_NEURAL=1
+```
+
+The report then adds combined performance/tie tables, paired neural-minus-XGBoost
+article-bootstrap differences, and combined SVG/PDF performance figures. Neural
+reporting is disabled by default so the existing regression/XGBoost report remains
+runnable before the GPU jobs finish.
