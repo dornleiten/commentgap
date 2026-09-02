@@ -7,6 +7,21 @@ if (!length(args)) {
   )
 }
 
+script_args <- commandArgs(trailingOnly = FALSE)
+script_flag <- grep("^--file=", script_args, value = TRUE)
+if (length(script_flag) != 1L) {
+  stop("Could not determine the render wrapper path")
+}
+script_path <- normalizePath(
+  sub("^--file=", "", script_flag[[1L]]),
+  mustWork = TRUE
+)
+project_root <- normalizePath(
+  file.path(dirname(script_path), ".."),
+  mustWork = TRUE
+)
+setwd(project_root)
+
 if (!requireNamespace("rmarkdown", quietly = TRUE)) {
   stop("The rmarkdown package is required to render R Markdown documents")
 }
@@ -28,3 +43,17 @@ if (anyDuplicated(output_names)) {
 }
 
 output_dir <- "html"
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+for (index in seq_along(input_paths)) {
+  message("Rendering ", input_paths[[index]])
+  rmarkdown::render(
+    input = input_paths[[index]],
+    output_file = paste0(output_names[[index]], ".html"),
+    output_dir = output_dir,
+    knit_root_dir = project_root,
+    envir = new.env(parent = globalenv()),
+    clean = TRUE,
+    quiet = FALSE
+  )
+}

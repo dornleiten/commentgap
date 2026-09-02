@@ -1,5 +1,5 @@
 ---
-title: "Development-only collinearity sensitivity for stacked selection models"
+title: "7A1. Development-only collinearity sensitivity for stacked selection models"
 output:
   html_document:
     toc: true
@@ -12,11 +12,11 @@ This analysis diagnoses dependence among terms in the stacked conditional-logit
 models and tests prespecified reduced specifications. It is deliberately limited
 to the 50% development partition. The shared choice-set parquet contains both
 partitions, so test rows are present during initial file loading, but they are
-immediately removed by an inner join to development article IDs. No Paper 2 test
+immediately removed by an inner join to development article IDs. No held-out test
 row enters scaling, fitting, scoring, diagnostics, or model comparison, and no
-sealed-test performance artifact is read.
+held-out-test performance artifact is read.
 
-The primary full models in `06B_stacked_selection_models.Rmd` remain the fixed
+The primary full models in `07_stacked_selection_models.Rmd` remain the fixed
 reference. Reduced models are robustness checks, not data-driven replacements.
 The analysis uses audience tie draw 1 and Efron's tied-likelihood approximation,
 matching the primary model.
@@ -37,7 +37,7 @@ library(survival)
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
-# Configuration and sealed-test guard
+# Configuration and held-out-test guard
 
 ```{r configuration}
 feature_root <- Sys.getenv(
@@ -56,9 +56,15 @@ split_path <- file.path(feature_root, "master_article_split.parquet")
 parameters_path <- file.path(feature_root, "preprocessing_parameters.json")
 manifest_path <- file.path(feature_root, "feature_manifest.json")
 requested_scopes <- strsplit(
-  Sys.getenv("COMMENTGAP_COLLINEARITY_SCOPES", "root,all"), ",", fixed = TRUE
+  Sys.getenv(
+    "COMMENTGAP_COLLINEARITY_SCOPES",
+    Sys.getenv("COMMENTGAP_MODEL_SCOPES", "all")
+  ),
+  ",",
+  fixed = TRUE
 )[[1L]]
-requested_scopes <- trimws(requested_scopes)
+requested_scopes <- unique(trimws(requested_scopes))
+requested_scopes <- requested_scopes[nzchar(requested_scopes)]
 run_cv <- tolower(Sys.getenv("COMMENTGAP_COLLINEARITY_RUN_CV", "1")) %in%
   c("1", "true", "yes")
 bootstrap_draws <- as.integer(Sys.getenv(
@@ -72,15 +78,15 @@ high_correlation_threshold <- as.numeric(Sys.getenv(
   "COMMENTGAP_COLLINEARITY_CORRELATION_THRESHOLD", "0.70"
 ))
 
-if (!all(requested_scopes %in% c("root", "all"))) {
+if (!length(requested_scopes) ||
+    !all(requested_scopes %in% c("root", "all"))) {
   stop("COMMENTGAP_COLLINEARITY_SCOPES must contain only root and/or all")
 }
-if (!length(requested_scopes)) stop("At least one scope is required")
 if (!is.finite(bootstrap_draws) || bootstrap_draws < 100L) {
   stop("COMMENTGAP_COLLINEARITY_BOOTSTRAP_DRAWS must be at least 100")
 }
 if (!file.exists(split_path) || !file.exists(manifest_path) || !file.exists(parameters_path)) {
-  stop("Missing shared preprocessing artifacts; run 06A2_shared_model_preprocessing.ipynb first")
+  stop("Missing shared preprocessing artifacts; run 03_shared_model_preprocessing.ipynb first")
 }
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
 dir.create(cache_root, recursive = TRUE, showWarnings = FALSE)
@@ -113,7 +119,7 @@ if (!identical(expected_folds, 0:4)) {
 feature_manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
 preprocessing_parameters <- jsonlite::fromJSON(parameters_path, simplifyVector = FALSE)
 if (!identical(as.integer(preprocessing_parameters$version), 4L)) {
-  stop("Expected shared preprocessing version 4; force-rerun 06A2")
+  stop("Expected shared preprocessing version 4; force-rerun stage 3")
 }
 fold_feature_columns <- preprocessing_parameters$fold_feature_columns
 if (!setequal(as.integer(names(fold_feature_columns)), expected_folds)) {
@@ -676,7 +682,7 @@ run_scope <- function(scope) {
   input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
   primary_path <- file.path(regression_root, scope, "stacked_selection_model.rds")
   if (!file.exists(input_path) || !file.exists(primary_path)) {
-    stop("Missing choice set or primary 06B fit for ", scope)
+    stop("Missing choice set or primary stage-7 fit for ", scope)
   }
   full_features <- unlist(
     feature_manifest$models[[scope]]$features, use.names = FALSE
@@ -1084,7 +1090,7 @@ for (result in results) {
 
 # Interpretation rules
 
-The unscaled covariance condition number is retained for continuity with 06B,
+The unscaled covariance condition number is retained for continuity with stage 7,
 but conclusions should rely on correlation-scale conditioning, within-choice-set
 condition indices, variance-decomposition proportions, and coefficient stability
 together.
@@ -1098,4 +1104,4 @@ Selector effect coding and centred reply depth are exact reparameterisations.
 If their likelihoods and within-stratum rankings agree, they may replace the
 presentation parameterisation without constituting a new model choice. Other
 variants omit information. They remain post-hoc development sensitivities, and
-the already-opened Paper 2 test partition must not be used to choose among them.
+the already-opened held-out test partition must not be used to choose among them.

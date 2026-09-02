@@ -1,20 +1,23 @@
-# The News Comment Gap and Algorithmic Agenda Setting in Online Forums
-Project repository
+# CommentGap
 
-* 01_Code: used for scraping derstandard.at with RSelenium
-* 02_Code: used for data cleaning, and analysis of comment preferences for readers/journalists
-* 03_Code: used for analysing ranking algorithms
-* 04_Code: used for beta regression model for FORUM score
-* 05_Code: used for creating figures and tables for the article
+This repository now centres the retrospective 2025 collection and two separate
+paper workflows:
 
-### The News Comment Gap and Algorithmic Agenda Setting in Online Forums
-#### Flora Böwing, Patrick Gildersleve
+- [Paper 1](papers/paper1/README.md): reader and journalist preferences,
+  including the comment-gap measure, conditional-logit regression, XGBoost,
+  neural rankers, and publication reporting. The `all`-comment scope is primary;
+  `root` is an appendix sensitivity.
+- [Paper 2](papers/paper2/README.md): the later FORUM and ranking-algorithm
+  effects paper. No new Paper 2 analysis is in the active pipeline yet.
+- [`legacy/`](legacy): the earlier paper code and pre-2025 gap-analysis
+  references. The earlier combined paper remains available as an
+  [arXiv preprint](https://arxiv.org/abs/2408.07052), and PyFORUM is maintained
+  separately at [github.com/pgilders/pyforum](https://github.com/pgilders/pyforum).
 
-_The disparity between news stories valued by journalists and those preferred by readers, known as the "News Gap", is well-documented. However, the difference in expectations regarding news related user-generated content is less studied. Comment sections, hosted by news websites, are popular venues for reader engagement, yet still subject to editorial decisions. It is thus important to understand journalist vs reader comment preferences and how these are served by various comment ranking algorithms that represent discussions differently. We analyse 1.2 million comments from Austrian newspaper Der Standard to understand the "News Comment Gap" and the effects of different ranking algorithms. We find that journalists prefer positive, timely, complex, direct responses, while readers favour comments similar to article content from elite authors. We introduce the versatile Feature-Oriented Ranking Utility Metric (FORUM) to assess the impact of different ranking algorithms and find dramatic differences in how they prioritise the display of comments by sentiment, topical relevance, lexical diversity, and readability. Journalists can exert substantial influence over the discourse through both curatorial and algorithmic means. Understanding these choices' implications is vital in fostering engaging and civil discussions while aligning with journalistic objectives, especially given the increasing legal scrutiny and societal importance of online discourse._
-
-Read the [preprint on arXiv](https://arxiv.org/abs/2408.07052)
-
-You can try out our FORUM score for evaluating ranking algorithm performance using this repo: [PyFORUM](https://github.com/pgilders/pyforum)
+Execution notebooks remain at the repository root for now because they assume a
+root working directory. The Paper 1 manifest is the authoritative order and
+records the small set of moves and renames deferred until the current factorial
+ranker run has finished.
 
 ## Retrospective 2025 forum collection
 
@@ -169,36 +172,26 @@ also reflect an article update, analyses that depend on exact publication time s
 filter or sensitivity-check this field. The original sitemap value is retained in
 `sitemap_lastmod` for auditability.
 
-## Four-model 2025 preference analysis
+## Paper 1: 2025 preference analysis
 
-The `06` workflow compares curator and audience top-k selections on two
-candidate sets. It fits a root-only and an all-comment stacked conditional-logit
-model, plus matching article-grouped XGBoost rankers:
+The authoritative workflow and its current readiness are documented in
+[`papers/paper1/README.md`](papers/paper1/README.md). In brief, the sequence is:
 
-1. `06A_build_model_features.ipynb` creates resumable scalar features and
-   matched choice sets from the normalized Parquet collection.
-2. `06C_xgboost_rankers.ipynb` creates one shared month-by-joint-size
-   stratified 50/50 development/Paper 2 split. Within development it runs a
-   reproducible 32-configuration broad random search and a 27-point local grid
-   on the same five article folds, then applies one frozen model per scope to
-   the sealed test half.
-3. `06B_stacked_selection_models.Rmd` uses that exact split, estimates feature
-   scaling and both conditional-logit models on development articles only, and
-   applies the frozen coefficients to the sealed test articles. Its fitted
-   conditional-logit models are cached separately by candidate scope and
-   audience tie draw under `regression/fit_cache/`. Cache fingerprints include
-   the input choice set, shared split, feature/provenance manifests, scaling,
-   formula, R version, and relevant package versions, but not the requested
-   total draw count. A completed one-draw benchmark is therefore reused by a
-   later ten-draw run. Set
-   `COMMENTGAP_REGRESSION_FORCE_RECOMPUTE=1` to bypass valid fit caches.
-   Draw 1 retains the complete fitted model required for diagnostics and sealed
-   prediction; subsequent draws retain compact coefficient artifacts because
-   they are used only for coefficient tie-sensitivity. Cache writes are
-   gzip-compressed and atomic.
-4. `06B_efron_exact_sensitivity.Rmd` compares Efron and exact conditional
-   likelihoods on a deterministic, complexity-bounded development subset.
-5. `06D_model_tables_plots.ipynb` exports CSV/LaTeX tables and SVG/PDF figures.
+1. scrape and validate the 2025 collection;
+2. build the production feature store;
+3. freeze shared, leakage-safe model preprocessing;
+4. diagnose the exact transformed model contract;
+5. produce descriptive statistics and topic breakdowns;
+6. calculate and summarize the 2025 comment-gap score;
+7. fit stacked selection models and their collinearity/Efron robustness checks;
+8. select XGBoost and neural variants using development CV only, then evaluate
+   the frozen winners on the held-out articles; and
+9. assemble Paper 1 tables and figures.
+
+Stages 5 and 6 now have tested Python implementations. Stage 8 is running and
+its development-only winner freezer is ready. Stage 9 is now implemented against
+the frozen factorial winners; production execution waits for the active launcher
+to finish.
 
 Install the tested Python environment and restore the R environment before a
 production run:
@@ -213,9 +206,20 @@ Render R Markdown documents from the repository root with the project wrapper;
 compiled HTML and any supporting files are written under `html/`:
 
 ```bash
-Rscript scripts/render_rmd.R 06B_stacked_selection_models.Rmd
+.venv/bin/python scripts/run_paper1_descriptives.py
+.venv/bin/python scripts/run_comment_gap.py
+Rscript scripts/render_rmd.R 07_stacked_selection_models.Rmd
+Rscript scripts/render_rmd.R \
+  07A1_collinearity_sensitivity.Rmd \
+  07A2_efron_exact_sensitivity.Rmd
+.venv/bin/python scripts/freeze_factorial_winners.py
+.venv/bin/python scripts/run_paper1_reporting.py
 Rscript scripts/render_rmd.R legacy/02F_stacked-selection-model.Rmd
 ```
+
+All Paper 1 R analyses default to the primary `all`-comment scope. To generate
+the root-candidate appendix in the same run, set
+`COMMENTGAP_MODEL_SCOPES=all,root`.
 
 The default notebook settings are inference-safe: feature extraction refuses
 an incomplete crawl or pilot NLP. A small pipeline check on the current partial
@@ -341,7 +345,7 @@ build identity; CPU runs record `requirements-aqua-legacy.txt`. An explicit
 The same pilot can be launched without installing the console entry point:
 
 ```bash
-python scripts/build_aqua_features.py \
+.venv/bin/python scripts/build_aqua_features.py \
   --runtime-python .venv-aqua/bin/python \
   --device cuda \
   --max-stories 20 \
@@ -391,8 +395,9 @@ and updates `aqua_runtime/artifacts.json` with the fixture hash.
 If a complete all-story run was accidentally made with
 `--allow-unverified-parity`, do not edit its manifest manually or repeat the
 GPU inference. After parity has been verified, use the audited, resumable
-`commentgap-aqua-promote` workflow described in
-[`notes/AQUA_PILOT_PROMOTION.md`](notes/AQUA_PILOT_PROMOTION.md).
+`commentgap-aqua-promote` workflow recorded in
+`02_build_model_features.ipynb`. The original local promotion note is not
+tracked; this reproducibility gap is recorded in the Paper 1 manifest.
 
 Each complete store retains all 20 hard labels, logits, raw four-class softmax
 values, raw expected ordinal values, published hard composite score, raw
@@ -405,27 +410,26 @@ commentgap-features --aqua-store model_output/selection_2025/aqua
 ```
 
 The merge requires exact candidate coverage, matching text hashes and build
-signatures, a completed validation report, and a production watermark. AQuA
-features remain descriptive/sensitivity features and are not automatically
-added to the confirmatory root/all model specifications.
+signatures, a completed validation report, and a production watermark. The 20
+continuous expected ordinal AQuA dimensions enter the current primary model
+contract; hard labels and composite scores remain descriptive/sensitivity
+features.
 
-Before fitting either Paper 2 model, run
-`06A2_shared_model_preprocessing.ipynb`. It validates and preserves the existing
-50/50 Paper 2 article split under `model_data/`, replaces `log_prior_roots`
+Before fitting a Paper 1 preference model, run
+`03_shared_model_preprocessing.ipynb`. It validates and preserves the existing
+50/50 development/held-out article split under `model_data/`, replaces `log_prior_roots`
 with the smoothed `prior_reply_composition`, and replaces all-comment
 `log_depth` with development-mean `reply_depth_centered`. Five fold-training
-depth centres are materialized for leakage-free development CV. Both 06B and
-06C consume the resulting choice sets and feature manifest; 06D uses the same
-manifest for labels and descriptive summaries.
+depth centres are materialized for leakage-free development CV. Stages 4–9
+consume the resulting choice sets and feature manifest. Stage 9 additionally
+requires the post-run Stage 8 winner manifest before it reads held-out results.
 
 Outputs are written below `model_output/selection_2025/`. Exploratory OOF
-artifacts remain under `xgboost/`; the sealed-test workflow writes separately
-under `xgboost_paper2/`. Only each scope's `test_scores_wide.parquet`
-and corresponding test metrics are eligible for Paper 2 predictive-performance
-or ranking-policy claims. Paper 2 reporting is written separately under
-`reporting_paper2/`. The saved `development_model.json` is fitted only
-on development articles. Broad and narrow CV histories are checkpointed after
-every fold under each scope, so interrupted searches can resume. Set
+artifacts remain under `xgboost/`; the earlier held-out workflow writes under the
+legacy path `xgboost_paper2/`, while the current 68-model experiment writes under
+`factorial_rankers/`. The saved `development_model` artifacts are fitted only on
+development articles. Broad and narrow CV histories are checkpointed after every
+fold under each scope, so interrupted searches can resume. Set
 `COMMENTGAP_XGB_BROAD_CONFIGS` to change the broad draw count and
 `COMMENTGAP_XGB_REFINEMENT_TOP` to change how many leading broad
 configurations define the local grid. Matching development models, test scores,
@@ -449,7 +453,7 @@ By default the builder discovers every year present in both the `articles` and
 commentgap-embed --device mps --batch-size 128 --storage-dtype float16
 
 # Linux workstation (NVIDIA GPU)
-python scripts/build_embeddings.py --device cuda --batch-size 128
+.venv/bin/python scripts/build_embeddings.py --device cuda --batch-size 128
 ```
 
 The default checkpoint is `BAAI/bge-m3`. Any model supported by Sentence
@@ -502,7 +506,7 @@ Before committing GPU time, run the exact tokenizer-length audit on any CPU-only
 machine. This loads the tokenizer but not BGE-M3 model weights and does not use a GPU:
 
 ```bash
-python scripts/build_embeddings.py --diagnostics-only --max-length 512
+.venv/bin/python scripts/build_embeddings.py --diagnostics-only --max-length 512
 ```
 
 The audit scans every selected year and writes `token_length_summary.json` with
@@ -521,7 +525,7 @@ toward `--max-batch-size`; the ceiling defaults to the requested initial
 `--batch-size`. For explicit upward probing, use for example:
 
 ```bash
-python scripts/build_embeddings.py --device cuda \
+.venv/bin/python scripts/build_embeddings.py --device cuda \
   --batch-size 64 --max-batch-size 256 --min-batch-size 4
 ```
 
@@ -542,7 +546,7 @@ After the complete embedding store finishes, calculate the three scalar semantic
 features required by the preference models without loading BGE-M3 again:
 
 ```bash
-python scripts/build_similarity_features.py \
+.venv/bin/python scripts/build_similarity_features.py \
   --model-id BAAI/bge-m3 \
   --revision 5617a9f61b028005a4858fdac845db406aefb181 \
   --year 2025 \
@@ -568,66 +572,43 @@ has eight 2025 discussions above 5,000 eligible comments; four also exceed 5,000
 roots. The December 2024 lookback is embedded for reuse, but its similarity scores
 are not calculated by default because they are not inputs to the 2025 models.
 
-`06A_build_model_features.ipynb` resolves the completed similarity store and joins
+`02_build_model_features.ipynb` resolves the completed similarity store and joins
 these scalars using `story_id, comment_id`. It never reruns the embedding model or
 recalculates cosine similarities. Set `COMMENTGAP_SIMILARITY_STORE` only when an
 explicit build directory is needed; otherwise the compatible store is discovered
 below `COMMENTGAP_SIMILARITY_ROOT`.
 
-### Neural preference rankers
+### Factorial preference rankers and final reporting
 
-The neural rankers reuse the exact root/all feature lists, five development folds,
-fixed 50/50 article split, labels, scaling registry, and sealed-test metrics created
-by `06A2_shared_model_preprocessing.ipynb`:
+The only Paper 1 machine-learning workflow is the 68-variant factorial recorded
+by `06C5_ranker_factorial.ipynb` and finalized by
+`08_xgboost_neural_model_variants.ipynb`. It compares four XGBoost and 64 neural
+recipes across metadata/BGE inputs, audience draw policies, negative sampling,
+learning-rate schedules, head sharing, and network size. All variants use the
+same five development folds and shared preprocessing contract.
 
-* `06C2_frozen_bge_rankers.ipynb`: frozen production BGE-M3 vectors plus a
-  two-head metadata fusion network;
-* `06C3_metadata_mlp_rankers.ipynb`: a lightweight two-selector MLP using only
-  the fold-safe XGBoost/tabular features.
-
-Install the analysis environment (the metadata-only model needs no additional
-large-model or quantization dependencies):
+After the factorial launcher exits, freeze the `all` XGBoost and neural winners
+from development CV and generate the Paper 1 report:
 
 ```bash
-python -m pip install -r requirements-analysis.txt
-python -m pip install -e .
+.venv/bin/python scripts/freeze_factorial_winners.py
+.venv/bin/python scripts/run_paper1_reporting.py
 ```
 
-The notebooks are thin, inspectable entry points. Long production runs can instead
-use the equivalent scripts:
+Both commands fail if the factorial launcher is still active. The freezer also
+requires every planned `all` variant to be marked complete with exactly folds
+0–4. Stage 9 validates the frozen hashes before reading held-out results, then
+combines the two ML winners with the stacked conditional-logit model. It writes
+CSV/LaTeX tables, paired article-bootstrap differences, ten-draw tie sensitivity,
+and PNG/PDF figures below `model_output/selection_2025/paper1/reporting/`.
+
+Add the root-comment appendix explicitly:
 
 ```bash
-python scripts/run_frozen_bge_rankers.py --device cuda
-python scripts/run_metadata_mlp_rankers.py --training-mode cv
-# Alternatives: --training-mode fixed_split or --training-mode full
+.venv/bin/python scripts/freeze_factorial_winners.py --scope all --scope root
+.venv/bin/python scripts/run_paper1_reporting.py --scope all --scope root
 ```
 
-Training and inference print a progress line after the first article, every 100
-articles by default, and at completion. Each line includes the phase, fold/epoch,
-article percentage, candidates processed, elapsed time, throughput, and ETA. Change
-the interval with `--progress-every-stories N` in the scripts or
-`COMMENTGAP_NEURAL_PROGRESS_EVERY_STORIES=N` in the notebooks.
-
-Both recipes are fixed before the sealed test is scored. Pairwise training
-samples negatives only within the same article and selector. Early stopping uses
-the five development folds; the final development-only refit uses the median selected
-epoch. Separate audience and curator heads share the relevant input projection.
-The frozen model reads the existing complete BGE-M3 store; the metadata-only model
-reads only the fold-safe XGBoost feature matrix. Model branches or tags are resolved
-to immutable Hub commits before cache signatures and checkpoints are written.
-
-Every output scope writes development histories, fold
-checkpoints, the final development checkpoint, feature scaler, sealed-test scores,
-article metrics, bootstrap summaries, audience tie sensitivity, and a signed model
-manifest below `model_output/selection_2025/neural_rankers/`.
-
-After both neural runs complete, include them in `06D_model_tables_plots.ipynb` with:
-
-```bash
-export COMMENTGAP_INCLUDE_NEURAL=1
-```
-
-The report then adds combined performance/tie tables, paired neural-minus-XGBoost
-article-bootstrap differences, and combined SVG/PDF performance figures. Neural
-reporting is disabled by default so the existing regression/XGBoost report remains
-runnable before the GPU jobs finish.
+The superseded standalone 06C notebooks have been removed. Their runner scripts
+remain only as non-canonical development utilities; they are not inputs to Stage
+8 selection or Stage 9 reporting.

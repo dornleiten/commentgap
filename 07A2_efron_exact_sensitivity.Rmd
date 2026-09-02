@@ -1,5 +1,5 @@
 ---
-title: "Conditional-logit Efron versus exact sensitivity (2025)"
+title: "7A2. Conditional-logit Efron versus exact sensitivity (2025)"
 output:
   html_document:
     toc: true
@@ -51,12 +51,26 @@ max_combinations <- as.numeric(Sys.getenv(
   "COMMENTGAP_EXACT_MAX_COMBINATIONS", "5000"
 ))
 base_seed <- as.integer(Sys.getenv("COMMENTGAP_MODEL_SEED", "20260813"))
+requested_scopes <- strsplit(
+  Sys.getenv(
+    "COMMENTGAP_EFRON_EXACT_SCOPES",
+    Sys.getenv("COMMENTGAP_MODEL_SCOPES", "all")
+  ),
+  ",",
+  fixed = TRUE
+)[[1L]]
+requested_scopes <- unique(trimws(requested_scopes))
+requested_scopes <- requested_scopes[nzchar(requested_scopes)]
 
 if (sample_articles < 25L) {
   stop("COMMENTGAP_EXACT_SAMPLE_ARTICLES must be at least 25")
 }
 if (!is.finite(max_combinations) || max_combinations < 100) {
   stop("COMMENTGAP_EXACT_MAX_COMBINATIONS must be at least 100")
+}
+if (!length(requested_scopes) ||
+    !all(requested_scopes %in% c("root", "all"))) {
+  stop("COMMENTGAP_EFRON_EXACT_SCOPES must contain only root and/or all")
 }
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
 
@@ -78,7 +92,7 @@ if (!setequal(unique(article_split$split_role),
 }
 if (article_split[split_role == "paper2_test",
                   any(development_fold != -1L)]) {
-  stop("Paper 2 test articles must not have development folds")
+  stop("Held-out test articles must not have development folds")
 }
 development_ids <- article_split[
   split_role == "development", unique(story_id)
@@ -90,7 +104,7 @@ feature_manifest <- jsonlite::fromJSON(
 )
 preprocessing_parameters <- jsonlite::fromJSON(parameters_path, simplifyVector = FALSE)
 if (!identical(as.integer(preprocessing_parameters$version), 4L)) {
-  stop("Expected shared preprocessing version 4; force-rerun 06A2")
+  stop("Expected shared preprocessing version 4; force-rerun stage 3")
 }
 ```
 
@@ -441,7 +455,7 @@ run_scope <- function(scope) {
   list(scope = scope, summary = summary, comparison = comparison)
 }
 
-results <- lapply(c("root", "all"), run_scope)
+results <- lapply(requested_scopes, run_scope)
 ```
 
 # Results
@@ -473,6 +487,6 @@ few material sign reversals, and high top-comment agreement. Differences do not
 invalidate the primary Efron model automatically: the exact analysis uses a
 smaller, lower-complexity article sample and a reduced specification.
 
-Neither fit uses Paper 2 test articles. Standard errors are not compared because
+Neither fit uses held-out test articles. Standard errors are not compared because
 article clustering changes uncertainty estimates but not point estimates, while
 the purpose here is to isolate the likelihood approximation.

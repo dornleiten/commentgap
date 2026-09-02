@@ -1,5 +1,5 @@
 ---
-title: "Gap Regression (02C-Consistent, Streamlined)"
+title: "Legacy gap regression (02C-consistent, streamlined)"
 output: html_document
 date: "2026-02-19"
 ---
@@ -13,6 +13,12 @@ knitr::opts_chunk$set(
 )
 library(dplyr)
 ```
+
+## Legacy data dependency
+
+This analysis uses the pre-2025 `comment_data_general` CSV. It is retained as a
+methodological reference for the Paper 1 gap-score port and is not part of the
+2025 inference pipeline.
 
 ## Load data
 

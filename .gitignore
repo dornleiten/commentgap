@@ -33,3 +33,5 @@ commentgap_scraper.egg-info
 
 # Runtime and experiment logs
 /logs/
+
+/papers/

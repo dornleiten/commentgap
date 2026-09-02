@@ -1,5 +1,5 @@
 ---
-title: "Stacked curator–audience selection models (2025)"
+title: "7. Stacked curator–audience selection models (2025)"
 output:
   html_document:
     toc: true
@@ -8,14 +8,16 @@ output:
 
 # Objective
 
-Fit two common-scale conditional-logit models: one whose candidates are root
-comments and one whose candidates are all published comments. Each comment is
-stacked once for the audience selector and once for the curator selector.
+Fit a common-scale conditional-logit model for the requested candidate scopes.
+All published comments are the Paper 1 primary scope; root comments are an
+opt-in appendix sensitivity. Each comment is stacked once for the audience
+selector and once for the curator selector.
 Article-by-selector strata provide the article controls; standard errors are
-clustered by article. Both primary specifications include the 20 continuous
-AQuA expected ordinal dimensions; neither includes the derived AQuA composite.
+clustered by article. Each specification includes the 20 continuous AQuA
+expected ordinal dimensions and excludes the derived AQuA composite.
 Models and feature scaling are fitted on the same 50% development articles used
-by 06C; the other 50% are used only for sealed Paper 2 prediction.
+by stage 8; the other 50% are used only for frozen held-out evaluation. The stored
+split role retains the legacy name `paper2_test`.
 
 ```{r setup, message=FALSE, warning=FALSE}
 required_packages <- c(
@@ -63,6 +65,16 @@ log_root <- Sys.getenv("COMMENTGAP_LOG_ROOT", "logs")
 force_recompute <- tolower(Sys.getenv(
   "COMMENTGAP_REGRESSION_FORCE_RECOMPUTE", "0"
 )) %in% c("1", "true", "yes")
+requested_scopes <- strsplit(
+  Sys.getenv(
+    "COMMENTGAP_REGRESSION_SCOPES",
+    Sys.getenv("COMMENTGAP_MODEL_SCOPES", "all")
+  ),
+  ",",
+  fixed = TRUE
+)[[1L]]
+requested_scopes <- unique(trimws(requested_scopes))
+requested_scopes <- requested_scopes[nzchar(requested_scopes)]
 fit_cache_schema <- "stacked-clogit-efron-shared-preprocessing-v4"
 
 if (tie_draws_requested < 1L) stop("COMMENTGAP_TIE_DRAWS must be positive")
@@ -70,20 +82,24 @@ if (probability_draws < 100L) stop("COMMENTGAP_PROBABILITY_DRAWS must be at leas
 if (test_bootstrap_draws < 100L) {
   stop("COMMENTGAP_TEST_BOOTSTRAP_DRAWS must be at least 100")
 }
+if (!length(requested_scopes) ||
+    !all(requested_scopes %in% c("all", "root"))) {
+  stop("COMMENTGAP_REGRESSION_SCOPES must contain all and/or root")
+}
 if (!file.exists(split_path)) {
-  stop("Run 06A2_shared_model_preprocessing.ipynb first; missing shared split: ", split_path)
+  stop("Run 03_shared_model_preprocessing.ipynb first; missing shared split: ", split_path)
 }
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
 dir.create(fit_cache_root, recursive = TRUE, showWarnings = FALSE)
 progress_log_path <- Sys.getenv(
   "COMMENTGAP_REGRESSION_PROGRESS_LOG",
-  file.path(log_root, "06B_progress.log")
+  file.path(log_root, "07_stacked_selection_models_progress.log")
 )
 dir.create(dirname(progress_log_path), recursive = TRUE, showWarnings = FALSE)
 progress_state <- new.env(parent = emptyenv())
 progress_state$run_started <- Sys.time()
 progress_state$completed_fits <- 0L
-progress_state$total_fits <- 2L * tie_draws_requested
+progress_state$total_fits <- length(requested_scopes) * tie_draws_requested
 progress_state$fit_seconds <- numeric()
 
 format_duration <- function(seconds) {
@@ -114,10 +130,11 @@ progress_message <- function(message) {
 
 progress_message(sprintf(
   paste0(
-    "Run started; planned conditional-logit fits=%d (two scopes x %d tie draws); ",
-    "cache=%s; force_recompute=%s"
+    "Run started; scopes=%s; planned conditional-logit fits=%d ",
+    "(%d scopes x %d tie draws); cache=%s; force_recompute=%s"
   ),
-  progress_state$total_fits, tie_draws_requested,
+  paste(requested_scopes, collapse = ","),
+  progress_state$total_fits, length(requested_scopes), tie_draws_requested,
   normalizePath(fit_cache_root, mustWork = FALSE), force_recompute
 ))
 
@@ -138,7 +155,7 @@ if (!file.exists(manifest_path)) stop("Missing feature manifest: ", manifest_pat
 if (!file.exists(parameters_path)) stop("Missing preprocessing parameters: ", parameters_path)
 if (!file.exists(provenance_path)) stop("Missing provenance manifest: ", provenance_path)
 preprocessing_parameters <- jsonlite::fromJSON(parameters_path, simplifyVector = FALSE)
-if (!identical(as.integer(preprocessing_parameters$version), 4L)) stop("Expected shared preprocessing version 4; force-rerun 06A2")
+if (!identical(as.integer(preprocessing_parameters$version), 4L)) stop("Expected shared preprocessing version 4; force-rerun stage 3")
 feature_manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
 provenance <- jsonlite::fromJSON(provenance_path, simplifyVector = FALSE)
 aqua_expected_features <- setdiff(
@@ -418,10 +435,12 @@ evaluate_frozen_scores <- function(scores) {
     idcg <- sum(selected[ideal_top] * discounts)
     actual <- which(selected == 1L)
     overlap <- length(intersect(predicted, actual))
+    selected_ranks <- match(actual, ranked)
     .(n_candidates = .N, n_picks = k,
       ndcg_at_k = if (idcg > 0) dcg / idcg else NA_real_,
       top_k_overlap = overlap / k,
-      jaccard = overlap / length(union(predicted, actual)))
+      jaccard = overlap / length(union(predicted, actual)),
+      mean_selected_rank = mean(selected_ranks))
   }, by = .(story_id, selector)]
 }
 
@@ -449,12 +468,13 @@ chance_ranking_metrics <- function(scores) {
     n_picks,
     ndcg_at_k = chance_rate,
     top_k_overlap = chance_rate,
-    jaccard = expected_jaccard
+    jaccard = expected_jaccard,
+    mean_selected_rank = (n_candidates + 1) / 2
   )]
 }
 
 bootstrap_metric_summary <- function(article_metrics, draws, seed) {
-  metric_names <- c("ndcg_at_k", "top_k_overlap", "jaccard")
+  metric_names <- c("ndcg_at_k", "top_k_overlap", "jaccard", "mean_selected_rank")
   rbindlist(lapply(seq_along(metric_names), function(metric_index) {
     metric <- metric_names[[metric_index]]
     rbindlist(lapply(c("audience", "curator"), function(selector_name) {
@@ -498,7 +518,7 @@ bootstrap_above_chance <- function(model_metrics, chance_metrics, draws, seed) {
     suffixes = c("_model", "_chance"),
     sort = FALSE
   )
-  metric_names <- c("ndcg_at_k", "top_k_overlap", "jaccard")
+  metric_names <- c("ndcg_at_k", "top_k_overlap", "jaccard", "mean_selected_rank")
   rbindlist(lapply(seq_along(metric_names), function(metric_index) {
     metric <- metric_names[[metric_index]]
     rbindlist(lapply(c("audience", "curator"), function(selector_name) {
@@ -980,7 +1000,7 @@ run_scope <- function(scope) {
   list(scope = scope, associations = associations, probabilities = probabilities, summary = summary)
 }
 
-results <- lapply(c("root", "all"), run_scope)
+results <- lapply(requested_scopes, run_scope)
 progress_message("Analysis and artifact generation completed successfully")
 ```
 
@@ -1014,5 +1034,5 @@ well as preference. Author-history vote variables are also collection-snapshot
 reputation measures. Curators include journalists, community-management staff,
 and volunteer guides. The models estimate associations only within discussions
 where at least one usable sticky selection was observed. Association estimates
-now describe the development half; predictive metrics describe only the sealed
-Paper 2 test half.
+describe the development half; predictive metrics describe only the held-out
+test half.
