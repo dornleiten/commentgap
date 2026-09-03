@@ -34,4 +34,8 @@ commentgap_scraper.egg-info
 # Runtime and experiment logs
 /logs/
 
-/papers/
+!/papers/
+/papers/*
+!/papers/forum_ranking_analysis/
+/papers/forum_ranking_analysis/*
+!/papers/forum_ranking_analysis/README.md

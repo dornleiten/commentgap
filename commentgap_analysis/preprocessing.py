@@ -1,4 +1,4 @@
-"""Shared split and predictor preprocessing for Paper 2 selection models."""
+"""Shared split and predictor preprocessing for held-out selection models."""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def validate_frozen_split(split: pd.DataFrame, *, development_folds: int = 5) ->
     if set(development["development_fold"].astype(int)) != set(range(development_folds)):
         raise ValueError("Frozen split does not contain the expected development folds")
     if not (test["development_fold"].astype(int) == -1).all():
-        raise ValueError("Paper 2 test articles must have development_fold = -1")
+        raise ValueError("FORUM held-out test articles must have development_fold = -1")
     return output.sort_values("story_id").reset_index(drop=True)
 
 
@@ -445,7 +445,7 @@ def prepare_shared_model_data(
         existing = article_split[columns].sort_values("story_id").reset_index(drop=True)
         if not regenerated.equals(existing):
             raise ValueError(
-                "Regenerated split differs from the frozen Paper 2 split; refusing to replace it"
+                "Regenerated split differs from the frozen held-out split; refusing to replace it"
             )
         split_source = str(frozen_split_path)
         split_source_sha256 = _file_sha256(frozen_split_path)
@@ -561,7 +561,7 @@ def prepare_shared_model_data(
             "reading_level_length_adjusted",
             "novelty_prior_roots_model / novelty_prior_all_model imputation",
         ],
-        "paper2_split_status": "frozen and unchanged",
+        "held_out_split_status": "frozen and unchanged",
     }
     _atomic_json(manifest, output_root / "preprocessing_manifest.json")
     return {

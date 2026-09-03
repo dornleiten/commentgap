@@ -209,7 +209,7 @@ class AnalysisReportingTests(unittest.TestCase):
                 (output / "figures/regression_vs_xgb_test_performance.pdf").exists()
             )
             self.assertTrue((output / "tables/sample_accounting.csv").exists())
-            self.assertTrue((output / "tables/paper2_covariate_balance.csv").exists())
+            self.assertTrue((output / "tables/held_out_covariate_balance.csv").exists())
             self.assertTrue(
                 (output / "tables/regression_model_diagnostics.csv").exists()
             )

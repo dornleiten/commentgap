@@ -7,8 +7,9 @@ paper workflows:
   including the comment-gap measure, conditional-logit regression, XGBoost,
   neural rankers, and publication reporting. The `all`-comment scope is primary;
   `root` is an appendix sensitivity.
-- [Paper 2](papers/paper2/README.md): the later FORUM and ranking-algorithm
-  effects paper. No new Paper 2 analysis is in the active pipeline yet.
+- [FORUM and ranking-algorithm effects](papers/forum_ranking_analysis/README.md): the FORUM and ranking-algorithm effects
+  pipeline, with a frozen Paper 1 ranker handoff, 90 policy bundles, static
+  novelty, paired inference, and an explicit random-ordering reference.
 - [`legacy/`](legacy): the earlier paper code and pre-2025 gap-analysis
   references. The earlier combined paper remains available as an
   [arXiv preprint](https://arxiv.org/abs/2408.07052), and PyFORUM is maintained

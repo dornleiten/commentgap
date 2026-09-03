@@ -1,4 +1,4 @@
-"""Article-grouped neural rankers for the Paper 2 preference task.
+"""Article-grouped neural rankers for the held-out preference task.
 
 The module deliberately keeps notebook code thin.  It owns the shared data
 contract, fold-safe feature scaling, deterministic within-article pair
@@ -1492,7 +1492,7 @@ def run_neural_ranker_workflow(
         development_stories = sorted(development["story_id"].unique())
         test_stories = sorted(test["story_id"].unique())
         if set(development_stories) & set(test_stories):
-            raise ValueError("Development and Paper 2 article sets overlap")
+            raise ValueError("Development and held-out article sets overlap")
         selection_folds, selection_fold_count, selection_label = _selection_plan(
             training_mode
         )

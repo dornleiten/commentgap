@@ -317,8 +317,8 @@ def build_reporting_outputs(
         ignore_index=True,
     )
     _save_table(combined_ties, table_root / "model_test_tie_sensitivity")
-    _save_table(folds, table_root / "paper2_split_balance")
-    _save_table(split_balance, table_root / "paper2_covariate_balance")
+    _save_table(folds, table_root / "held_out_split_balance")
+    _save_table(split_balance, table_root / "held_out_covariate_balance")
 
     labels = registry["features"]
     maximum_regression_terms = max(

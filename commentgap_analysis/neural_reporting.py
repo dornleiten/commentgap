@@ -1,4 +1,4 @@
-"""Extend the Paper 2 report with the three text-augmented rankers."""
+"""Extend the FORUM report with the three text-augmented rankers."""
 
 from __future__ import annotations
 

@@ -196,7 +196,7 @@ def assign_article_splits(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Create one shared month-by-size split for both ranking scopes.
 
-    Only stories present in both choice sets enter the primary Paper 2 sample.
+    Only stories present in both choice sets enter the primary FORUM held-out sample.
     Assignment is rerandomized deterministically until all prespecified balance
     diagnostics meet max_abs_smd.
     """
@@ -219,7 +219,7 @@ def assign_article_splits(
         validate="one_to_one",
     ).sort_values("story_id").reset_index(drop=True)
     if len(article) < development_folds * 2:
-        raise ValueError("Too few common articles for development and Paper 2 test sets")
+        raise ValueError("Too few common articles for development and FORUM held-out test sets")
     if not (article["article_month_root"] == article["article_month_all"]).all():
         raise ValueError("Root and all choice sets disagree on article month")
     article["article_month"] = article.pop("article_month_root")
@@ -851,7 +851,7 @@ def run_ranker_workflow(
     if set(split["split_role"].unique()) != {"development", "paper2_test"}:
         raise ValueError("The shared article split has invalid roles")
     if not (split.loc[split["split_role"] == "paper2_test", "development_fold"] == -1).all():
-        raise ValueError("Paper 2 test articles must not have development folds")
+        raise ValueError("FORUM held-out test articles must not have development folds")
     choice = choice_set.copy()
     choice["story_id"] = choice["story_id"].astype(str)
     split_stories = set(split["story_id"])
@@ -902,11 +902,11 @@ def run_ranker_workflow(
     development = stacked[stacked["split_role"] == "development"].copy()
     test = stacked[stacked["split_role"] == "paper2_test"].copy()
     if development.empty or test.empty:
-        raise ValueError("Development and Paper 2 test data must both be non-empty")
+        raise ValueError("Development and FORUM held-out test data must both be non-empty")
     development_stories = set(development["story_id"])
     test_stories = set(test["story_id"])
     if development_stories & test_stories:
-        raise ValueError("Development and Paper 2 test stories overlap")
+        raise ValueError("Development and FORUM held-out stories overlap")
 
     if configs is not None:
         best, history = tune_ranker(
