@@ -18,6 +18,9 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
+from commentgap_analysis.category_labels import translate_news_category
+from commentgap_analysis.plotting import save_display_figure
+
 
 AUDIENCE_DRAW_COLUMNS = tuple(
     f"audience_selected_draw_{draw:02d}" for draw in range(1, 11)
@@ -417,21 +420,19 @@ def _save_figures(
 
     primary = discussions[discussions["scope"] == scope]
     monthly = primary.groupby("article_month")["story_id"].nunique().reindex(range(1, 13), fill_value=0)
-    fig, axis = plt.subplots(figsize=(8, 4.5))
+    fig, axis = plt.subplots(figsize=(6.6, 4.5))
     axis.bar(monthly.index, monthly.values, color="#356a8a")
     axis.set(xlabel="2025 month", ylabel="Eligible discussions", title=f"Monthly model-sample coverage ({scope})")
     axis.set_xticks(range(1, 13))
     save(fig, f"{scope}_monthly_coverage")
 
-    overall_topics = topic_summary[
-        (topic_summary["scope"] == scope) & (topic_summary["analysis_partition"] == "all_partitions")
-    ].nlargest(15, "n_articles").sort_values("n_articles")
-    fig, axis = plt.subplots(figsize=(9, max(4.5, 0.32 * len(overall_topics))))
-    axis.barh(overall_topics["primary_topic"], overall_topics["n_articles"], color="#4b8b6f")
-    axis.set(xlabel="Eligible discussions", title=f"Primary topics from section_1 ({scope})")
-    save(fig, f"{scope}_topic_composition")
+    plot_topic_composition(topic_summary, scope, output_root, show=False)
+    outputs.extend(
+        figures_root / f"{scope}_topic_composition.{suffix}"
+        for suffix in ("png", "pdf")
+    )
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.2))
     axes[0].hist(primary["candidate_rows"], bins=40, color="#356a8a")
     axes[0].set(xlabel="Candidates per discussion", ylabel="Discussions")
     axes[1].hist(primary["n_picks"], bins=np.arange(0.5, primary["n_picks"].max() + 1.5), color="#d4744c")
@@ -439,18 +440,71 @@ def _save_figures(
     fig.suptitle(f"Discussion size and selection intensity ({scope})")
     save(fig, f"{scope}_discussion_size_and_picks")
 
-    contrasts = feature_summary[
+    plot_selected_feature_contrasts(feature_summary, scope, output_root, show=False)
+    outputs.extend(
+        figures_root / f"{scope}_selected_feature_contrasts.{suffix}"
+        for suffix in ("png", "pdf")
+    )
+    return outputs
+
+
+def plot_topic_composition(
+    topic_summary: pd.DataFrame,
+    scope: str,
+    output_root: Path | None = None,
+    *,
+    show: bool = True,
+):
+    """Render topic composition directly from the stage-5 summary table."""
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import PercentFormatter
+
+    shown = topic_summary[
+        (topic_summary["scope"] == scope)
+        & (topic_summary["analysis_partition"] == "all_partitions")
+    ].nlargest(15, "n_articles").sort_values("n_articles")
+    label_column = "primary_topic_label" if "primary_topic_label" in shown else "primary_topic"
+    shares = shown["n_articles"] / topic_summary.loc[
+        (topic_summary["scope"] == scope)
+        & (topic_summary["analysis_partition"] == "all_partitions"),
+        "n_articles",
+    ].sum()
+    fig, axis = plt.subplots(figsize=(6.6, max(4.5, 0.32 * len(shown))))
+    axis.barh(shown[label_column].map(translate_news_category), shares, color="#4b8b6f")
+    axis.xaxis.set_major_formatter(PercentFormatter(1.0))
+    axis.set(
+        xlabel="Share of eligible discussions",
+        title=f"Share of eligible discussions by primary news category (section_1; {scope})",
+    )
+    return save_display_figure(fig, output_root, f"{scope}_topic_composition", show=show)
+
+
+def plot_selected_feature_contrasts(
+    feature_summary: pd.DataFrame,
+    scope: str,
+    output_root: Path | None = None,
+    *,
+    show: bool = True,
+):
+    """Render selected-feature contrasts directly from the stage-5 summary table."""
+    import matplotlib.pyplot as plt
+
+    shown = feature_summary[
         (feature_summary["scope"] == scope)
         & (feature_summary["feature_source"] == "transformed_model_predictor")
     ].dropna(subset=["curator_minus_audience_sd"])
-    contrasts = contrasts.assign(abs_contrast=contrasts["curator_minus_audience_sd"].abs()).nlargest(20, "abs_contrast").sort_values("curator_minus_audience_sd")
-    fig, axis = plt.subplots(figsize=(9, max(5, 0.3 * len(contrasts))))
-    colors = np.where(contrasts["curator_minus_audience_sd"] >= 0, "#4b8b6f", "#d4744c")
-    axis.barh(contrasts["label"], contrasts["curator_minus_audience_sd"], color=colors)
+    shown = shown.assign(
+        abs_contrast=shown["curator_minus_audience_sd"].abs()
+    ).nlargest(20, "abs_contrast").sort_values("curator_minus_audience_sd")
+    fig, axis = plt.subplots(figsize=(14, max(5, 0.3 * len(shown))))
+    colors = np.where(shown["curator_minus_audience_sd"] >= 0, "#4b8b6f", "#d4744c")
+    axis.barh(shown["label"], shown["curator_minus_audience_sd"], color=colors)
     axis.axvline(0, color="black", linewidth=0.8)
-    axis.set(xlabel="Curator mean minus audience mean (candidate SDs)", title=f"Largest selected-feature contrasts ({scope})")
-    save(fig, f"{scope}_selected_feature_contrasts")
-    return outputs
+    axis.set(
+        xlabel="Curator mean minus audience mean (candidate SDs)",
+        title=f"Largest selected-feature contrasts ({scope})",
+    )
+    return save_display_figure(fig, output_root, f"{scope}_selected_feature_contrasts", show=show)
 
 
 def run_descriptive_analysis(
@@ -509,6 +563,7 @@ def run_descriptive_analysis(
         ["scope", "analysis_partition", "primary_topic"],
     )
     topic = pd.concat([topic, topic_all], ignore_index=True)
+    topic["primary_topic_label"] = topic["primary_topic"].map(translate_news_category)
     sample_flow = _sample_flow(discussions, scopes, provenance)
     qa = provenance.get("qa", {})
     collection_qa = pd.DataFrame(

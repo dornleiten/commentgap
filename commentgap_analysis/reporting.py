@@ -326,7 +326,7 @@ def build_reporting_outputs(
     )
     regression_figure_height = max(7.0, 0.27 * maximum_regression_terms)
     fig, axes = plt.subplots(
-        1, 2, figsize=(11, regression_figure_height), sharex=True
+        1, 2, figsize=(14, regression_figure_height), sharex=True
     )
     for axis, scope in zip(axes, ("root", "all")):
         subset = regression[regression["scope"] == scope].copy()
@@ -378,7 +378,7 @@ def build_reporting_outputs(
     _save_figure(fig, figure_root / "regression_preference_differences")
 
     plot_metrics = metrics[metrics["metric"].isin(["ndcg_at_k", "top_k_overlap", "jaccard"])].copy()
-    fig, axis = plt.subplots(figsize=(8, 4.5))
+    fig, axis = plt.subplots(figsize=(6.6, 4.5))
     plot_metrics["model"] = plot_metrics["scope"] + " / " + plot_metrics["selector"]
     metric_order = ["top_k_overlap", "jaccard", "ndcg_at_k"]
     metric_labels = ["Top-k overlap", "Jaccard", "nDCG@k"]
@@ -411,7 +411,7 @@ def build_reporting_outputs(
     _save_figure(fig, figure_root / "xgb_test_performance")
 
     comparison = paired_differences.copy()
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.5), sharey=True)
     for axis, scope in zip(axes, ("root", "all")):
         subset = comparison[comparison["scope"] == scope].copy()
         subset["series"] = subset["selector"].str.title()
@@ -458,7 +458,7 @@ def build_reporting_outputs(
         .groupby("scope", group_keys=False)
         .head(10)
     )
-    fig, axes = plt.subplots(1, 2, figsize=(11, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     for axis, scope in zip(axes, ("root", "all")):
         subset = keep[keep["scope"] == scope].sort_values("importance")
         axis.barh(subset["label"], subset["importance"], color="#61a5c2")
@@ -480,7 +480,7 @@ def build_reporting_outputs(
         .groupby(["scope", "selector"], group_keys=False)
         .head(5)
     )
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9))
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
     for axis, ((scope, selector), subset) in zip(axes.flat, top.groupby(["scope", "selector"], sort=True)):
         subset = subset.sort_values("abs_shap")
         axis.barh(subset["label"], subset["abs_shap"], color="#e07a5f")

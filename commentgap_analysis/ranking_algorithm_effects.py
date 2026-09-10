@@ -13,36 +13,24 @@ import numpy as np
 import pandas as pd
 
 from .forum_scores import PRIMARY_OUTCOMES
+from .presentation_labels import (
+    ORDERING_DISPLAY_LABELS,
+    ORDERING_DISPLAY_ORDER,
+    OUTCOME_DISPLAY_LABELS,
+    OUTCOME_DISPLAY_ORDER,
+    REPLY_DISPLAY_MARKERS,
+)
 
 
-OUTCOME_LABELS = {
-    "aqua_score_expected": "AQuA deliberative quality",
-    "article_similarity_top3": "Article similarity",
-    "toxicity_probability": "Toxicity",
-    "log_author_prior_30d_comments": "Participant incumbency",
-    "author_prior_30d_reception_balance": "Prior audience reception",
-    "semantic_novelty_knn5": "Comment novelty (5-NN)",
-    "sentiment_positive": "Positive sentiment",
-    "sentiment_negative": "Negative sentiment",
-    "cttr": "Lexical diversity (raw CTTR)",
-    "smog_de": "Reading difficulty (raw SMOG-DE)",
-}
+OUTCOME_LABELS = dict(OUTCOME_DISPLAY_LABELS)
+SUBPLOT_OUTCOME_LABELS = OUTCOME_LABELS
 
+# This module ranks substantive policies against the random reference, so the
+# reference itself is intentionally excluded from these ranked-effect plots.
 ORDERING_LABELS = {
-    "relative_votes": "Relative votes",
-    "upvotes": "Upvotes",
-    "chronological": "Chronological",
-    "reverse_chronological": "Reverse chronological",
-    "regression_audience": "Regression: audience",
-    "regression_editor": "Regression: editor",
-    "xgb_metadata_audience": "XGB metadata: audience",
-    "xgb_metadata_editor": "XGB metadata: editor",
-    "xgb_metadata_text_audience": "XGB text: audience",
-    "xgb_metadata_text_editor": "XGB text: editor",
-    "neural_metadata_audience": "Neural metadata: audience",
-    "neural_metadata_editor": "Neural metadata: editor",
-    "neural_metadata_text_audience": "Neural text: audience",
-    "neural_metadata_text_editor": "Neural text: editor",
+    ordering: ORDERING_DISPLAY_LABELS[ordering]
+    for ordering in ORDERING_DISPLAY_ORDER
+    if ordering != "random"
 }
 
 
@@ -62,9 +50,6 @@ def _atomic_json(value: dict[str, Any], path: Path) -> None:
 
 
 def _plot_modules() -> tuple[Any, Any]:
-    import matplotlib
-
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib import colors
 
@@ -92,7 +77,7 @@ def _primary_top10(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def plot_ordering_effects(
-    effects: pd.DataFrame, output_root: Path, *, depth: str = "top10"
+    effects: pd.DataFrame, output_root: Path, *, depth: str = "top10", show: bool = False
 ) -> list[Path]:
     """Plot ordering-versus-random effects with aggregate interface effects.
 
@@ -105,9 +90,9 @@ def plot_ordering_effects(
     data = _primary_depth(effects, depth)
     ordering_data = data[data["contrast_family"].eq("ordering_vs_random")]
     interface_definitions = [
-        ("pinned_vs_unpinned", "pinned", "Pinned vs unpinned"),
-        ("reply_vs_loose", "hidden", "Hidden vs loose"),
-        ("reply_vs_loose", "trees", "Trees vs loose"),
+        ("reply_vs_loose", "trees", "Reply trees"),
+        ("reply_vs_loose", "hidden", "Replies hidden"),
+        ("pinned_vs_unpinned", "pinned", "Pinned Picks"),
     ]
     interface_rows = []
     for family, contrast, label in interface_definitions:
@@ -118,9 +103,9 @@ def plot_ordering_effects(
         interface_rows.append(subset)
     interface_data = pd.concat(interface_rows, ignore_index=True)
 
-    figure, axes = plt.subplots(2, 5, figsize=(18, 11), sharex=True, sharey=True)
-    ordering = list(reversed(ORDERING_LABELS))
-    for panel_index, (axis, outcome) in enumerate(zip(axes.flat, PRIMARY_OUTCOMES)):
+    figure, axes = plt.subplots(2, 5, figsize=(14, 9), sharex=True, sharey=True)
+    ordering = list(ORDERING_LABELS)
+    for panel_index, (axis, outcome) in enumerate(zip(axes.flat, OUTCOME_DISPLAY_ORDER)):
         ordering_panel = (
             ordering_data[ordering_data["outcome"].eq(outcome)]
             .set_index("contrast")
@@ -161,13 +146,16 @@ def plot_ordering_effects(
                     interface_panel["ci_upper"] - interface_panel["estimate"],
                 ]
             ),
-            fmt="D",
-            color="#333333",
-            ecolor="#777777",
-            markersize=4.5,
+            fmt="o",
+            color="#2457A7",
+            ecolor="#7A9AC8",
+            markersize=3.5,
             capsize=2,
         )
-        axis.axhline(len(ordering_panel) - 0.5, color="0.82", linewidth=0.8)
+        separator_position = (ordering_positions[-1] + interface_positions[0]) / 2
+        axis.axhline(separator_position, color="0.82", linewidth=0.8)
+        interface_separator_position = (interface_positions[1] + interface_positions[2]) / 2
+        axis.axhline(interface_separator_position, color="0.82", linewidth=0.8)
         positions = np.concatenate([ordering_positions, interface_positions])
         axis.set_yticks(positions)
         if panel_index % axes.shape[1] == 0:
@@ -178,7 +166,7 @@ def plot_ordering_effects(
             )
         else:
             axis.tick_params(labelleft=False)
-        axis.set_title(OUTCOME_LABELS[outcome])
+        axis.set_title(SUBPLOT_OUTCOME_LABELS[outcome])
         axis.set_xlabel("FORUM contrast")
         axis.grid(axis="x", color="0.9", linewidth=0.6)
     depth_label = "top 10" if depth == "top10" else "full discussion (N-1)"
@@ -188,27 +176,11 @@ def plot_ordering_effects(
     )
     axes[0, 0].invert_yaxis()
 
-    from matplotlib.lines import Line2D
-
-    figure.legend(
-        handles=[
-            Line2D(
-                [0], [0], marker="o", linestyle="none", color="#2457A7",
-                label="Ordering vs random",
-            ),
-            Line2D(
-                [0], [0], marker="D", linestyle="none", color="#333333",
-                label="Average reply / pin effect",
-            ),
-        ],
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.965),
-        ncol=2,
-        frameon=False,
-    )
-    figure.tight_layout(rect=(0, 0, 1, 0.93))
+    figure.tight_layout(rect=(0, 0, 1, 0.98), pad=0.6, h_pad=0.8, w_pad=0.8)
     figure_name = "figure_ordering_effects" if depth == "top10" else f"figure_ordering_effects_{depth}"
     paths = _save_figure(figure, output_root / figure_name)
+    if show:
+        plt.show()
     plt.close(figure)
     return paths
 
@@ -217,19 +189,16 @@ def plot_ordering_policy_variants(
     output_root: Path,
     *,
     depth: str = "top10",
+    show: bool = False,
 ) -> list[Path]:
     """Plot all substantive reply/pinning variants for each ordering."""
     plt, _ = _plot_modules()
     data = _primary_depth(summary, depth)
     data = data[data["deployable"]].copy()
-    orderings = list(reversed(ORDERING_LABELS))
+    orderings = list(ORDERING_LABELS)
     positions = np.arange(len(orderings), dtype=float)
-    reply_colors = {
-        "loose": "#2457A7",
-        "trees": "#A33F2B",
-        "hidden": "#2A8C68",
-    }
-    pin_markers = {False: "o", True: "^"}
+    plot_color = "#2457A7"
+    reply_markers = REPLY_DISPLAY_MARKERS
     # Small deterministic offsets keep the six variants legible at each ordering.
     offsets = {
         ("loose", False): -0.18,
@@ -239,37 +208,30 @@ def plot_ordering_policy_variants(
         ("hidden", False): 0.14,
         ("hidden", True): 0.22,
     }
-    figure, axes = plt.subplots(2, 5, figsize=(18, 10), sharex=True, sharey=True)
-    for panel_index, (axis, outcome) in enumerate(zip(axes.flat, PRIMARY_OUTCOMES)):
+    figure, axes = plt.subplots(2, 5, figsize=(14, 9), sharex=True, sharey=True)
+    for panel_index, (axis, outcome) in enumerate(zip(axes.flat, OUTCOME_DISPLAY_ORDER)):
         panel = data[data["outcome"].eq(outcome)]
-        for reply_mode, color in reply_colors.items():
-            for pinned, marker in pin_markers.items():
+        for reply_mode in reply_markers:
+            for pinned in (False, True):
                 subset = (
                     panel[panel["reply_mode"].eq(reply_mode) & panel["pinned"].eq(pinned)]
                     .set_index("ordering")
                     .reindex(orderings)
                 )
                 y = positions + offsets[(reply_mode, pinned)]
-                axis.errorbar(
+                axis.plot(
                     subset["estimate"],
                     y,
-                    xerr=np.vstack(
-                        [
-                            subset["estimate"] - subset["ci_lower"],
-                            subset["ci_upper"] - subset["estimate"],
-                        ]
-                    ),
-                    fmt=marker,
                     linestyle="none",
-                    color=color,
-                    ecolor=color,
+                    marker=reply_markers[reply_mode],
+                    color=plot_color,
+                    markerfacecolor=plot_color if pinned else "none",
+                    markeredgecolor=plot_color,
                     alpha=0.88,
                     markersize=4.5,
-                    capsize=1.8,
-                    elinewidth=0.8,
                 )
         axis.axvline(0, color="0.55", linewidth=0.8)
-        axis.set_title(OUTCOME_LABELS[outcome])
+        axis.set_title(SUBPLOT_OUTCOME_LABELS[outcome])
         axis.set_xlabel("Mean FORUM")
         axis.grid(axis="x", color="0.9", linewidth=0.6)
         axis.set_yticks(positions)
@@ -285,29 +247,38 @@ def plot_ordering_policy_variants(
     from matplotlib.lines import Line2D
 
     legend_handles = [
-        Line2D([0], [0], marker="o", linestyle="none", color=color, label=reply)
-        for reply, color in reply_colors.items()
+        Line2D(
+            [0], [0], marker=reply_markers[reply], linestyle="none",
+            color=plot_color, markerfacecolor=plot_color,
+            markeredgecolor=plot_color,
+            label=reply,
+        )
+        for reply in reply_markers
     ] + [
-        Line2D([0], [0], marker=marker, linestyle="none", color="0.25", label=label)
-        for marker, label in (("o", "Unpinned"), ("^", "Pinned"))
+        Line2D(
+            [0], [0], marker="o", linestyle="none", color="0.25",
+            markerfacecolor=fill, markeredgecolor="0.25", label=label,
+        )
+        for fill, label in (("none", "Unpinned"), ("0.25", "Pinned"))
     ]
     depth_label = "top 10" if depth == "top10" else "full discussion (N-1)"
     figure.suptitle(f"Ordering × reply × pin variants at {depth_label}")
     figure.legend(
         handles=legend_handles,
         loc="upper center",
-        bbox_to_anchor=(0.5, 0.955),
+        bbox_to_anchor=(0.5, 0.965),
         ncol=len(legend_handles),
         frameon=False,
-        title="Colour = reply mode; marker = pin state",
     )
-    figure.tight_layout(rect=(0, 0, 1, 0.90))
+    figure.tight_layout(rect=(0, 0, 1, 0.955), pad=0.6, h_pad=0.8, w_pad=0.8)
     figure_name = (
         "figure_ordering_policy_variants"
         if depth == "top10"
         else f"figure_ordering_policy_variants_{depth}"
     )
     paths = _save_figure(figure, output_root / figure_name)
+    if show:
+        plt.show()
     plt.close(figure)
     return paths
 
@@ -319,13 +290,13 @@ def plot_structure_effects(
     data = _primary_depth(effects, depth)
     data = data[~data["contrast_family"].eq("ordering_vs_random")].copy()
     labels = {
-        "trees": "Trees vs loose",
-        "hidden": "Hidden vs loose",
-        "pinned": "Pinned vs unpinned",
+        "trees": "Reply trees",
+        "hidden": "Replies hidden",
+        "pinned": "Pinned Picks",
     }
     order = ["trees", "hidden", "pinned"]
-    figure, axes = plt.subplots(2, 5, figsize=(16, 9), sharex=True)
-    for panel_index, (axis, outcome) in enumerate(zip(axes.flat, PRIMARY_OUTCOMES)):
+    figure, axes = plt.subplots(2, 5, figsize=(14, 9), sharex=True)
+    for panel_index, (axis, outcome) in enumerate(zip(axes.flat, OUTCOME_DISPLAY_ORDER)):
         panel = data[data["outcome"].eq(outcome)].set_index("contrast").reindex(order)
         positions = np.arange(len(panel))
         axis.axvline(0, color="0.55", linewidth=0.8)
@@ -347,7 +318,7 @@ def plot_structure_effects(
         axis.set_yticks(positions)
         axis.set_yticklabels([labels[value] for value in panel.index], fontsize=8)
         axis.invert_yaxis()
-        axis.set_title(OUTCOME_LABELS[outcome])
+        axis.set_title(SUBPLOT_OUTCOME_LABELS[outcome])
         axis.set_xlabel("Average FORUM contrast")
         axis.grid(axis="x", color="0.9", linewidth=0.6)
     depth_label = "top 10" if depth == "top10" else "full discussion (N-1)"
@@ -364,6 +335,7 @@ def plot_metric_agreement(
     output_root: Path,
     *,
     depth: str = "top10",
+    show: bool = False,
 ) -> list[Path]:
     """Plot FORUM/nDCG agreement by reply/pin group and overall.
 
@@ -377,13 +349,13 @@ def plot_metric_agreement(
         & metric["depth"].eq(depth)
         & metric["outcome"].isin(PRIMARY_OUTCOMES)
     ].copy()
-    positions = np.arange(len(PRIMARY_OUTCOMES), dtype=float)
+    positions = np.arange(len(OUTCOME_DISPLAY_ORDER), dtype=float)
     reply_colors = {
         "loose": "#2457A7",
         "trees": "#A33F2B",
         "hidden": "#2A8C68",
     }
-    pin_markers = {False: "o", True: "^"}
+    reply_markers = REPLY_DISPLAY_MARKERS
     offsets = {
         ("loose", False): -0.22,
         ("loose", True): -0.13,
@@ -392,8 +364,8 @@ def plot_metric_agreement(
         ("hidden", False): 0.14,
         ("hidden", True): 0.23,
     }
-    figure, axis = plt.subplots(figsize=(11, 7))
-    for position, outcome in zip(positions, PRIMARY_OUTCOMES):
+    figure, axis = plt.subplots(figsize=(6.6, 7))
+    for position, outcome in zip(positions, OUTCOME_DISPLAY_ORDER):
         panel = data[data["outcome"].eq(outcome)]
         overall = panel[panel["variant_group"].eq("overall")]
         if len(overall) != 1:
@@ -402,8 +374,8 @@ def plot_metric_agreement(
         axis.errorbar(
             overall_row["spearman_forum_ndcg"],
             position,
-            xerr=[[overall_row["spearman_forum_ndcg"] - overall_row["ci_lower"]],
-                  [overall_row["ci_upper"] - overall_row["spearman_forum_ndcg"]]],
+            xerr=[[max(0.0, overall_row["spearman_forum_ndcg"] - overall_row["ci_lower"])],
+                  [max(0.0, overall_row["ci_upper"] - overall_row["spearman_forum_ndcg"])]],
             fmt="D",
             color="0.15",
             ecolor="0.35",
@@ -412,7 +384,7 @@ def plot_metric_agreement(
             label="Overall substantive" if position == positions[0] else "_nolegend_",
         )
         for reply_mode, color in reply_colors.items():
-            for pinned, marker in pin_markers.items():
+            for pinned in (False, True):
                 subset = panel[
                     panel["reply_mode"].eq(reply_mode)
                     & panel["pinned"].eq(pinned)
@@ -425,12 +397,14 @@ def plot_metric_agreement(
                 axis.errorbar(
                     row["spearman_forum_ndcg"],
                     position + offsets[(reply_mode, pinned)],
-                    xerr=[[row["spearman_forum_ndcg"] - row["ci_lower"]],
-                          [row["ci_upper"] - row["spearman_forum_ndcg"]]],
-                    fmt=marker,
+                    xerr=[[max(0.0, row["spearman_forum_ndcg"] - row["ci_lower"])],
+                          [max(0.0, row["ci_upper"] - row["spearman_forum_ndcg"])]],
+                    fmt=reply_markers[reply_mode],
                     linestyle="none",
                     color=color,
                     ecolor=color,
+                    markerfacecolor=color if pinned else "none",
+                    markeredgecolor=color,
                     markersize=4.5,
                     capsize=1.5,
                     elinewidth=0.8,
@@ -438,17 +412,24 @@ def plot_metric_agreement(
     from matplotlib.lines import Line2D
 
     legend_handles = [
-        Line2D([0], [0], marker="o", linestyle="none", color=color, label=reply)
+        Line2D(
+            [0], [0], marker=reply_markers[reply], linestyle="none",
+            color=color, markerfacecolor="none", markeredgecolor=color,
+            label=reply,
+        )
         for reply, color in reply_colors.items()
     ] + [
-        Line2D([0], [0], marker=marker, linestyle="none", color="0.25", label=label)
-        for marker, label in (("o", "Unpinned"), ("^", "Pinned"))
+        Line2D(
+            [0], [0], marker="o", linestyle="none", color="0.25",
+            markerfacecolor=fill, markeredgecolor="0.25", label=label,
+        )
+        for fill, label in (("none", "Unpinned"), ("0.25", "Pinned"))
     ] + [
         Line2D([0], [0], marker="D", linestyle="none", color="0.15", label="Overall substantive")
     ]
     depth_label = "top 10" if depth == "top10" else "full discussion (N-1)"
     axis.set_yticks(positions)
-    axis.set_yticklabels([OUTCOME_LABELS[value] for value in PRIMARY_OUTCOMES])
+    axis.set_yticklabels([OUTCOME_LABELS[value] for value in OUTCOME_DISPLAY_ORDER])
     axis.invert_yaxis()
     axis.set_xlim(-1.02, 1.02)
     axis.set_xlabel("Spearman correlation across substantive policy conditions")
@@ -460,7 +441,6 @@ def plot_metric_agreement(
         bbox_to_anchor=(0.5, 0.96),
         ncol=len(legend_handles),
         frameon=False,
-        title="Colour = reply mode; marker = pin state",
     )
     figure.tight_layout(rect=(0, 0, 1, 0.90))
     figure_name = (
@@ -469,6 +449,8 @@ def plot_metric_agreement(
         else f"figure_forum_ndcg_agreement_{depth}"
     )
     paths = _save_figure(figure, output_root / figure_name)
+    if show:
+        plt.show()
     plt.close(figure)
     return paths
 
@@ -481,8 +463,8 @@ def plot_mechanism_heatmap(mechanism: pd.DataFrame, output_root: Path) -> list[P
     ]
     matrix = data.pivot(
         index="score", columns="outcome", values="mean_within_story_spearman"
-    ).reindex(columns=PRIMARY_OUTCOMES)
-    figure, axis = plt.subplots(figsize=(10, 5.5))
+    ).reindex(columns=OUTCOME_DISPLAY_ORDER)
+    figure, axis = plt.subplots(figsize=(6.6, 5.5))
     image = axis.imshow(
         matrix.to_numpy(),
         aspect="auto",
@@ -517,7 +499,7 @@ def write_primary_effects_table(effects: pd.DataFrame, output_root: Path) -> Pat
         axis=1,
     )
     table = data.pivot(index="contrast", columns="outcome", values="cell")
-    table = table.reindex(index=list(ORDERING_LABELS), columns=PRIMARY_OUTCOMES)
+    table = table.reindex(index=list(ORDERING_LABELS), columns=OUTCOME_DISPLAY_ORDER)
     table.index = [ORDERING_LABELS.get(value, value) for value in table.index]
     table.columns = [OUTCOME_LABELS[value] for value in table.columns]
     output_root.mkdir(parents=True, exist_ok=True)
@@ -582,4 +564,3 @@ def run_ranking_algorithm_effects(
     }
     _atomic_json(manifest, output_root / "reporting_manifest.json")
     return manifest
-

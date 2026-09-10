@@ -115,9 +115,62 @@ class ForumScoresTests(unittest.TestCase):
             story, PolicySpec("relative_votes", "hidden", True)
         )
         self.assertEqual(loose[:2].tolist(), [1, 6])
-        self.assertEqual(trees.tolist(), [6, 7, 8, 9, 10, 0, 1, 2, 3, 4, 5])
+        self.assertEqual(trees.tolist(), [6, 0, 1, 2, 4, 5])
         self.assertEqual(hidden.tolist(), [6, 0])
-        self.assertEqual(sorted(trees.tolist()), list(range(len(story))))
+        self.assertEqual(set(loose), {0, 1, 2, 4, 5, 6})
+        for mode in ("loose", "trees"):
+            restored = make_policy_order(story, PolicySpec("relative_votes", mode, False))
+            self.assertEqual(set(restored), set(range(len(story))))
+
+    def test_nested_sticky_descendants_stay_hidden(self):
+        story = self._story()
+        story.loc[9, 'is_sticky'] = True  # A sticky descendant cannot escape its pinned ancestor.
+        for mode in ('loose', 'trees', 'hidden'):
+            for ordering in ('random', 'reverse_chronological', 'relative_votes'):
+                order = make_policy_order(story, PolicySpec(ordering, mode, True))
+                self.assertFalse({3, 7, 8, 9, 10}.intersection(order))
+                self.assertIn(6, order)
+
+    def test_pinned_root_hides_replies_across_missing_parent(self):
+        story = self._story()
+        story.loc[9, 'parent_comment_id'] = 'deleted-parent'
+        for mode in ('loose', 'trees', 'hidden'):
+            order = make_policy_order(story, PolicySpec('relative_votes', mode, True))
+            self.assertNotIn(9, order)
+        restored = make_policy_order(story, PolicySpec('relative_votes', 'trees', False))
+        self.assertIn(9, restored)
+        scores = score_story_policies(story, outcomes=['test_outcome'], tie_draws=1, random_draws=1)
+        self.assertTrue(scores.ndcg.notna().all())
+
+    def test_collapsed_policy_scores_and_ndcg_visible_prefix(self):
+        from commentgap_analysis.forum_scores import _complete_order_for_ndcg, _induced_visible_forest
+        story = self._story()
+        scores = score_story_policies(story, outcomes=['test_outcome'], tie_draws=1, random_draws=1)
+        for mode in ('loose', 'trees', 'hidden'):
+            spec = PolicySpec('relative_votes', mode, True)
+            order = make_policy_order(story, spec)
+            complete = _complete_order_for_ndcg(story, order, _induced_visible_forest(story))
+            np.testing.assert_array_equal(complete[:len(order)], order)
+            self.assertEqual(set(complete), set(range(len(story))))
+            row = scores.loc[scores.policy_id.eq(spec.policy_id) & scores.depth.eq('full')].iloc[0]
+            self.assertAlmostEqual(row.forum, forum_score(story.test_outcome, order, depth=10, hidden=True))
+            self.assertAlmostEqual(row.ndcg, ndcg_score(story.test_outcome, complete, depth=10))
+
+    def test_topic_exposure_excludes_pinned_descendants(self):
+        from commentgap_analysis.topic_policy import weighted_policy_topic_distributions
+        story = self._story()
+        memberships = story[['story_id', 'comment_id']].copy()
+        memberships['valid_topic'] = True
+        memberships['topic_000'] = 0.0
+        memberships.loc[[3, 7, 8, 9, 10], 'topic_000'] = 1.0
+        memberships['topic_001'] = 1.0 - memberships.topic_000
+        result = weighted_policy_topic_distributions(memberships, story, tie_draws=1, random_draws=1)
+        for mode in ('loose', 'trees'):
+            pinned = result.loc[result.policy_id.eq(f'relative_votes__{mode}__pinned')].iloc[0]
+            unpinned = result.loc[result.policy_id.eq(f'relative_votes__{mode}__unpinned')].iloc[0]
+            self.assertEqual(pinned.n_documents, 6)
+            self.assertEqual(pinned.topic_000, 0.0)
+            self.assertGreater(unpinned.topic_000, 0.0)
 
     def test_forum_anchors_and_affine_invariance(self):
         values = np.asarray([0.0, 1.0, 2.0, 3.0])

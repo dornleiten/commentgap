@@ -288,7 +288,6 @@ class AquaAnalysisTests(unittest.TestCase):
             )
         )
         self.assertEqual(sum(map(len, manifest["adapter_files"].values())), 80)
-        self.assertEqual(manifest["parity"]["status"], "pending")
 
     def test_adapter_artifacts_fail_closed_on_checksum_or_head_change(self):
         feature = AQUA_FEATURES[0]

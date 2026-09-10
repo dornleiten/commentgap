@@ -136,7 +136,7 @@ def build_neural_reporting_outputs(
         plotting["model"] + " / " + plotting["scope"] + " / " + plotting["selector"]
     )
     sns.set_theme(style="whitegrid", context="paper")
-    fig, axis = plt.subplots(figsize=(12, 7))
+    fig, axis = plt.subplots(figsize=(6.6, 7))
     sns.pointplot(
         data=plotting,
         x="metric",

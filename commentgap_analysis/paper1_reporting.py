@@ -14,6 +14,16 @@ import pandas as pd
 
 from commentgap_analysis.comment_gap import weighted_median
 from commentgap_analysis.factorial_winners import assert_factorial_idle
+from commentgap_analysis.presentation_labels import model_prefix, model_selector_label
+from commentgap_analysis.paper1_plotting import (
+    _largest_regression_coefficient_rows,
+    plot_regression_selector_coefficients,
+    plot_regression_selector_differences,
+    plot_winner_permutation_importance,
+    plot_winner_permutation_importance_gaps,
+    plot_winner_shap_importance,
+    plot_winner_shap_importance_gaps,
+)
 
 
 METRICS = ("ndcg_at_k", "top_k_overlap", "jaccard", "mean_selected_rank")
@@ -46,10 +56,9 @@ def _require_hash(path: Path, expected: str | None, label: str) -> None:
         )
 
 
-def _winner_label(family: str) -> str:
-    return {"xgboost": "XGBoost winner", "neural": "Neural winner"}.get(
-        family, family
-    )
+def _winner_label(family: str, feature_set: str | None = None) -> str:
+    """Return the short presentation label for a model pair."""
+    return model_prefix(family, feature_set)
 
 
 def model_implied_comment_gap(scores: pd.DataFrame) -> pd.DataFrame:
@@ -478,7 +487,12 @@ def _load_or_compute_winner_permutation(
     model_root = Path(factorial_root) / variant_id / scope
     supplied = model_root / "test_selector_permutation_importance.parquet"
     if supplied.exists():
-        return pd.read_parquet(supplied)
+        supplied_frame = pd.read_parquet(supplied)
+        supplied_frame["feature_set"] = winner.get("feature_set")
+        supplied_frame["model_label"] = _winner_label(
+            family, winner.get("feature_set")
+        )
+        return supplied_frame
     cache = Path(cache_root) / variant_id / scope
     cache.mkdir(parents=True, exist_ok=True)
     output_path = cache / "test_selector_permutation_importance.parquet"
@@ -518,7 +532,8 @@ def _load_or_compute_winner_permutation(
             "scope": scope,
             "model_family": family,
             "model_id": variant_id,
-            "model_label": _winner_label(family),
+            "model_label": _winner_label(family, winner.get("feature_set")),
+            "feature_set": winner.get("feature_set"),
         },
     )
     output.to_parquet(output_path, index=False)
@@ -676,7 +691,8 @@ def _read_model_artifacts(
         common = {
             "model_id": variant_id,
             "model_family": family,
-            "model_label": _winner_label(family),
+            "model_label": _winner_label(family, winner.get("feature_set")),
+            "feature_set": winner.get("feature_set"),
             "scope": scope,
             "analysis_partition": "held_out_test",
         }
@@ -714,7 +730,7 @@ def _read_model_artifacts(
                 root,
                 family=family,
                 model_id=variant_id,
-                model_label=_winner_label(family),
+                model_label=_winner_label(family, winner.get("feature_set")),
                 scope=scope,
             )
         )
@@ -753,7 +769,8 @@ def _read_regression_artifacts(
         common = {
             "model_id": "stage7_stacked_selection",
             "model_family": "conditional_logit",
-            "model_label": "Stacked conditional logit",
+            "model_label": _winner_label("conditional_logit"),
+            "feature_set": None,
             "scope": scope,
             "analysis_partition": "held_out_test",
         }
@@ -775,7 +792,7 @@ def _read_regression_artifacts(
                 root,
                 family="conditional_logit",
                 model_id="stage7_stacked_selection",
-                model_label="Stacked conditional logit",
+                model_label=_winner_label("conditional_logit"),
                 scope=scope,
             )
         )
@@ -858,6 +875,7 @@ def _save_figures(
     associations: pd.DataFrame,
     model_gap_summary: pd.DataFrame,
     permutation_gaps: pd.DataFrame,
+    shap_summary: pd.DataFrame,
     output_root: Path,
 ) -> list[Path]:
     import matplotlib
@@ -878,7 +896,7 @@ def _save_figures(
 
     primary = ranking[ranking["scope"] == "all"] if "all" in set(ranking["scope"]) else ranking
     families = [family for family in ("xgboost", "neural") if family in set(primary["family"])]
-    fig, axes = plt.subplots(1, len(families), figsize=(7 * len(families), 6), squeeze=False)
+    fig, axes = plt.subplots(1, len(families), figsize=(14, 6), squeeze=False)
     for axis, family in zip(axes.flat, families, strict=True):
         shown = primary[primary["family"] == family].nsmallest(10, "development_cv_rank").sort_values("mean_macro_ndcg_at_k")
         axis.barh(shown["variant_id"], shown["mean_macro_ndcg_at_k"], xerr=shown["sd_macro_ndcg_at_k"], color="#356a8a" if family == "xgboost" else "#4b8b6f")
@@ -888,9 +906,9 @@ def _save_figures(
     ndcg = performance[(performance["scope"] == "all") & (performance["metric"] == "ndcg_at_k")].copy()
     if ndcg.empty:
         ndcg = performance[performance["metric"] == "ndcg_at_k"].copy()
-    ndcg["display"] = ndcg["model_label"] + " — " + ndcg["selector"]
+    ndcg["display"] = ndcg["model_label"]
     ndcg = ndcg.sort_values(["model_family", "selector"])
-    fig, axis = plt.subplots(figsize=(9, max(4.5, 0.45 * len(ndcg))))
+    fig, axis = plt.subplots(figsize=(6.6, max(4.5, 0.45 * len(ndcg))))
     y = np.arange(len(ndcg))
     axis.errorbar(ndcg["estimate"], y, xerr=[ndcg["estimate"] - ndcg["conf_low"], ndcg["conf_high"] - ndcg["estimate"]], fmt="o", color="#356a8a", capsize=3)
     axis.set_yticks(y, ndcg["display"])
@@ -900,7 +918,7 @@ def _save_figures(
     tie = ties[(ties["scope"] == "all") & (ties["selector"] == "audience")].copy()
     if tie.empty:
         tie = ties[ties["selector"] == "audience"].copy()
-    fig, axis = plt.subplots(figsize=(8, 4.8))
+    fig, axis = plt.subplots(figsize=(6.6, 4.8))
     for label, group in tie.groupby("model_label", sort=False):
         axis.plot(group["audience_tie_draw"], group["ndcg_at_k"], marker="o", label=label)
     axis.set(xlabel="Audience tie draw", ylabel="Held-out nDCG@k", title="Audience-label tie sensitivity")
@@ -909,18 +927,15 @@ def _save_figures(
     save(fig, "all_winner_audience_tie_sensitivity")
 
     if not associations.empty:
-        shown = associations[associations["scope"] == "all"].copy()
-        if shown.empty:
-            shown = associations.copy()
-        shown["absolute"] = shown["curator_minus_audience_log_odds"].abs()
-        shown = shown.nlargest(20, "absolute").sort_values("curator_minus_audience_log_odds")
-        fig, axis = plt.subplots(figsize=(9, max(5, 0.32 * len(shown))))
-        y = np.arange(len(shown))
-        axis.errorbar(shown["curator_minus_audience_log_odds"], y, xerr=[shown["curator_minus_audience_log_odds"] - shown["difference_conf_low"], shown["difference_conf_high"] - shown["curator_minus_audience_log_odds"]], fmt="o", color="#4b8b6f", capsize=2)
-        axis.axvline(0, color="black", linewidth=0.8)
-        axis.set_yticks(y, shown["feature"])
-        axis.set(xlabel="Curator minus audience log-odds association", title="Largest stacked-model selector differences")
-        save(fig, "all_regression_selector_differences")
+        association_scope = associations[associations["scope"] == "all"].copy()
+        if association_scope.empty:
+            association_scope = associations.copy()
+        for plotter, stem in (
+            (plot_regression_selector_differences, "all_regression_selector_differences"),
+            (plot_regression_selector_coefficients, "all_regression_selector_coefficients"),
+        ):
+            if plotter(association_scope, output_root, show=False) is not None:
+                outputs.extend(figures_root / f"{stem}.{suffix}" for suffix in ("png", "pdf"))
 
     shown_gap = model_gap_summary[
         model_gap_summary["scope"] == "all"
@@ -928,7 +943,7 @@ def _save_figures(
     if shown_gap.empty:
         shown_gap = model_gap_summary.copy()
     shown_gap = shown_gap.sort_values("gap_mean", ascending=False)
-    fig, axis = plt.subplots(figsize=(8, max(4.2, 0.55 * len(shown_gap))))
+    fig, axis = plt.subplots(figsize=(6.6, max(4.2, 0.55 * len(shown_gap))))
     y = np.arange(len(shown_gap))
     axis.errorbar(
         shown_gap["gap_mean"],
@@ -984,46 +999,24 @@ def _save_figures(
     if primary_permutation.empty:
         primary_permutation = permutation_gaps.copy()
     if not primary_permutation.empty:
-        primary_permutation["absolute_gap"] = primary_permutation[
-            "permutation_importance_gap"
-        ].abs()
-        shown_permutation = (
-            primary_permutation.sort_values(
-                ["model_family", "absolute_gap"], ascending=[True, False]
-            )
-            .groupby("model_family", group_keys=False)
-            .head(15)
-            .sort_values("permutation_importance_gap")
-        )
-        shown_permutation["display"] = (
-            shown_permutation["model_label"]
-            + " — "
-            + shown_permutation.get("feature_label", shown_permutation["feature"])
-        )
-        fig, axis = plt.subplots(
-            figsize=(10, max(5, 0.3 * len(shown_permutation)))
-        )
-        y = np.arange(len(shown_permutation))
-        axis.errorbar(
-            shown_permutation["permutation_importance_gap"],
-            y,
-            xerr=[
-                shown_permutation["permutation_importance_gap"]
-                - shown_permutation["conf_low"],
-                shown_permutation["conf_high"]
-                - shown_permutation["permutation_importance_gap"],
-            ],
-            fmt="o",
-            color="#4b8b6f",
-            capsize=2,
-        )
-        axis.axvline(0, color="black", linewidth=0.8)
-        axis.set_yticks(y, shown_permutation["display"])
-        axis.set(
-            xlabel="Permutation-importance gap (curator − audience nDCG loss)",
-            title="Largest selector-specific permutation-importance gaps",
-        )
-        save(fig, "all_winner_permutation_importance_gaps")
+        for plotter, stem in (
+            (plot_winner_permutation_importance_gaps, "all_winner_permutation_importance_gaps"),
+            (plot_winner_permutation_importance, "all_winner_permutation_importance"),
+        ):
+            if plotter(primary_permutation, output_root, show=False) is not None:
+                outputs.extend(figures_root / f"{stem}.{suffix}" for suffix in ("png", "pdf"))
+
+    primary_shap = shap_summary[shap_summary["scope"] == "all"].copy()
+    if primary_shap.empty:
+        primary_shap = shap_summary.copy()
+    shap_columns = {"mean_shap_audience", "mean_shap_curator", "mean_shap_gap"}
+    if not primary_shap.empty and shap_columns.issubset(primary_shap.columns):
+        for plotter, stem in (
+            (plot_winner_shap_importance, "all_winner_shap_importance"),
+            (plot_winner_shap_importance_gaps, "all_winner_shap_importance_gaps"),
+        ):
+            if plotter(primary_shap, output_root, show=False) is not None:
+                outputs.extend(figures_root / f"{stem}.{suffix}" for suffix in ("png", "pdf"))
     return outputs
 
 
@@ -1037,6 +1030,11 @@ def run_paper1_reporting(
     scopes: Iterable[str] = ("all",),
     bootstrap_draws: int = 1000,
     permutation_repeats: int = 1,
+    shap_test_rows: int = 50_000,
+    shap_background_rows: int = 2_048,
+    shap_nsamples: int = 100,
+    shap_force_recompute: bool = False,
+    shap_chunk_rows: int = 500,
     seed: int = 20260813,
     make_figures: bool = True,
     require_factorial_idle: bool = True,
@@ -1062,6 +1060,17 @@ def run_paper1_reporting(
     performance = pd.concat([reg_performance, ml_performance], ignore_index=True)
     article_metrics = pd.concat([reg_articles, ml_articles], ignore_index=True)
     ties = pd.concat([reg_ties, ml_ties], ignore_index=True)
+    # Keep the model-pair label for relationship summaries, but expose the
+    # requested audience/editor label wherever a table or figure has a
+    # selector-specific row.
+    for frame in (performance, ties):
+        frame["model_pair_label"] = frame["model_label"]
+        frame["model_label"] = frame.apply(
+            lambda row: model_selector_label(
+                row["model_family"], row.get("feature_set"), row["selector"]
+            ),
+            axis=1,
+        )
     paired = _paired_model_differences(
         article_metrics, bootstrap_draws=bootstrap_draws, seed=seed
     )
@@ -1098,6 +1107,27 @@ def run_paper1_reporting(
         lambda value: feature_labels.get(str(value), str(value))
     )
 
+    from commentgap_analysis.explanations import run_shap_explanations
+
+    shap_result = run_shap_explanations(
+        model_data_root=model_data_root,
+        factorial_root=factorial_root,
+        winners=winners,
+        output_root=output_root,
+        scopes=scopes,
+        test_rows=shap_test_rows,
+        background_rows=shap_background_rows,
+        nsamples=shap_nsamples,
+        seed=seed + 300_000,
+        force_recompute=shap_force_recompute,
+        chunk_rows=shap_chunk_rows,
+    )
+    shap_summary = shap_result["summary"]
+    if feature_labels:
+        shap_summary["feature_label"] = shap_summary["feature"].map(
+            lambda value: feature_labels.get(str(value), str(value))
+        )
+
     tables_root = output_root / "tables"
     tables_root.mkdir(parents=True, exist_ok=True)
     table_frames = {
@@ -1111,6 +1141,7 @@ def run_paper1_reporting(
         "regression_feature_gaps.csv": feature_gaps,
         "held_out_model_implied_gap_summary.csv": model_gap_summary,
         "held_out_permutation_importance_gaps.csv": permutation_gaps,
+        "held_out_shap_importance.csv": shap_summary,
         "regression_model_diagnostics.csv": diagnostics,
     }
     table_paths = {}
@@ -1123,6 +1154,8 @@ def run_paper1_reporting(
         / "held_out_model_implied_article_gaps.parquet",
         "held_out_selector_permutation_importance.parquet": tables_root
         / "held_out_selector_permutation_importance.parquet",
+        "held_out_shap_values.parquet": tables_root / "held_out_shap_values.parquet",
+        "held_out_shap_importance.parquet": tables_root / "held_out_shap_importance.parquet",
     }
     model_gaps.to_parquet(
         parquet_paths["held_out_model_implied_article_gaps.parquet"], index=False
@@ -1130,6 +1163,8 @@ def run_paper1_reporting(
     permutation_article.to_parquet(
         parquet_paths["held_out_selector_permutation_importance.parquet"], index=False
     )
+    shap_result["values"].to_parquet(parquet_paths["held_out_shap_values.parquet"], index=False)
+    shap_summary.to_parquet(parquet_paths["held_out_shap_importance.parquet"], index=False)
     latex_paths = {
         "development_cv_winners.tex": tables_root / "development_cv_winners.tex",
         "held_out_ndcg.tex": tables_root / "held_out_ndcg.tex",
@@ -1152,6 +1187,7 @@ def run_paper1_reporting(
             associations,
             model_gap_summary,
             permutation_gaps,
+            shap_summary,
             output_root,
         )
         if make_figures
@@ -1164,7 +1200,7 @@ def run_paper1_reporting(
     for path in figure_paths:
         outputs[f"figure:{path.name}"] = {"path": str(path), "sha256": _sha256(path)}
     manifest = {
-        "version": 2,
+        "version": 3,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "scopes": list(scopes),
         "primary_scope": "all",
@@ -1179,6 +1215,7 @@ def run_paper1_reporting(
         "comment_weighted_median": "first ordered article gap where cumulative n_candidates reaches at least 50%; confidence interval resamples articles and recomputes the weighted median",
         "permutation_importance_gap": "paired within-article nDCG@k loss, curator minus audience; audience metrics average ten tie draws",
         "permutation_features": "named tabular model features; frozen BGE vectors are held fixed rather than interpreted dimension by dimension",
+        "shap": shap_result["manifest"],
         "outputs": outputs,
     }
     manifest_path = output_root / "report_manifest.json"

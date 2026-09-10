@@ -17,6 +17,9 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
+from commentgap_analysis.category_labels import translate_news_category
+from commentgap_analysis.plotting import save_display_figure
+
 from commentgap_analysis.paper1_descriptives import (
     AUDIENCE_DRAW_COLUMNS,
     _normalise_scopes,
@@ -252,54 +255,81 @@ def _save_gap_figures(
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
     scope = "all" if "all" in set(scores["scope"]) else scores["scope"].iloc[0]
     figures_root = output_root / "figures"
     figures_root.mkdir(parents=True, exist_ok=True)
-    outputs: list[Path] = []
 
-    def save(fig, stem: str) -> None:
-        for suffix in ("png", "pdf"):
-            path = figures_root / f"{stem}.{suffix}"
-            fig.savefig(path, dpi=180, bbox_inches="tight")
-            outputs.append(path)
-        plt.close(fig)
+    plot_comment_gap_distribution(scores, scope, output_root, show=False)
+    outputs = [
+        figures_root / f"{scope}_comment_gap_distribution.{suffix}"
+        for suffix in ("png", "pdf")
+    ]
+    plot_comment_gap_by_topic(topic_summary, scope, output_root, show=False)
+    outputs.extend(
+        figures_root / f"{scope}_comment_gap_by_topic.{suffix}"
+        for suffix in ("png", "pdf")
+    )
+    return outputs
+
+
+def plot_comment_gap_distribution(
+    scores: pd.DataFrame,
+    scope: str,
+    output_root: Path | None = None,
+    *,
+    show: bool = True,
+):
+    """Render the article-level comment-gap distribution from scored data."""
+    import matplotlib.pyplot as plt
 
     primary = scores[scores["scope"] == scope]
-    fig, axis = plt.subplots(figsize=(7.5, 4.5))
+    fig, axis = plt.subplots(figsize=(6.6, 4.5))
     axis.hist(primary["gap_score"], bins=np.linspace(0, 1, 31), color="#356a8a")
-    axis.axvline(0.5, color="#d4744c", linestyle="--", label="random-set expectation")
     axis.axvline(
-        primary["gap_score"].mean(),
-        color="#263f75",
-        linestyle="-",
-        label="equal-article mean",
+        primary["gap_score"].mean(), color="#263f75", label="equal-article mean"
     )
     axis.axvline(
         np.average(primary["gap_score"], weights=primary["n_candidates"]),
-        color="#4b8b6f",
-        linestyle=":",
-        linewidth=2,
+        color="#4b8b6f", linestyle=":", linewidth=2,
         label="candidate-comment-weighted mean",
     )
-    axis.set(xlabel="Normalized curator–audience comment gap", ylabel="Discussions", title=f"Comment-gap distribution ({scope})")
+    axis.set(
+        xlabel="Normalized curator–audience comment gap",
+        ylabel="Discussions",
+        title=f"Comment-gap distribution ({scope})",
+    )
     axis.legend(frameon=False)
-    save(fig, f"{scope}_comment_gap_distribution")
+    return save_display_figure(fig, output_root, f"{scope}_comment_gap_distribution", show=show)
+
+
+def plot_comment_gap_by_topic(
+    topic_summary: pd.DataFrame,
+    scope: str,
+    output_root: Path | None = None,
+    *,
+    show: bool = True,
+):
+    """Render topic-level comment gaps directly from the stage-6 summary."""
+    import matplotlib.pyplot as plt
 
     shown = topic_summary[
-        (topic_summary["scope"] == scope) & (topic_summary["analysis_partition"] == "all_partitions")
+        (topic_summary["scope"] == scope)
+        & (topic_summary["analysis_partition"] == "all_partitions")
     ].nlargest(15, "n_articles").sort_values("gap_mean")
-    fig, axis = plt.subplots(figsize=(9, max(4.5, 0.32 * len(shown))))
+    label_column = "primary_topic_label" if "primary_topic_label" in shown else "primary_topic"
+    fig, axis = plt.subplots(figsize=(6.6, max(4.5, 0.32 * len(shown))))
     y = np.arange(len(shown))
     axis.barh(y - 0.18, shown["gap_mean"], height=0.34, color="#356a8a", label="equal article weight")
     axis.barh(y + 0.18, shown["gap_comment_weighted_mean"], height=0.34, color="#4b8b6f", label="candidate-comment weight")
-    axis.set_yticks(y, shown["primary_topic"])
+    axis.set_yticks(y, shown[label_column].map(translate_news_category))
     axis.axvline(0.5, color="#d4744c", linestyle="--")
-    axis.set(xlim=(0, 1), xlabel="Mean normalized comment gap", title=f"Comment gap by primary section_1 topic ({scope})")
+    axis.set(
+        xlim=(0, 1), xlabel="Mean normalized comment gap",
+        title=f"Comment gap by primary section_1 topic ({scope})",
+    )
     axis.legend(frameon=False)
-    save(fig, f"{scope}_comment_gap_by_topic")
-    return outputs
+    return save_display_figure(fig, output_root, f"{scope}_comment_gap_by_topic", show=show)
 
 
 def run_comment_gap_analysis(
@@ -353,6 +383,7 @@ def run_comment_gap_analysis(
         ["scope", "analysis_partition", "primary_topic"],
     )
     topic = pd.concat([topic, topic_all], ignore_index=True)
+    topic["primary_topic_label"] = topic["primary_topic"].map(translate_news_category)
 
     table_paths = {
         "article_gap_scores": output_root / "article_gap_scores.parquet",

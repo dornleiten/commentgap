@@ -69,6 +69,9 @@ class AquaPromotionTests(unittest.TestCase):
 
             artifact_manifest = root / "artifacts.json"
             shutil.copyfile("aqua_runtime/artifacts.json", artifact_manifest)
+            artifacts = json.loads(artifact_manifest.read_text())
+            artifacts["parity"] = {"status": "pending"}
+            artifact_manifest.write_text(json.dumps(artifacts))
             runtime_python = root / "python"
             runtime_python.write_text("fixture")
             output_root = root / "aqua"

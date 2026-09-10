@@ -64,7 +64,7 @@ class Paper1PipelineFixtureTests(unittest.TestCase):
         article_root = data_root / "articles" / "year=2025" / "month=01"
         article_root.mkdir(parents=True)
         for story_id, section_1, section_2 in (
-            ("s1", "Politics", "National"),
+            ("s1", "/inland", "National"),
             ("s2", "", "Audit-only child"),
         ):
             pd.DataFrame(
@@ -172,6 +172,11 @@ class Paper1PipelineFixtureTests(unittest.TestCase):
             )
             self.assertTrue(
                 (descriptives_root / "figures" / "all_topic_composition.png").exists()
+            )
+            topic_summary = pd.read_csv(descriptives_root / "topic_summary.csv")
+            self.assertEqual(
+                set(topic_summary["primary_topic_label"]),
+                {"domestic", "Unknown/other"},
             )
 
             gap_root = root / "comment_gap"

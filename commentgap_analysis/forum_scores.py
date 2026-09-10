@@ -23,7 +23,7 @@ import pandas as pd
 from .factorial_winners import assert_factorial_idle, rank_development_cv_variants
 
 
-FORUM_ANALYSIS_VERSION = 3
+FORUM_ANALYSIS_VERSION = 4
 DEFAULT_SEED = 20260813
 PRIMARY_MIN_COMMENTS = 11
 SENSITIVITY_MIN_COMMENTS = 100
@@ -772,7 +772,11 @@ def make_policy_order(
     draw: int = 1,
     visible_forest: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """Construct one policy order while preserving the declared UI semantics."""
+    """Return visible positions; pinning hides every descendant of a sticky comment.
+
+    Suppression applies even with loose replies. Unpinned policies restore
+    those descendants, and hidden-reply policies still expose only roots.
+    """
     _require_columns(
         story,
         (
@@ -803,7 +807,31 @@ def make_policy_order(
     display = pd.to_numeric(frame["display_order"], errors="raise").to_numpy()
     sticky = frame["is_sticky"].astype(bool).to_numpy()
 
-    candidates = all_indices if spec.reply_mode == "loose" else roots
+    visible = np.ones(len(frame), dtype=bool)
+    if spec.pinned:
+        # Follow actual parent links, including nested replies and sticky replies.
+        # The induced-forest validation above rejects cycles and duplicate IDs.
+        locations = {str(value): index for index, value in enumerate(frame["comment_id"])}
+        children: dict[int, list[int]] = {}
+        for index, parent_id in enumerate(frame["parent_comment_id"]):
+            parent = locations.get(str(parent_id)) if pd.notna(parent_id) else None
+            if parent is not None:
+                children.setdefault(parent, []).append(index)
+        pending = [child for index in np.flatnonzero(sticky) for child in children.get(index, [])]
+        # Retained root IDs also identify replies across a deleted intermediate
+        # ancestor, where the induced visible forest has promoted the reply.
+        for index, root_id in enumerate(frame["root_comment_id"]):
+            root = locations.get(str(root_id)) if pd.notna(root_id) else None
+            if root is not None and root != index and sticky[root]:
+                pending.append(index)
+        while pending:
+            index = pending.pop()
+            if not visible[index]:
+                continue
+            visible[index] = False
+            pending.extend(children.get(index, []))
+
+    candidates = all_indices[visible] if spec.reply_mode == "loose" else roots[visible[roots]]
     ranked = _primary_order(
         frame, candidates, spec.ordering, seed=seed, draw=draw
     )
@@ -814,7 +842,10 @@ def make_policy_order(
         ]
         pinned_set = set(map(int, pinned_candidates))
         ranked = np.concatenate(
-            [pinned_candidates, np.asarray([i for i in ranked if int(i) not in pinned_set])]
+            [
+                pinned_candidates,
+                np.asarray([i for i in ranked if int(i) not in pinned_set], dtype=int),
+            ]
         )
 
     if spec.reply_mode in {"loose", "hidden"}:
@@ -824,12 +855,12 @@ def make_policy_order(
     preorder = pd.to_numeric(frame["preorder_position"], errors="raise").to_numpy()
     output: list[int] = []
     for root_index in ranked:
-        members = all_indices[effective_root == root_index]
+        members = all_indices[(effective_root == root_index) & visible]
         members = members[np.argsort(preorder[members], kind="stable")]
         output.extend(map(int, members))
     ordered = np.asarray(output, dtype=int)
-    if len(ordered) != len(frame) or len(set(map(int, ordered))) != len(frame):
-        raise ValueError("Tree ordering did not preserve every comment exactly once")
+    if len(ordered) != int(visible.sum()) or len(set(map(int, ordered))) != len(ordered):
+        raise ValueError("Tree ordering did not preserve every visible comment exactly once")
     return ordered
 
 
@@ -838,26 +869,30 @@ def _complete_order_for_ndcg(
     order: Sequence[int],
     visible_forest: tuple[np.ndarray, np.ndarray],
 ) -> np.ndarray:
-    """Complete a hidden root order using frozen preorder for nDCG.
+    """Append suppressed comments for the complete-permutation nDCG diagnostic.
 
-    Hidden-reply policies expose roots first and leave replies unobserved. For
-    metric agreement only, those replies are appended in their frozen preorder
-    within each ranked root, producing a deterministic complete permutation.
-    FORUM still uses its separate hidden-reply interpolation estimand.
+    Preserve the entire visible prefix, including partially collapsed trees.
+    Hidden comments are a synthetic tail in ranked-root/frozen-preorder order;
+    they never receive visible ranks in FORUM or topic exposure calculations.
     """
     indices = np.asarray(order, dtype=int)
     if len(indices) == len(frame):
         return indices
-    roots, effective_root = visible_forest
-    all_indices = np.arange(len(frame), dtype=int)
+    _, effective_root = visible_forest
     preorder = pd.to_numeric(frame["preorder_position"], errors="raise").to_numpy()
-    output: list[int] = []
-    for root_index in indices:
-        members = all_indices[effective_root == root_index]
-        members = members[np.argsort(preorder[members], kind="stable")]
-        output.extend(map(int, members))
+    seen = set(map(int, indices))
+    ranked_roots = list(dict.fromkeys(map(int, effective_root[indices])))
+    # A pinned original root can also suppress an entire induced orphan tree.
+    ranked_roots.extend(root for root in dict.fromkeys(map(int, effective_root)) if root not in ranked_roots)
+    output = list(map(int, indices))
+    for root_index in ranked_roots:
+        members = np.flatnonzero(effective_root == root_index)
+        for index in members[np.argsort(preorder[members], kind="stable")]:
+            if int(index) not in seen:
+                output.append(int(index))
+                seen.add(int(index))
     completed = np.asarray(output, dtype=int)
-    if len(completed) != len(frame) or len(set(map(int, completed))) != len(frame):
+    if len(completed) != len(frame) or len(seen) != len(frame):
         raise ValueError("Could not complete hidden order for nDCG")
     return completed
 
@@ -1138,7 +1173,7 @@ def score_story_policies(
                     forum_reference_matrix,
                     order,
                     depths=depths,
-                    hidden=spec.reply_mode == "hidden",
+                    hidden=len(order) < n_rows,
                 )
                 ndcg_order = _complete_order_for_ndcg(
                     frame, order, visible_forest
@@ -2420,7 +2455,11 @@ def run_forum_analysis_pipeline(
     score_outcomes_current = False
     if score_manifest_path.exists():
         score_manifest = json.loads(score_manifest_path.read_text())
-        score_outcomes_current = score_manifest.get("outcomes") == list(outcomes)
+        score_outcomes_current = (
+            score_manifest.get("outcomes") == list(outcomes)
+            and score_manifest.get("version") == FORUM_ANALYSIS_VERSION
+            and score_manifest.get("implementation_sha256") == _sha256(Path(__file__))
+        )
     score_needs_run = (
         not all(path.exists() for path in targets["score"])
         or not grouped_agreement_current

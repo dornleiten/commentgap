@@ -10,6 +10,8 @@ paper workflows:
 - [FORUM and ranking-algorithm effects](papers/forum_ranking_analysis/README.md): the FORUM and ranking-algorithm effects
   pipeline, with a frozen Paper 1 ranker handoff, 90 policy bundles, static
   novelty, paired inference, and an explicit random-ordering reference.
+- [Paper 2 topic agenda analysis](papers/topic_modeling/README.md): the common
+  article/comment topic model and ranking-induced topic-distribution analysis.
 - [`legacy/`](legacy): the earlier paper code and pre-2025 gap-analysis
   references. The earlier combined paper remains available as an
   [arXiv preprint](https://arxiv.org/abs/2408.07052), and PyFORUM is maintained

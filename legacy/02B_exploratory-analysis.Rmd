@@ -280,9 +280,28 @@ nrow(comment_data_general_features)/length(unique(comment_data_general_features$
 
 article_genres <- article_info %>% group_by(genre1) %>% count() %>% arrange(desc(n))
 
-article_genres$genre1_eng <- c("international", "sports", "digital", "culture", "media industry", 
-                               "human interest", "domestic", "economy", "lifestyle", "opinion",
-                               "science", "video", "podcast", "legal", "women's policy")
+# Keep the legacy translations explicit rather than positional.  Unmapped
+# categories stay in their stored form until a translation is agreed.
+legacy_genre_labels <- c(
+  "/international" = "international",
+  "/sport" = "sports",
+  "/web" = "digital",
+  "/kultur" = "culture",
+  "/etat" = "media industry",
+  "/panorama" = "human interest",
+  "/inland" = "domestic",
+  "/wirtschaft" = "economy",
+  "/lifestyle" = "lifestyle",
+  "/diskurs" = "opinion",
+  "/wissenschaft" = "science",
+  "/video" = "video",
+  "/podcast" = "podcast",
+  "/recht" = "legal",
+  "/diestandard" = "women's policy"
+)
+article_genres$genre1_eng <- unname(legacy_genre_labels[as.character(article_genres$genre1)])
+missing_genre_labels <- is.na(article_genres$genre1_eng)
+article_genres$genre1_eng[missing_genre_labels] <- as.character(article_genres$genre1[missing_genre_labels])
 
 # comments by genre
 df_help3 <- comment_data_general %>% group_by(article) %>% count()

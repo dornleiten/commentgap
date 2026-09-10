@@ -13,7 +13,7 @@ scrap*
 /.venv-aqua/
 /Capstone Code
 /submissions
-/notes/*
+/notes/
 /presentations
 model_output/regressions/votes_neg_results.rds
 model_output/regressions/votes_pos_results.rds
@@ -36,6 +36,14 @@ commentgap_scraper.egg-info
 
 !/papers/
 /papers/*
+
+# Keep the linked workflow documentation while ignoring paper outputs/drafts.
+!/papers/paper1/
+/papers/paper1/*
+!/papers/paper1/README.md
+!/papers/topic_modeling/
+/papers/topic_modeling/*
+!/papers/topic_modeling/README.md
 !/papers/forum_ranking_analysis/
 /papers/forum_ranking_analysis/*
 !/papers/forum_ranking_analysis/README.md

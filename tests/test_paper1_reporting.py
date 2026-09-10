@@ -2,10 +2,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
 from commentgap_analysis.factorial_winners import freeze_development_cv_winners
+from commentgap_analysis.paper1_plotting import _largest_regression_coefficient_rows
 from commentgap_analysis.paper1_reporting import (
     _paired_model_differences,
     model_implied_comment_gap,
@@ -230,20 +232,44 @@ class Paper1ReportingTests(unittest.TestCase):
             root = Path(directory)
             factorial_root, winner_root, regression_root = self._fixture(root)
             output_root = root / "reporting"
-            manifest = run_paper1_reporting(
-                factorial_root=factorial_root,
-                winner_root=winner_root,
-                regression_root=regression_root,
-                output_root=output_root,
-                scopes=("all",),
-                bootstrap_draws=100,
-                make_figures=True,
-                require_factorial_idle=False,
-            )
+            shap_result = {
+                "values": pd.DataFrame(
+                    {
+                        "story_id": ["s1"],
+                        "comment_id": ["c1"],
+                        "scope": ["all"],
+                        "model_family": ["xgboost"],
+                        "model_id": ["xgb-winner"],
+                        "feature_set": ["metadata"],
+                        "selector": ["audience"],
+                        "shap_feature_a": [0.0],
+                    }
+                ),
+                "summary": pd.DataFrame(columns=["scope", "feature"]),
+                "manifest": {"workflow_version": 2, "cached": False},
+            }
+            with patch(
+                "commentgap_analysis.explanations.run_shap_explanations",
+                return_value=shap_result,
+            ):
+                manifest = run_paper1_reporting(
+                    factorial_root=factorial_root,
+                    winner_root=winner_root,
+                    regression_root=regression_root,
+                    output_root=output_root,
+                    scopes=("all",),
+                    bootstrap_draws=100,
+                    make_figures=True,
+                    require_factorial_idle=False,
+                )
             winners = pd.read_csv(output_root / "tables" / "development_cv_winners.csv")
             self.assertEqual(set(winners["variant_id"]), {"xgb-winner", "nn-winner"})
             performance = pd.read_csv(output_root / "tables" / "held_out_model_performance.csv")
             self.assertEqual(set(performance["model_family"]), {"conditional_logit", "xgboost", "neural"})
+            self.assertEqual(
+                set(performance["model_label"]),
+                {"Reg: Audience", "Reg: Editor", "XGB: Audience", "XGB: Editor", "NN: Audience", "NN: Editor"},
+            )
             paired = pd.read_csv(output_root / "tables" / "held_out_paired_model_differences.csv")
             self.assertEqual(len(paired), 24)
             self.assertTrue((output_root / "figures" / "all_winner_held_out_ndcg.png").exists())
@@ -251,6 +277,22 @@ class Paper1ReportingTests(unittest.TestCase):
             self.assertTrue((output_root / "tables" / "regression_feature_gaps.csv").exists())
             self.assertTrue((output_root / "tables" / "held_out_permutation_importance_gaps.csv").exists())
             self.assertIn("table:held_out_ndcg.tex", manifest["outputs"])
+
+    def test_largest_coefficients_use_all_association_rows(self):
+        associations = pd.DataFrame(
+            {
+                "feature": ["large_shared", "large_difference", "small"],
+                "audience_log_odds": [5.0, 0.1, 0.2],
+                "curator_log_odds": [5.1, 4.0, 0.3],
+                "audience_conf_low": [4.9, 0.0, 0.1],
+                "audience_conf_high": [5.1, 0.2, 0.3],
+                "curator_conf_low": [5.0, 3.9, 0.2],
+                "curator_conf_high": [5.2, 4.1, 0.4],
+                "curator_minus_audience_log_odds": [0.1, 3.9, 0.1],
+            }
+        )
+        selected = _largest_regression_coefficient_rows(associations, limit=1)
+        self.assertEqual(selected["feature"].tolist(), ["large_shared"])
 
     def test_model_implied_gap_uses_midranks_and_fractional_cutoff_ties(self):
         scores = pd.DataFrame(

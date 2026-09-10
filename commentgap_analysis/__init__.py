@@ -12,6 +12,47 @@ from .features import (
 )
 from .embeddings import EmbeddingBuildConfig, build_embedding_store
 from .similarities import SimilarityBuildConfig, build_similarity_store
+from .topic_modeling import (
+    TopicModelConfig,
+    aggregate_topic_distributions,
+    article_topic_coverage,
+    prepare_article_passages,
+    prepare_documents,
+    load_precomputed_embeddings,
+    fit_topic_model,
+    load_topic_model,
+    save_topic_model,
+)
+from .topic_metrics import (
+    build_topic_agenda_baseline_analysis,
+    build_topic_agenda_rarefaction_analysis,
+    cosine_similarity,
+    compute_topic_metrics,
+    effective_topic_count,
+    hellinger_distance,
+    hellinger_projection,
+    jensen_shannon_distance,
+    shannon_entropy,
+    summarize_hellinger_movement,
+)
+from .topic_policy import (
+    build_policy_reference_target_metrics,
+    build_rankings_from_scores,
+    hellinger_oracle_order,
+    ranked_topic_trajectory,
+    weighted_policy_topic_distributions,
+)
+from .topic_artifacts import (
+    code_revision,
+    compute_draw_metrics_in_batches,
+    file_sha256,
+    input_signature,
+    package_versions,
+    read_cached_parquet,
+    required,
+    signature_equal,
+    write_signature,
+)
 
 __all__ = [
     "ALL_MODEL_FEATURES",
@@ -26,4 +67,34 @@ __all__ = [
     "build_embedding_store",
     "SimilarityBuildConfig",
     "build_similarity_store",
+    "TopicModelConfig",
+    "aggregate_topic_distributions",
+    "article_topic_coverage",
+    "prepare_article_passages",
+    "build_topic_agenda_baseline_analysis",
+    "build_topic_agenda_rarefaction_analysis",
+    "compute_topic_metrics",
+    "shannon_entropy",
+    "effective_topic_count",
+    "hellinger_distance",
+    "jensen_shannon_distance",
+    "cosine_similarity",
+    "hellinger_projection",
+    "hellinger_oracle_order",
+    "fit_topic_model",
+    "load_precomputed_embeddings",
+    "ranked_topic_trajectory",
+    "summarize_hellinger_movement",
+    "build_rankings_from_scores",
+    "weighted_policy_topic_distributions",
+    "build_policy_reference_target_metrics",
+    "code_revision",
+    "compute_draw_metrics_in_batches",
+    "file_sha256",
+    "input_signature",
+    "package_versions",
+    "read_cached_parquet",
+    "required",
+    "signature_equal",
+    "write_signature",
 ]
