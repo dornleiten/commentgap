@@ -555,7 +555,7 @@ bootstrap_above_chance <- function(model_metrics, chance_metrics, draws, seed) {
   }))
 }
 
-model_diagnostics <- function(fit) {
+model_diagnostics <- function(fit, strata_count) {
   fit_summary <- summary(fit)
   concordance <- fit_summary$concordance
   covariance <- stats::vcov(fit)
@@ -565,6 +565,10 @@ model_diagnostics <- function(fit) {
     statistic = c(
       "iterations", "null_log_likelihood", "fitted_log_likelihood",
       "likelihood_ratio_chisq", "likelihood_ratio_df", "likelihood_ratio_p_value",
+      "model_wald_chisq", "model_wald_df", "model_wald_p_value",
+      "robust_score_chisq", "robust_score_df", "robust_score_p_value",
+      "mcfadden_pseudo_r2", "max_rescaled_pseudo_r2", "aic", "bic",
+      "n_observations", "n_events", "n_parameters", "n_strata",
       "concordance", "concordance_se", "maximum_absolute_coefficient",
       "maximum_clustered_standard_error", "covariance_condition_number",
       "fit_warning_count", "all_coefficients_finite", "all_standard_errors_finite"
@@ -576,6 +580,20 @@ model_diagnostics <- function(fit) {
       fit_summary$logtest[["test"]],
       fit_summary$logtest[["df"]],
       fit_summary$logtest[["pvalue"]],
+      fit_summary$waldtest[["test"]],
+      fit_summary$waldtest[["df"]],
+      fit_summary$waldtest[["pvalue"]],
+      fit_summary$robscore[["test"]],
+      fit_summary$robscore[["df"]],
+      fit_summary$robscore[["pvalue"]],
+      fit_summary$rsq[["rsq"]],
+      fit_summary$rsq[["maxrsq"]],
+      stats::AIC(fit),
+      stats::BIC(fit),
+      fit$n,
+      fit$nevent,
+      length(stats::coef(fit)),
+      strata_count,
       concordance[["C"]],
       concordance[["se(C)"]],
       max(abs(stats::coef(fit))),
@@ -821,7 +839,7 @@ run_scope <- function(scope) {
   primary <- fit_stacked(
     development, features, model_formula, 1L, scope, fit_fingerprint(1L)
   )
-  diagnostics <- model_diagnostics(primary)
+  diagnostics <- model_diagnostics(primary, 2L * uniqueN(development$story_id))
   covariance <- stats::vcov(primary)
   coefficients <- data.table(
     term = names(stats::coef(primary)),
@@ -873,8 +891,9 @@ run_scope <- function(scope) {
     statistic = c(
       "candidate_scope", "development_articles", "paper2_test_articles",
       "development_candidate_comments", "paper2_test_candidate_comments",
-      "development_curator_selections", "development_stacked_rows", "tie_draws_fitted",
-      "article_selector_strata", "watermark"
+      "development_curator_selections", "development_audience_selections",
+      "development_events_total", "development_stacked_rows", "tie_draws_fitted",
+      "article_selector_strata", "n_model_parameters", "watermark"
     ),
     value = c(
       scope,
@@ -883,9 +902,13 @@ run_scope <- function(scope) {
       nrow(development),
       nrow(test),
       sum(development$curator_selected),
+      sum(development$audience_selected_draw_01),
+      sum(development$curator_selected) +
+        sum(development$audience_selected_draw_01),
       2L * nrow(development),
       tie_draws,
       2L * uniqueN(development$story_id),
+      length(stats::coef(primary)),
       provenance$watermark
     )
   )

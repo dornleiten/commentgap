@@ -34,6 +34,17 @@ sensitivity and runs only when explicitly requested.
 | 8. XGBoost/neural variants | [`08_xgboost_neural_model_variants.ipynb`](../../08_xgboost_neural_model_variants.ipynb), protected execution record [`06C5_ranker_factorial.ipynb`](../../06C5_ranker_factorial.ipynb), [`scripts/run_ranker_factorial.py`](../../scripts/run_ranker_factorial.py), and [`scripts/freeze_factorial_winners.py`](../../scripts/freeze_factorial_winners.py) | The 68-model factorial is the only Paper 1 ML workflow. Training is in progress. The fixture-tested finalizer refuses to run while the launcher is active, requires exact five-fold coverage for every planned variant/scope, and selects XGBoost/neural winners from development CV only. |
 | 9. Tables and plots | [`09_model_tables_plots.ipynb`](../../09_model_tables_plots.ipynb) and [`scripts/run_paper1_reporting.py`](../../scripts/run_paper1_reporting.py) | Implemented and fixture-tested. Validates frozen CV/plan/ranking hashes before opening held-out artifacts; combines stage 7 with the XGBoost and neural winners; writes CSV/LaTeX tables, paired article-bootstrap comparisons, tie sensitivity, and PNG/PDF figures. Full-data execution waits for stage 8 completion. |
 
+### Comment-gap interpretation
+
+The normalized rank gap is the primary measure. The legacy-style Jaccard
+overlap, and its complement reported as the Jaccard gap, are secondary
+descriptive comparisons. Jaccard discards the rank within each selected set,
+depends on the number of curator picks and audience tie policy, and may reflect
+exposure feedback because pinned comments can receive more votes. It should
+therefore not be presented as a definitive or causal measure of preference
+disagreement, and comparisons across studies require matching the sample and
+top-k construction.
+
 After the active factorial run finishes, build the all-comment descriptive and
 gap artifacts, then render the regression and robustness stages with:
 

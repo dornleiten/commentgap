@@ -290,6 +290,83 @@ def _plot_metric(
         plt.close(figure)
 
 
+def _plot_combined_metrics(
+    plot_data: pd.DataFrame,
+    search_root: Path,
+    metrics: Sequence[tuple[str, str, str, str, str, str]],
+    cluster_sizes: dict[int, int],
+    final_setup: tuple[str, int, int, int] | None,
+    *,
+    show: bool,
+) -> None:
+    """Render the article- and comment-coverage diagnostics side by side."""
+    import matplotlib.pyplot as plt
+
+    figure, (article_axis, comment_axis, legend_axis) = plt.subplots(
+        1,
+        3,
+        figsize=(14, 6.6),
+        gridspec_kw={"width_ratios": [1.0, 1.0, 0.24]},
+        sharey=True,
+    )
+    for axis, metric in zip((article_axis, comment_axis), metrics):
+        x_column, x_label, y_column, y_label, title, _ = metric
+        axis.set_box_aspect(1)
+        for _, row in plot_data.iterrows():
+            color = NEIGHBOR_COLORS[int(row.n_neighbors)]
+            marker = SAMPLE_MARKERS[int(row.min_samples)]
+            size = cluster_sizes[int(row.min_cluster_size)]
+            axis.scatter(
+                row[y_column], row[x_column], color=color, marker=marker, s=size,
+                facecolors=color, edgecolors=color, linewidths=2, zorder=3,
+            )
+        for _, row in plot_data[plot_data.pareto_frontier].iterrows():
+            axis.scatter(
+                row[y_column], row[x_column],
+                s=cluster_sizes[int(row.min_cluster_size)] + 55,
+                marker=SAMPLE_MARKERS[int(row.min_samples)],
+                facecolors="none", edgecolors="black", linewidths=1, zorder=4,
+            )
+        if final_setup is not None:
+            fit_corpus, min_cluster_size, n_neighbors, min_samples = final_setup
+            selected = plot_data[
+                (plot_data.fit_corpus == fit_corpus)
+                & (plot_data.min_cluster_size == min_cluster_size)
+                & (plot_data.n_neighbors == n_neighbors)
+                & (plot_data.min_samples == min_samples)
+            ]
+            if len(selected) == 1:
+                row = selected.iloc[0]
+                axis.scatter(
+                    row[y_column], row[x_column],
+                    s=cluster_sizes[int(row.min_cluster_size)] + 80,
+                    marker=SAMPLE_MARKERS[int(row.min_samples)],
+                    facecolors="none", edgecolors="#D62728",
+                    linewidths=1, zorder=5,
+                )
+        axis.set_xlim(0, 100)
+        axis.set_ylim(0, 1)
+        axis.set(xlabel=y_label, ylabel=x_label, title=title)
+        axis.grid(alpha=0.2)
+    comment_axis.set_ylabel("")
+    comment_axis.tick_params(axis="y", labelleft=False, labelright=False)
+    figure.tight_layout(rect=(0, 0, 0.97, 0.95), w_pad=1.6)
+    _add_legends(figure, legend_axis, cluster_sizes)
+    figure.savefig(
+        search_root / "raw_pooled_common_ami_vs_article_comment_coverage_pareto.png",
+        dpi=200,
+        bbox_inches="tight",
+    )
+    figure.savefig(
+        search_root / "raw_pooled_common_ami_vs_article_comment_coverage_pareto.pdf",
+        bbox_inches="tight",
+    )
+    if show:
+        plt.show()
+    else:
+        plt.close(figure)
+
+
 def plot_topic_search_metrics(
     search_report: pd.DataFrame,
     search_seeds: pd.DataFrame,
@@ -298,9 +375,10 @@ def plot_topic_search_metrics(
     *,
     final_configuration: object | None = None,
     final_fit_corpus: str | None = None,
+    combine: bool = False,
     show: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build the search summary and write the two AMI/coverage figures."""
+    """Build the search summary and write the AMI/coverage figures."""
     plot_data = build_topic_search_plot_data(search_report, search_seeds)
     frontier = build_topic_search_frontier(plot_data, search_root, stability_seeds)
     frontier_columns = [
@@ -337,11 +415,16 @@ def plot_topic_search_metrics(
             "raw_pooled_common_ami_vs_comment_coverage_pareto",
         ),
     ]
-    for x_column, x_label, y_column, y_label, title, file_stem in metrics:
-        _plot_metric(
-            plot_data, search_root, x_column, x_label, y_column, y_label,
-            file_stem, cluster_sizes, final_setup, title=title, show=show,
+    if combine:
+        _plot_combined_metrics(
+            plot_data, search_root, metrics, cluster_sizes, final_setup, show=show,
         )
+    else:
+        for x_column, x_label, y_column, y_label, title, file_stem in metrics:
+            _plot_metric(
+                plot_data, search_root, x_column, x_label, y_column, y_label,
+                file_stem, cluster_sizes, final_setup, title=title, show=show,
+            )
     return plot_data, frontier
 
 from .presentation_labels import (
@@ -467,7 +550,8 @@ def _contrast_colors() -> dict[str, str]:
 
 def _contrast_style(family: str) -> tuple[str, str, str]:
     """Return the notebook-11 marker, point colour, and interval colour."""
-
+    if family not in {"ordering_vs_random", "reply_vs_loose", "pinned_vs_unpinned"}:
+        raise ValueError(f"Unknown contrast family: {family}")
     return "o", "#2457A7", "#7A9AC8"
 
 def _add_contrast_divider(
@@ -771,6 +855,7 @@ def plot_topic_policy_metric_effects(
     plt.show()
     plt.close(figure)
     return effect_plot
+
 
 def plot_topic_policy_progress_effects(
     metrics: pd.DataFrame,

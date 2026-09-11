@@ -10,6 +10,7 @@ from commentgap_analysis.factorial_winners import freeze_development_cv_winners
 from commentgap_analysis.paper1_plotting import _largest_regression_coefficient_rows
 from commentgap_analysis.paper1_reporting import (
     _paired_model_differences,
+    balanced_macro_f1_at_k,
     model_implied_comment_gap,
     run_paper1_reporting,
     summarize_model_implied_gaps,
@@ -21,6 +22,21 @@ METRICS = ("ndcg_at_k", "top_k_overlap", "jaccard", "mean_selected_rank")
 
 
 class Paper1ReportingTests(unittest.TestCase):
+    def test_balanced_macro_f1_at_k_ranks_a_balanced_article(self):
+        scores = pd.DataFrame(
+            {
+                "story_id": ["s"] * 4,
+                "comment_id": ["a", "b", "c", "d"],
+                "n_picks": [2] * 4,
+                "selector": ["curator"] * 4,
+                "selected": [1, 1, 0, 0],
+                "score": [0.9, 0.8, 0.7, 0.1],
+            }
+        )
+        result = balanced_macro_f1_at_k(scores, draws=10, seed=7)
+        self.assertAlmostEqual(result.loc[0, "balanced_macro_f1_at_k"], 1.0)
+        self.assertEqual(result.loc[0, "balance_draws"], 10)
+
     def test_paired_differences_support_multiple_winners_per_family(self):
         models = (("conditional_logit", "reg"), ("xgboost", "xgb-a"), ("xgboost", "xgb-b"), ("neural", "nn-a"), ("neural", "nn-b"))
         frame = pd.DataFrame([

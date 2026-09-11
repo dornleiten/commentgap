@@ -470,7 +470,7 @@ def _calculate_neural(
     return pd.concat(output, ignore_index=True)
 
 
-def _story_aggregate(values: pd.DataFrame) -> pd.DataFrame:
+def _story_feature_values(values: pd.DataFrame) -> pd.DataFrame:
     shap_columns = [
         column for column in values.columns
         if column.startswith("shap_") and column != "shap_expected_value"
@@ -494,7 +494,11 @@ def _story_aggregate(values: pd.DataFrame) -> pd.DataFrame:
                 n_comments=("comment_id", "nunique"),
             )
         )
-    story = pd.concat(story_frames, ignore_index=True)
+    return pd.concat(story_frames, ignore_index=True)
+
+
+def _story_aggregate(values: pd.DataFrame) -> pd.DataFrame:
+    story = _story_feature_values(values)
     summary_keys = ["scope", "model_family", "model_id", "feature_set", "feature"]
     summary = story.groupby(summary_keys, as_index=False, observed=True).agg(
         mean_shap=("mean_shap", "mean"),
@@ -532,6 +536,133 @@ def _story_aggregate(values: pd.DataFrame) -> pd.DataFrame:
         summary[f"{column}_gap"] = summary[curator] - summary[audience]
     summary["aggregation"] = "mean over comments within story, then equal mean over stories"
     return summary.sort_values(summary_keys).reset_index(drop=True)
+
+
+def summarize_shap_values(values: pd.DataFrame) -> pd.DataFrame:
+    """Return the story-aggregated SHAP summary used by the reporting plots."""
+    return _story_aggregate(values)
+
+
+def summarize_shap_story_variability(
+    values: pd.DataFrame,
+    *,
+    lower_quantile: float = 0.25,
+    upper_quantile: float = 0.75,
+) -> pd.DataFrame:
+    """Return per-story SHAP spread for the reporting plot error bars.
+
+    The returned bounds are the central interval across story-level mean SHAP
+    values.  For the selector gap, the difference is formed within each story
+    before taking quantiles, preserving the paired editor--audience structure.
+    """
+    if not 0 <= lower_quantile < upper_quantile <= 1:
+        raise ValueError("quantiles must satisfy 0 <= lower < upper <= 1")
+    story = _story_feature_values(values)
+    variant_keys = ["scope", "model_family", "model_id", "feature_set"]
+    records: list[dict[str, Any]] = []
+    for variant, group in story.groupby(variant_keys, observed=True, sort=False):
+        audience = group[group["selector"].eq("audience")].pivot(
+            index="story_id", columns="feature", values="mean_shap"
+        )
+        curator = group[group["selector"].eq("curator")].pivot(
+            index="story_id", columns="feature", values="mean_shap"
+        )
+        features = audience.columns.intersection(curator.columns).sort_values()
+        stories = audience.index.intersection(curator.index)
+        for feature in features:
+            paired = pd.concat(
+                [audience.loc[stories, feature], curator.loc[stories, feature]],
+                axis=1,
+                keys=["audience", "curator"],
+            ).dropna()
+            if paired.empty:
+                continue
+            gap = paired["curator"] - paired["audience"]
+            records.append({
+                **dict(zip(variant_keys, variant)),
+                "feature": feature,
+                "mean_shap_audience_story_q25": paired["audience"].quantile(lower_quantile),
+                "mean_shap_audience_story_q75": paired["audience"].quantile(upper_quantile),
+                "mean_shap_curator_story_q25": paired["curator"].quantile(lower_quantile),
+                "mean_shap_curator_story_q75": paired["curator"].quantile(upper_quantile),
+                "mean_shap_gap_story_q25": gap.quantile(lower_quantile),
+                "mean_shap_gap_story_q75": gap.quantile(upper_quantile),
+                "story_count": len(paired),
+                "story_lower_quantile": lower_quantile,
+                "story_upper_quantile": upper_quantile,
+            })
+    return pd.DataFrame(records)
+
+
+def bootstrap_shap_summary(
+    values: pd.DataFrame,
+    *,
+    n_bootstrap: int = 2_000,
+    confidence_level: float = 0.95,
+    seed: int = 20260911,
+) -> pd.DataFrame:
+    """Estimate paired story-level confidence intervals for mean SHAP gaps.
+
+    Comments are first averaged within story, matching the main SHAP summary.
+    Stories are then resampled with replacement within each model variant;
+    audience and curator values use the same draws so the gap interval is paired.
+    """
+    if n_bootstrap < 1:
+        raise ValueError("n_bootstrap must be positive")
+    if not 0 < confidence_level < 1:
+        raise ValueError("confidence_level must be between 0 and 1")
+    story = _story_feature_values(values)
+    variant_keys = ["scope", "model_family", "model_id", "feature_set"]
+    alpha = (1 - confidence_level) / 2
+    records: list[dict[str, Any]] = []
+    rng = np.random.default_rng(seed)
+    for variant, group in story.groupby(variant_keys, observed=True, sort=False):
+        audience = group[group["selector"].eq("audience")].pivot(
+            index="story_id", columns="feature", values="mean_shap"
+        )
+        curator = group[group["selector"].eq("curator")].pivot(
+            index="story_id", columns="feature", values="mean_shap"
+        )
+        features = audience.columns.intersection(curator.columns).sort_values()
+        stories = audience.index.intersection(curator.index)
+        if len(features) == 0 or len(stories) == 0:
+            continue
+        audience_matrix = audience.loc[stories, features].to_numpy(dtype=float)
+        curator_matrix = curator.loc[stories, features].to_numpy(dtype=float)
+        finite_features = np.isfinite(audience_matrix).all(axis=0) & np.isfinite(curator_matrix).all(axis=0)
+        features = features[finite_features]
+        audience_matrix = audience_matrix[:, finite_features]
+        curator_matrix = curator_matrix[:, finite_features]
+        if len(features) == 0:
+            continue
+        n_stories = len(stories)
+        probabilities = np.full(n_stories, 1 / n_stories)
+        draws = rng.multinomial(n_stories, probabilities, size=n_bootstrap)
+        audience_boot = draws @ audience_matrix / n_stories
+        curator_boot = draws @ curator_matrix / n_stories
+        gap_boot = curator_boot - audience_boot
+        audience_low, audience_high = np.quantile(
+            audience_boot, [alpha, 1 - alpha], axis=0
+        )
+        curator_low, curator_high = np.quantile(
+            curator_boot, [alpha, 1 - alpha], axis=0
+        )
+        gap_low, gap_high = np.quantile(gap_boot, [alpha, 1 - alpha], axis=0)
+        for feature_index, feature in enumerate(features):
+            records.append({
+                **dict(zip(variant_keys, variant)),
+                "feature": feature,
+                "mean_shap_audience_conf_low": audience_low[feature_index],
+                "mean_shap_audience_conf_high": audience_high[feature_index],
+                "mean_shap_curator_conf_low": curator_low[feature_index],
+                "mean_shap_curator_conf_high": curator_high[feature_index],
+                "mean_shap_gap_conf_low": gap_low[feature_index],
+                "mean_shap_gap_conf_high": gap_high[feature_index],
+                "bootstrap_stories": n_stories,
+                "bootstrap_draws": n_bootstrap,
+                "confidence_level": confidence_level,
+            })
+    return pd.DataFrame(records)
 
 
 def run_shap_explanations(

@@ -33,6 +33,19 @@ ORDERING_LABELS = {
     if ordering != "random"
 }
 
+DEPTH_COLORS = {
+    "top10": "#0072B2",
+    "full": "#D55E00",
+}
+DEPTH_ECOLORS = {
+    "top10": "#6BAED6",
+    "full": "#F4A582",
+}
+DEPTH_LABELS = {
+    "top10": "Top 10",
+    "full": "Full discussion",
+}
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -132,8 +145,8 @@ def plot_ordering_effects(
                 ]
             ),
             fmt="o",
-            color="#2457A7",
-            ecolor="#7A9AC8",
+            color=DEPTH_COLORS[depth],
+            ecolor=DEPTH_ECOLORS[depth],
             markersize=3.5,
             capsize=2,
         )
@@ -147,8 +160,8 @@ def plot_ordering_effects(
                 ]
             ),
             fmt="o",
-            color="#2457A7",
-            ecolor="#7A9AC8",
+            color=DEPTH_COLORS[depth],
+            ecolor=DEPTH_ECOLORS[depth],
             markersize=3.5,
             capsize=2,
         )
@@ -184,6 +197,139 @@ def plot_ordering_effects(
     plt.close(figure)
     return paths
 
+
+def plot_combined_ordering_effects(
+    effects: pd.DataFrame, output_root: Path, *, show: bool = False
+) -> list[Path]:
+    """Plot top-10 and full-discussion ordering effects in one figure."""
+    plt, _ = _plot_modules()
+    data = effects[
+        effects["sample"].eq("primary")
+        & effects["outcome"].isin(PRIMARY_OUTCOMES)
+    ].copy()
+    ordering_data = data[data["contrast_family"].eq("ordering_vs_random")]
+    interface_definitions = [
+        ("reply_vs_loose", "trees", "Reply trees"),
+        ("reply_vs_loose", "hidden", "Replies hidden"),
+        ("pinned_vs_unpinned", "pinned", "Pinned Picks"),
+    ]
+    interface_rows = []
+    for family, contrast, label in interface_definitions:
+        subset = data[
+            data["contrast_family"].eq(family) & data["contrast"].eq(contrast)
+        ].copy()
+        subset["plot_label"] = label
+        interface_rows.append(subset)
+    interface_data = pd.concat(interface_rows, ignore_index=True)
+
+    figure, axes = plt.subplots(2, 5, figsize=(14, 9), sharex=True, sharey=True)
+    ordering = list(ORDERING_LABELS)
+    ordering_positions = np.arange(len(ordering), dtype=float)
+    interface_positions = np.arange(
+        len(ordering) + 1,
+        len(ordering) + 1 + len(interface_definitions),
+        dtype=float,
+    )
+    positions = np.concatenate([ordering_positions, interface_positions])
+    depth_offsets = {"top10": -0.13, "full": 0.13}
+    for panel_index, (axis, outcome) in enumerate(
+        zip(axes.flat, OUTCOME_DISPLAY_ORDER)
+    ):
+        for depth in ("top10", "full"):
+            ordering_panel = (
+                ordering_data[
+                    ordering_data["depth"].eq(depth)
+                    & ordering_data["outcome"].eq(outcome)
+                ]
+                .set_index("contrast")
+                .reindex(ordering)
+            )
+            interface_panel = (
+                interface_data[
+                    interface_data["depth"].eq(depth)
+                    & interface_data["outcome"].eq(outcome)
+                ]
+                .set_index("plot_label")
+                .reindex([label for _, _, label in interface_definitions])
+            )
+            offset = depth_offsets[depth]
+            axis.errorbar(
+                ordering_panel["estimate"],
+                ordering_positions + offset,
+                xerr=np.vstack(
+                    [
+                        ordering_panel["estimate"] - ordering_panel["ci_lower"],
+                        ordering_panel["ci_upper"] - ordering_panel["estimate"],
+                    ]
+                ),
+                fmt="o",
+                color=DEPTH_COLORS[depth],
+                ecolor=DEPTH_ECOLORS[depth],
+                markersize=3.5,
+                capsize=2,
+            )
+            axis.errorbar(
+                interface_panel["estimate"],
+                interface_positions + offset,
+                xerr=np.vstack(
+                    [
+                        interface_panel["estimate"] - interface_panel["ci_lower"],
+                        interface_panel["ci_upper"] - interface_panel["estimate"],
+                    ]
+                ),
+                fmt="o",
+                color=DEPTH_COLORS[depth],
+                ecolor=DEPTH_ECOLORS[depth],
+                markersize=3.5,
+                capsize=2,
+            )
+        axis.axvline(0, color="0.55", linewidth=0.8)
+        axis.axhline(
+            (ordering_positions[-1] + interface_positions[0]) / 2,
+            color="0.82", linewidth=0.8,
+        )
+        axis.axhline(
+            (interface_positions[1] + interface_positions[2]) / 2,
+            color="0.82", linewidth=0.8,
+        )
+        axis.set_yticks(positions)
+        if panel_index % axes.shape[1] == 0:
+            axis.set_yticklabels(
+                [ORDERING_LABELS.get(value, value) for value in ordering]
+                + [label for _, _, label in interface_definitions],
+                fontsize=7,
+            )
+        else:
+            axis.tick_params(labelleft=False)
+        axis.set_title(SUBPLOT_OUTCOME_LABELS[outcome])
+        axis.set_xlabel("FORUM contrast")
+        axis.grid(axis="x", color="0.9", linewidth=0.6)
+    axes[0, 0].invert_yaxis()
+    figure.suptitle(
+        "Ordering and average interface effects at top 10 and full discussion "
+        "(paired 95% bootstrap intervals)"
+    )
+    from matplotlib.lines import Line2D
+
+    figure.legend(
+        handles=[
+            Line2D(
+                [0], [0], marker="o", linestyle="none", color=DEPTH_COLORS[depth],
+                markerfacecolor=DEPTH_COLORS[depth], label=DEPTH_LABELS[depth],
+            )
+            for depth in ("top10", "full")
+        ],
+        loc="upper center", bbox_to_anchor=(0.5, 0.965), ncol=2,
+        frameon=False,
+    )
+    figure.tight_layout(rect=(0, 0, 1, 0.955), pad=0.6, h_pad=0.8, w_pad=0.8)
+    paths = _save_figure(figure, output_root / "figure_ordering_effects")
+    if show:
+        plt.show()
+    plt.close(figure)
+    return paths
+
+
 def plot_ordering_policy_variants(
     summary: pd.DataFrame,
     output_root: Path,
@@ -197,7 +343,7 @@ def plot_ordering_policy_variants(
     data = data[data["deployable"]].copy()
     orderings = list(ORDERING_LABELS)
     positions = np.arange(len(orderings), dtype=float)
-    plot_color = "#2457A7"
+    plot_color = DEPTH_COLORS[depth]
     reply_markers = REPLY_DISPLAY_MARKERS
     # Small deterministic offsets keep the six variants legible at each ordering.
     offsets = {
@@ -247,6 +393,12 @@ def plot_ordering_policy_variants(
     from matplotlib.lines import Line2D
 
     legend_handles = [
+        Line2D(
+            [0], [0], marker="o", linestyle="none", color=plot_color,
+            markerfacecolor=plot_color, markeredgecolor=plot_color,
+            label=DEPTH_LABELS[depth],
+        )
+    ] + [
         Line2D(
             [0], [0], marker=reply_markers[reply], linestyle="none",
             color=plot_color, markerfacecolor=plot_color,

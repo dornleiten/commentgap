@@ -19,6 +19,7 @@ from commentgap_analysis.paper1_plotting import (
     _largest_regression_coefficient_rows,
     plot_regression_selector_coefficients,
     plot_regression_selector_differences,
+    plot_regression_vs_shap_gaps,
     plot_winner_permutation_importance,
     plot_winner_permutation_importance_gaps,
     plot_winner_shap_importance,
@@ -372,8 +373,9 @@ def _winner_permutation_components(
     winner: dict[str, Any],
     factorial_root: Path,
     model_data_root: Path,
+    split_role: str = "paper2_test",
 ) -> tuple[pd.DataFrame, list[str], Callable[[pd.DataFrame], pd.DataFrame]]:
-    """Load a frozen winner and return its held-out frame and score function."""
+    """Load a frozen winner and return a split frame and score function."""
     from commentgap_analysis.factorial_rankers import (
         _embedding_cache,
         _scored_from_predictions,
@@ -397,7 +399,7 @@ def _winner_permutation_components(
     manifest = json.loads((root / "model_manifest.json").read_text())
     frame, features, _, _, _ = _load_scope_inputs(model_data_root, scope)
     frame = apply_fold_feature_columns(
-        frame[frame["split_role"] == "paper2_test"].copy(), features, None
+        frame[frame["split_role"] == split_role].copy(), features, None
     )
     stories = sorted(frame["story_id"].astype(str).unique())
 
@@ -470,6 +472,92 @@ def _winner_permutation_components(
         )
 
     return frame, features, predict_neural
+
+
+def _score_development_regression(
+    *,
+    model_data_root: Path,
+    regression_root: Path,
+    scope: str,
+) -> pd.DataFrame:
+    """Score the frozen Stage-7 regression fit on its development articles."""
+    root = Path(regression_root) / scope
+    coefficients = pd.read_csv(root / "model_coefficients.csv")
+    scaling = pd.read_csv(root / "feature_scaling.csv").set_index("term")
+    base_terms = [
+        str(term)
+        for term in coefficients.loc[
+            ~coefficients["term"].astype(str).str.endswith(":curator"), "term"
+        ]
+    ]
+    interaction = coefficients.set_index("term")["estimate"]
+    columns = [
+        "story_id", "comment_id", "n_picks", "curator_selected",
+        *[f"audience_selected_draw_{draw:02d}" for draw in range(1, 11)],
+        *base_terms,
+    ]
+    frame = pd.read_parquet(Path(model_data_root) / f"choice_set_{scope}.parquet", columns=columns)
+    split = pd.read_parquet(Path(model_data_root) / "master_article_split.parquet")
+    split["story_id"] = split["story_id"].astype(str)
+    frame["story_id"] = frame["story_id"].astype(str)
+    frame["comment_id"] = frame["comment_id"].astype(str)
+    frame = frame.merge(
+        split[["story_id", "split_role"]],
+        on="story_id",
+        how="inner",
+        validate="many_to_one",
+    )
+    frame = frame.loc[frame["split_role"].eq("development")].copy()
+    if frame.empty:
+        raise ValueError(f"No development rows found for regression scope={scope}")
+
+    design = frame[base_terms].astype(float).copy()
+    for term in base_terms:
+        if bool(scaling.loc[term, "standardized"]):
+            design[term] = (
+                design[term] - float(scaling.loc[term, "mean"])
+            ) / float(scaling.loc[term, "sd"])
+    beta = coefficients.set_index("term")["estimate"]
+    audience_beta = beta.loc[base_terms].to_numpy(dtype=float)
+    curator_beta = audience_beta.copy()
+    for index, term in enumerate(base_terms):
+        curator_beta[index] += float(interaction.get(f"{term}:curator", 0.0))
+    matrix = design.to_numpy(dtype=float)
+    frame["audience_score"] = matrix @ audience_beta
+    frame["curator_score"] = matrix @ curator_beta
+    return frame.drop(columns="split_role")
+
+
+def score_development_model(
+    *,
+    model_family: str,
+    model_data_root: Path,
+    factorial_root: Path,
+    regression_root: Path,
+    winner: dict[str, Any] | None = None,
+    scope: str = "all",
+) -> pd.DataFrame:
+    """Return frozen-model scores for every development candidate.
+
+    The returned wide frame has the same score and selection columns as the
+    held-out score artifacts, so the primary nDCG and balanced macro-F1
+    diagnostics use identical definitions on development and test data.
+    """
+    if model_family == "conditional_logit":
+        return _score_development_regression(
+            model_data_root=model_data_root,
+            regression_root=regression_root,
+            scope=scope,
+        )
+    if winner is None:
+        raise ValueError("ML development scoring requires a frozen winner record")
+    frame, _, predictor = _winner_permutation_components(
+        winner=winner,
+        factorial_root=factorial_root,
+        model_data_root=model_data_root,
+        split_role="development",
+    )
+    return predictor(frame)
 
 
 def _load_or_compute_winner_permutation(
@@ -615,6 +703,177 @@ def _read_dual_model_scores(root: Path, family: str) -> pd.DataFrame:
         "story_id", "comment_id", "n_picks", "audience_score", "curator_score"
     ]
     return pd.read_parquet(path, columns=required)
+
+
+def _read_scored_model_rows(root: Path, family: str) -> pd.DataFrame:
+    """Read held-out scores and labels in one long selector-specific frame."""
+    if family == "conditional_logit":
+        path = root / "test_scores_long.parquet"
+        columns = [
+            "story_id", "comment_id", "n_picks", "selector", "selected", "score"
+        ]
+        if not path.exists():
+            raise FileNotFoundError(path)
+        frame = pd.read_parquet(path, columns=columns)
+    else:
+        path = root / "test_scores_wide.parquet"
+        columns = [
+            "story_id", "comment_id", "n_picks", "curator_selected",
+            "audience_selected_draw_01", "audience_score", "curator_score",
+        ]
+        if not path.exists():
+            raise FileNotFoundError(path)
+        wide = pd.read_parquet(path, columns=columns)
+        audience = wide[
+            [
+                "story_id", "comment_id", "n_picks",
+                "audience_selected_draw_01", "audience_score",
+            ]
+        ].rename(
+            columns={
+                "audience_selected_draw_01": "selected",
+                "audience_score": "score",
+            }
+        )
+        audience["selector"] = "audience"
+        curator = wide[
+            ["story_id", "comment_id", "n_picks", "curator_selected", "curator_score"]
+        ].rename(columns={"curator_selected": "selected", "curator_score": "score"})
+        curator["selector"] = "curator"
+        frame = pd.concat([audience, curator], ignore_index=True)
+    required = {"story_id", "comment_id", "n_picks", "selector", "selected", "score"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"Held-out scores are missing columns: {sorted(missing)}")
+    if frame.duplicated(["story_id", "comment_id", "selector"]).any():
+        raise ValueError("Held-out scores contain duplicate story/comment/selector rows")
+    frame["selected"] = frame["selected"].astype(int)
+    frame["score"] = pd.to_numeric(frame["score"], errors="raise")
+    return frame
+
+
+def balanced_macro_f1_at_k(
+    scores: pd.DataFrame,
+    *,
+    draws: int = 100,
+    seed: int = 20260813,
+) -> pd.DataFrame:
+    """Estimate paper-style balanced macro-F1 after selecting the top k.
+
+    Each article-selector query retains all selected comments and draws the
+    same number of non-selected comments without replacement. The model then
+    ranks this balanced candidate set and selects its top k. F1 is calculated
+    for both classes and macro-averaged, then averaged over deterministic
+    negative-sampling draws. This is a secondary, balanced diagnostic; it does
+    not alter model fitting, winner selection, or the primary full-candidate
+    ranking metrics.
+    """
+    required = {"story_id", "comment_id", "n_picks", "selector", "selected", "score"}
+    missing = required - set(scores.columns)
+    if missing:
+        raise ValueError(f"Scores are missing columns: {sorted(missing)}")
+    if draws < 1:
+        raise ValueError("draws must be positive")
+    rng = np.random.default_rng(seed)
+    rows: list[dict[str, Any]] = []
+    for (story_id, selector), group in scores.groupby(
+        ["story_id", "selector"], sort=False
+    ):
+        group = group.copy()
+        group["selected"] = group["selected"].astype(int)
+        k_values = pd.to_numeric(group["n_picks"], errors="raise").astype(int).unique()
+        if len(k_values) != 1:
+            raise ValueError(f"n_picks is not constant for {story_id}/{selector}")
+        k = int(k_values[0])
+        positives = group[group["selected"] == 1]
+        negatives = group[group["selected"] == 0]
+        if len(positives) != k or k < 1 or len(negatives) < k:
+            raise ValueError(
+                f"Cannot balance {story_id}/{selector}: positives={len(positives)}, "
+                f"negatives={len(negatives)}, k={k}"
+            )
+        draw_values: list[float] = []
+        positive_scores = positives["score"].to_numpy(dtype=float)
+        positive_ids = positives["comment_id"].astype(str).to_numpy()
+        negative_scores = negatives["score"].to_numpy(dtype=float)
+        negative_ids = negatives["comment_id"].astype(str).to_numpy()
+        for _ in range(draws):
+            sampled = rng.choice(len(negative_scores), size=k, replace=False)
+            scores = np.concatenate([positive_scores, negative_scores[sampled]])
+            comment_ids = np.concatenate([positive_ids, negative_ids[sampled]])
+            labels = np.concatenate([np.ones(k, dtype=int), np.zeros(k, dtype=int)])
+            order = np.lexsort((comment_ids, -scores))
+            true_positives = int(labels[order[:k]].sum())
+            # On a balanced 2k candidate set with exactly k predictions,
+            # positive- and negative-class F1 are both true_positives / k.
+            draw_values.append(true_positives / k)
+        rows.append(
+            {
+                "story_id": str(story_id),
+                "selector": selector,
+                "n_candidates": len(group),
+                "n_picks": k,
+                "balanced_macro_f1_at_k": float(np.mean(draw_values)),
+                "balance_draws": draws,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _paired_balanced_f1_differences(
+    article_metrics: pd.DataFrame,
+    *,
+    bootstrap_draws: int,
+    seed: int,
+) -> pd.DataFrame:
+    """Bootstrap paired model differences for the balanced F1 diagnostic."""
+    metric = "balanced_macro_f1_at_k"
+    required = {"story_id", "scope", "selector", "model_family", "model_id", metric}
+    missing = required - set(article_metrics.columns)
+    if missing:
+        raise ValueError(f"Balanced F1 rows are missing columns: {sorted(missing)}")
+    rows: list[dict[str, Any]] = []
+    rng = np.random.default_rng(seed)
+    family_order = {family: index for index, family in enumerate(MODEL_ORDER)}
+    for (scope, selector), group in article_metrics.groupby(
+        ["scope", "selector"], observed=True
+    ):
+        models = group[["model_family", "model_id"]].drop_duplicates()
+        models["_order"] = models["model_family"].map(family_order).fillna(len(MODEL_ORDER))
+        models = list(
+            models.sort_values(["_order", "model_id"])[
+                ["model_family", "model_id"]
+            ].itertuples(index=False, name=None)
+        )
+        for (first_family, first_id), (second_family, second_id) in itertools.combinations(models, 2):
+            if first_family == second_family:
+                continue
+            left = group[group["model_id"] == first_id][["story_id", metric]]
+            right = group[group["model_id"] == second_id][["story_id", metric]]
+            paired = left.merge(right, on="story_id", suffixes=("_first", "_second"), validate="one_to_one")
+            if paired.empty:
+                raise RuntimeError(f"No paired held-out articles for {first_id} vs {second_id}")
+            indices = rng.integers(0, len(paired), size=(bootstrap_draws, len(paired)))
+            delta = paired[f"{metric}_second"].to_numpy(float) - paired[f"{metric}_first"].to_numpy(float)
+            bootstrap = delta[indices].mean(axis=1)
+            rows.append(
+                {
+                    "scope": scope,
+                    "selector": selector,
+                    "comparison": f"{second_id}_minus_{first_id}",
+                    "model_first": first_family,
+                    "model_second": second_family,
+                    "model_first_id": first_id,
+                    "model_second_id": second_id,
+                    "metric": metric,
+                    "estimate": float(delta.mean()),
+                    "conf_low": float(np.quantile(bootstrap, 0.025)),
+                    "conf_high": float(np.quantile(bootstrap, 0.975)),
+                    "n_articles": len(paired),
+                    "bootstrap_draws": bootstrap_draws,
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def _model_gap_artifact(
@@ -1013,10 +1272,31 @@ def _save_figures(
     if not primary_shap.empty and shap_columns.issubset(primary_shap.columns):
         for plotter, stem in (
             (plot_winner_shap_importance, "all_winner_shap_importance"),
-            (plot_winner_shap_importance_gaps, "all_winner_shap_importance_gaps"),
         ):
             if plotter(primary_shap, output_root, show=False) is not None:
                 outputs.extend(figures_root / f"{stem}.{suffix}" for suffix in ("png", "pdf"))
+        shap_gap_figures = plot_winner_shap_importance_gaps(
+            primary_shap, output_root, show=False,
+        )
+        if shap_gap_figures:
+            for stem in (
+                "all_winner_shap_importance_gaps_xgb",
+                "all_winner_shap_importance_gaps_nn",
+            ):
+                outputs.extend(
+                    figures_root / f"{stem}.{suffix}"
+                    for suffix in ("png", "pdf")
+                )
+        if plot_regression_vs_shap_gaps(
+            association_scope,
+            primary_shap,
+            output_root,
+            show=False,
+        ) is not None:
+            outputs.extend(
+                figures_root / f"all_regression_vs_shap_gaps.{suffix}"
+                for suffix in ("png", "pdf")
+            )
     return outputs
 
 
@@ -1036,7 +1316,9 @@ def run_paper1_reporting(
     shap_force_recompute: bool = False,
     shap_chunk_rows: int = 500,
     seed: int = 20260813,
+    balanced_f1_draws: int = 100,
     make_figures: bool = True,
+    make_latex_tables: bool = True,
     require_factorial_idle: bool = True,
 ) -> dict:
     """Create Stage 9 only after Stage 8 has frozen development-CV winners."""
@@ -1046,6 +1328,8 @@ def run_paper1_reporting(
         raise ValueError("bootstrap_draws must be at least 100")
     if permutation_repeats < 1:
         raise ValueError("permutation_repeats must be positive")
+    if balanced_f1_draws < 1:
+        raise ValueError("balanced_f1_draws must be positive")
     scopes = _normalise_scopes(scopes)
     winner_manifest_path = winner_root / "factorial_winner_manifest.json"
     winner_manifest, winners, ranking = _load_winner_inputs(
@@ -1060,6 +1344,71 @@ def run_paper1_reporting(
     performance = pd.concat([reg_performance, ml_performance], ignore_index=True)
     article_metrics = pd.concat([reg_articles, ml_articles], ignore_index=True)
     ties = pd.concat([reg_ties, ml_ties], ignore_index=True)
+    balanced_article_frames = []
+    for index, scope in enumerate(scopes):
+        regression_balanced = balanced_macro_f1_at_k(
+            _read_scored_model_rows(regression_root / scope, "conditional_logit"),
+            draws=balanced_f1_draws,
+            seed=seed + index * 100_000,
+        )
+        balanced_article_frames.append(
+            regression_balanced.assign(
+                model_id="stage7_stacked_selection",
+                model_family="conditional_logit",
+                model_label=_winner_label("conditional_logit"),
+                feature_set=None,
+                scope=scope,
+                analysis_partition="held_out_test",
+            )
+        )
+    for index, winner in enumerate(winners.to_dict("records"), start=1):
+        scope = str(winner["scope"])
+        balanced = balanced_macro_f1_at_k(
+            _read_scored_model_rows(
+                factorial_root / str(winner["variant_id"]) / scope,
+                str(winner["family"]),
+            ),
+            draws=balanced_f1_draws,
+            seed=seed + index * 100_000,
+        )
+        balanced_article_frames.append(
+            balanced.assign(
+                model_id=str(winner["variant_id"]),
+                model_family=str(winner["family"]),
+                model_label=_winner_label(
+                    str(winner["family"]), winner.get("feature_set")
+                ),
+                feature_set=winner.get("feature_set"),
+                scope=scope,
+                analysis_partition="held_out_test",
+            )
+        )
+    balanced_articles = pd.concat(balanced_article_frames, ignore_index=True)
+    balanced_performance = _bootstrap_group_mean(
+        balanced_articles,
+        groups=["scope", "model_family", "model_id", "model_label", "selector"],
+        value="balanced_macro_f1_at_k",
+        draws=bootstrap_draws,
+        seed=seed + 400_000,
+        estimate_name="estimate",
+    )
+    balanced_performance["metric"] = "balanced_macro_f1_at_k"
+    balanced_performance["model_pair_label"] = balanced_performance["model_label"]
+    balanced_performance["model_label"] = balanced_performance.apply(
+        lambda row: model_selector_label(
+            row["model_family"],
+            balanced_articles.loc[
+                (balanced_articles["model_id"] == row["model_id"])
+                & (balanced_articles["scope"] == row["scope"]),
+                "feature_set",
+            ].iloc[0],
+            row["selector"],
+        ),
+        axis=1,
+    )
+    balanced_paired = _paired_balanced_f1_differences(
+        balanced_articles, bootstrap_draws=bootstrap_draws, seed=seed + 500_000
+    )
     # Keep the model-pair label for relationship summaries, but expose the
     # requested audience/editor label wherever a table or figure has a
     # selector-specific row.
@@ -1135,7 +1484,9 @@ def run_paper1_reporting(
         "development_cv_winners.csv": winners,
         "winner_model_specifications.csv": specifications,
         "held_out_model_performance.csv": performance,
+        "held_out_balanced_macro_f1.csv": balanced_performance,
         "held_out_paired_model_differences.csv": paired,
+        "held_out_paired_balanced_macro_f1.csv": balanced_paired,
         "held_out_tie_sensitivity.csv": ties,
         "regression_selector_associations.csv": associations,
         "regression_feature_gaps.csv": feature_gaps,
@@ -1152,6 +1503,8 @@ def run_paper1_reporting(
     parquet_paths = {
         "held_out_model_implied_article_gaps.parquet": tables_root
         / "held_out_model_implied_article_gaps.parquet",
+        "held_out_balanced_macro_f1_articles.parquet": tables_root
+        / "held_out_balanced_macro_f1_articles.parquet",
         "held_out_selector_permutation_importance.parquet": tables_root
         / "held_out_selector_permutation_importance.parquet",
         "held_out_shap_values.parquet": tables_root / "held_out_shap_values.parquet",
@@ -1160,25 +1513,30 @@ def run_paper1_reporting(
     model_gaps.to_parquet(
         parquet_paths["held_out_model_implied_article_gaps.parquet"], index=False
     )
+    balanced_articles.to_parquet(
+        parquet_paths["held_out_balanced_macro_f1_articles.parquet"], index=False
+    )
     permutation_article.to_parquet(
         parquet_paths["held_out_selector_permutation_importance.parquet"], index=False
     )
     shap_result["values"].to_parquet(parquet_paths["held_out_shap_values.parquet"], index=False)
     shap_summary.to_parquet(parquet_paths["held_out_shap_importance.parquet"], index=False)
-    latex_paths = {
-        "development_cv_winners.tex": tables_root / "development_cv_winners.tex",
-        "held_out_ndcg.tex": tables_root / "held_out_ndcg.tex",
-        "paired_ndcg_differences.tex": tables_root / "paired_ndcg_differences.tex",
-        "model_implied_gaps.tex": tables_root / "model_implied_gaps.tex",
-        "regression_feature_gaps.tex": tables_root / "regression_feature_gaps.tex",
-        "permutation_importance_gaps.tex": tables_root / "permutation_importance_gaps.tex",
-    }
-    _save_latex(winners, latex_paths["development_cv_winners.tex"], ["scope", "family", "variant_id", "mean_macro_ndcg_at_k", "sd_macro_ndcg_at_k", "min_fold_macro_ndcg_at_k"])
-    _save_latex(performance[performance["metric"] == "ndcg_at_k"], latex_paths["held_out_ndcg.tex"], ["scope", "model_label", "selector", "estimate", "conf_low", "conf_high", "bootstrap_draws"])
-    _save_latex(paired[paired["metric"] == "ndcg_at_k"], latex_paths["paired_ndcg_differences.tex"], ["scope", "selector", "comparison", "estimate", "conf_low", "conf_high", "n_articles"])
-    _save_latex(model_gap_summary, latex_paths["model_implied_gaps.tex"], ["scope", "model_label", "gap_mean", "conf_low", "conf_high", "gap_comment_weighted_mean", "weighted_conf_low", "weighted_conf_high", "gap_comment_weighted_median", "weighted_median_conf_low", "weighted_median_conf_high", "n_articles", "candidate_comments"])
-    _save_latex(feature_gaps, latex_paths["regression_feature_gaps.tex"], ["scope", "feature", "feature_gap_log_odds", "feature_gap_conf_low", "feature_gap_conf_high", "curator_to_audience_odds_ratio"])
-    _save_latex(permutation_gaps, latex_paths["permutation_importance_gaps.tex"], ["scope", "model_label", "feature_label", "audience_importance", "curator_importance", "permutation_importance_gap", "conf_low", "conf_high"])
+    latex_paths = {}
+    if make_latex_tables:
+        latex_paths = {
+            "development_cv_winners.tex": tables_root / "development_cv_winners.tex",
+            "held_out_ndcg.tex": tables_root / "held_out_ndcg.tex",
+            "paired_ndcg_differences.tex": tables_root / "paired_ndcg_differences.tex",
+            "model_implied_gaps.tex": tables_root / "model_implied_gaps.tex",
+            "regression_feature_gaps.tex": tables_root / "regression_feature_gaps.tex",
+            "permutation_importance_gaps.tex": tables_root / "permutation_importance_gaps.tex",
+        }
+        _save_latex(winners, latex_paths["development_cv_winners.tex"], ["scope", "family", "variant_id", "mean_macro_ndcg_at_k", "sd_macro_ndcg_at_k", "min_fold_macro_ndcg_at_k"])
+        _save_latex(performance[performance["metric"] == "ndcg_at_k"], latex_paths["held_out_ndcg.tex"], ["scope", "model_label", "selector", "estimate", "conf_low", "conf_high", "bootstrap_draws"])
+        _save_latex(paired[paired["metric"] == "ndcg_at_k"], latex_paths["paired_ndcg_differences.tex"], ["scope", "selector", "comparison", "estimate", "conf_low", "conf_high", "n_articles"])
+        _save_latex(model_gap_summary, latex_paths["model_implied_gaps.tex"], ["scope", "model_label", "gap_mean", "conf_low", "conf_high", "gap_comment_weighted_mean", "weighted_conf_low", "weighted_conf_high", "gap_comment_weighted_median", "weighted_median_conf_low", "weighted_median_conf_high", "n_articles", "candidate_comments"])
+        _save_latex(feature_gaps, latex_paths["regression_feature_gaps.tex"], ["scope", "feature", "feature_gap_log_odds", "feature_gap_conf_low", "feature_gap_conf_high", "curator_to_audience_odds_ratio"])
+        _save_latex(permutation_gaps, latex_paths["permutation_importance_gaps.tex"], ["scope", "model_label", "feature_label", "audience_importance", "curator_importance", "permutation_importance_gap", "conf_low", "conf_high"])
     figure_paths = (
         _save_figures(
             ranking,
@@ -1209,11 +1567,13 @@ def run_paper1_reporting(
         "winner_manifest": {"path": str(winner_manifest_path), "sha256": _sha256(winner_manifest_path)},
         "development_cv_sha256": winner_manifest["input"]["sha256"],
         "bootstrap_draws": bootstrap_draws,
+        "balanced_f1_draws": balanced_f1_draws,
         "permutation_repeats": permutation_repeats,
         "model_implied_gap": "predicted curator top-k ranked by predicted audience score; midranks and fractional curator cutoff ties; equal-article mean, candidate-comment-weighted mean, and candidate-comment-weighted median are reported",
         "comment_weighting": "sum(n_candidates * article_gap) / sum(n_candidates); confidence interval resamples articles and recomputes the weighted ratio",
         "comment_weighted_median": "first ordered article gap where cumulative n_candidates reaches at least 50%; confidence interval resamples articles and recomputes the weighted median",
         "permutation_importance_gap": "paired within-article nDCG@k loss, curator minus audience; audience metrics average ten tie draws",
+        "balanced_macro_f1_at_k": "secondary held-out diagnostic; retain all selected comments and sample an equal number of non-selected comments within each article-selector query, rank by model score, select the top k, calculate macro-F1 across selected/non-selected classes, and average over articles; non-selected is the closest available analogue to the paper's zero-pick class",
         "permutation_features": "named tabular model features; frozen BGE vectors are held fixed rather than interpreted dimension by dimension",
         "shap": shap_result["manifest"],
         "outputs": outputs,

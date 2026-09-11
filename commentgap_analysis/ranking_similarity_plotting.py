@@ -24,6 +24,7 @@ def plot_umap_clusters(
     cluster_boundary_padding: float = 0.4,
     cluster_min_gap_fraction: float = 0.015,
     cluster_corner_cut: float = 0.2,
+    label_clusters: bool = True,
     show: bool = True,
 ):
     """Render the fixed 2-D display embedding and save the UMAP figure."""
@@ -38,6 +39,7 @@ def plot_umap_clusters(
         cluster for cluster in sorted(membership["umap_cluster"].unique())
         if cluster != -1
     ]
+    cluster_numbers = {cluster: index + 1 for index, cluster in enumerate(cluster_ids)}
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
     for axis, depth in zip(axes, depths):
         display_embedding = umap.UMAP(
@@ -53,10 +55,24 @@ def plot_umap_clusters(
             colour_order=list(ordering_order), colour_palette=ordering_palette,
             reply_markers=reply_markers,
         )
-        for cluster in cluster_ids:
-            points = frame[frame["umap_cluster"].eq(cluster)][["umap1", "umap2"]].to_numpy()
-            if len(points) < 3:
-                continue
+        cluster_points = {
+            cluster: frame.loc[
+                frame["umap_cluster"].eq(cluster), ["umap1", "umap2"]
+            ].to_numpy()
+            for cluster in cluster_ids
+        }
+        cluster_points = {
+            cluster: points for cluster, points in cluster_points.items()
+            if len(points) >= 3
+        }
+        cluster_centers = {
+            cluster: points.mean(axis=0)
+            for cluster, points in cluster_points.items()
+        }
+        panel_center = np.vstack(list(cluster_centers.values())).mean(axis=0)
+        placed_labels: list[np.ndarray] = []
+        for cluster, points in cluster_points.items():
+
             hull = ConvexHull(points)
             centroid = points.mean(axis=0)
             hull_vectors = points[hull.vertices] - centroid
@@ -82,6 +98,58 @@ def plot_umap_clusters(
             axis.plot(
                 rounded_boundary[:, 0], rounded_boundary[:, 1], color="black",
                 linewidth=1.5, alpha=0.9, zorder=3,
+            )
+            if label_clusters:
+                outward = centroid - panel_center
+                if np.linalg.norm(outward) == 0:
+                    outward = np.array([1.0, 0.0])
+                outward_angle = np.arctan2(outward[1], outward[0])
+                candidate_angles = outward_angle + np.linspace(
+                    -np.pi, np.pi, 25, endpoint=False,
+                )
+                candidates = []
+                for angle in candidate_angles:
+                    direction = np.array([np.cos(angle), np.sin(angle)])
+                    boundary_distance = np.max((points - centroid) @ direction)
+                    label_position = centroid + direction * (
+                        boundary_distance + display_scale * 0.055
+                    )
+                    other_centers = [
+                        other for other_cluster, other in cluster_centers.items()
+                        if other_cluster != cluster
+                    ]
+                    center_gap = min(
+                        np.linalg.norm(label_position - other)
+                        for other in other_centers
+                    ) if other_centers else np.inf
+                    placed_gap = min(
+                        np.linalg.norm(label_position - other)
+                        for other in placed_labels
+                    ) if placed_labels else np.inf
+                    candidates.append((min(center_gap, placed_gap), label_position, direction))
+                _, label_position, direction = max(candidates, key=lambda item: item[0])
+                placed_labels.append(label_position)
+                axis.annotate(
+                    str(cluster_numbers[cluster]),
+                    xy=centroid + direction * np.max((points - centroid) @ direction),
+                    xytext=label_position,
+                    ha="center", va="center", fontsize=11, fontweight="bold",
+                    color="black", zorder=5, clip_on=False,
+                    arrowprops=dict(arrowstyle="-", color="0.25", linewidth=0.8),
+                    bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=1.5),
+                )
+        if label_clusters and placed_labels:
+            current_x = axis.get_xlim()
+            current_y = axis.get_ylim()
+            label_array = np.vstack(placed_labels)
+            padding = display_scale * 0.04
+            axis.set_xlim(
+                min(current_x[0], label_array[:, 0].min() - padding),
+                max(current_x[1], label_array[:, 0].max() + padding),
+            )
+            axis.set_ylim(
+                min(current_y[0], label_array[:, 1].min() - padding),
+                max(current_y[1], label_array[:, 1].max() + padding),
             )
         axis.set(title=depth_titles[depth], xlabel="UMAP 1", ylabel="UMAP 2")
     reply_labels = {"loose": "Loose", "trees": "Trees", "hidden": "Hidden"}
