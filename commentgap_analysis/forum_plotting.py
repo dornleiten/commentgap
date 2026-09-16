@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -14,6 +16,119 @@ import seaborn as sns
 def _show(show: bool) -> None:
     if show:
         plt.show()
+
+
+def plot_forum_calculation(
+    feature_values: Sequence[float],
+    policy_cumulative: Sequence[float],
+    *,
+    rank_i: int = 43,
+    output_paths: Sequence[str | Path] | None = None,
+    show: bool = True,
+):
+    """Plot the conceptual FORUM calculation schematic.
+
+    ``feature_values`` contains the example comment-level feature values and
+    ``policy_cumulative`` contains the example policy's cumulative values in
+    presentation order.  The three delta guides use the notation from the
+    FORUM manuscript: :math:`\\Delta_i^{br}`, :math:`\\Delta_i^{pr}`, and
+    :math:`\\Delta_i^{rw}`.
+    """
+    values = np.asarray(feature_values, dtype=float)
+    cumulative = np.asarray(policy_cumulative, dtype=float)
+    if values.ndim != 1 or cumulative.ndim != 1 or len(values) != len(cumulative):
+        raise ValueError("feature_values and policy_cumulative must be equal-length vectors")
+    if len(values) < 2:
+        raise ValueError("at least two feature values are required")
+    if not 1 <= rank_i <= len(values):
+        raise ValueError("rank_i must be between 1 and the number of feature values")
+
+    sorted_values = np.sort(values)[::-1]
+    rank = np.arange(1, len(values) + 1)
+    baseline = rank * values.mean()
+    best = np.cumsum(sorted_values)
+    worst = np.cumsum(sorted_values[::-1])
+    idx = rank_i - 1
+
+    style = {
+        "axes.facecolor": "white",
+        "figure.facecolor": "white",
+        "axes.edgecolor": "0.15",
+        "axes.grid": True,
+        "grid.color": "0.85",
+        "grid.linewidth": 0.7,
+        "grid.alpha": 0.9,
+        "font.size": 11,
+        "axes.titlesize": 16,
+        "axes.labelsize": 13,
+        "figure.dpi": 120,
+        "savefig.bbox": "tight",
+    }
+    with plt.style.context("default"), plt.rc_context(style):
+        best_color, policy_color, worst_color = "tab:green", "tab:blue", "tab:red"
+        random_color = "0.25"
+        figure, axis = plt.subplots(figsize=(6.6, 4.5))
+        axis.plot(
+            rank, best, color=best_color, linestyle="--", linewidth=1.8,
+            label=r"Best feature ordering ($t_i^b$)",
+        )
+        axis.plot(
+            rank, baseline, color=random_color, linestyle=":", linewidth=1.8,
+            label=r"Random baseline ($t_i^r$)",
+        )
+        axis.plot(
+            rank, worst, color=worst_color, linestyle="--", linewidth=1.8,
+            label=r"Worst feature ordering ($t_i^w$)",
+        )
+        axis.plot(
+            rank, cumulative, color=policy_color, linewidth=2.0,
+            label=r"Example policy ($t_i^p$)",
+        )
+
+        # Keep the manuscript's illustrative delta guides and label offsets.
+        x_gap = rank_i
+        for value, color in (
+            (best[idx], best_color), (cumulative[idx], policy_color),
+            (worst[idx], worst_color),
+        ):
+            axis.plot([rank_i, x_gap], [value, value], color=color,
+                      linewidth=0.9, alpha=0.85)
+        axis.plot([x_gap, x_gap], [baseline[idx], best[idx]],
+                  color=best_color, linewidth=1.1)
+        axis.plot([x_gap + 0.4, x_gap + 0.4], [baseline[idx], cumulative[idx]],
+                  color=policy_color, linewidth=1.1)
+        axis.plot([x_gap, x_gap], [worst[idx], baseline[idx]],
+                  color=worst_color, linewidth=1.1)
+        axis.text(
+            x_gap + 1.2, (baseline[idx] + best[idx]) / 2 + 4,
+            r"$\Delta_i^{br}$", color=best_color, va="center",
+        )
+        axis.text(
+            x_gap + 1.2, (baseline[idx] + cumulative[idx]) / 2 + 1,
+            r"$\Delta_i^{pr}$", color=policy_color, va="center",
+        )
+        axis.text(
+            x_gap + 1.2, (worst[idx] + baseline[idx]) / 2,
+            r"$\Delta_i^{rw}$", color=worst_color, va="center",
+        )
+        axis.axvline(rank_i, color="0.5", linewidth=0.7, alpha=0.45)
+
+        axis.set_title("Conceptual FORUM calculation")
+        axis.set_xlabel("Comments returned")
+        axis.set_ylabel(r"Cumulative feature value ($t_i$)")
+        axis.set_xlim(0, len(values))
+        axis.set_ylim(0, max(50, float(values.sum()) * 1.05))
+        axis.set_axisbelow(True)
+        axis.legend(frameon=False, loc="upper left")
+        figure.tight_layout()
+
+        for output_path in output_paths or ():
+            path = Path(output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            figure.savefig(path)
+
+    _show(show)
+    return figure
 
 
 def _identity_line(axis, x, y) -> None:
@@ -33,7 +148,7 @@ def plot_top10_full_forum(
     show: bool = True,
 ):
     """Plot top-10 against full-list FORUM across ranking conditions."""
-    fig, axis = plt.subplots(figsize=(14, 10))
+    fig, axis = plt.subplots(figsize=(6.6, 7))
     for feature in feature_order:
         for reply_mode, marker in reply_markers.items():
             for pinned in (False, True):
@@ -72,15 +187,15 @@ def plot_top10_full_forum(
                markerfacecolor="black", label="Pinned"),
     ]
     fig.legend(handles=feature_handles, title="Feature", loc="upper left",
-               bbox_to_anchor=(0.75, 0.9), borderaxespad=0.0, ncol=1,
+               bbox_to_anchor=(0.85, 0.91), borderaxespad=0.0, ncol=1,
                handletextpad=0.7, labelspacing=0.5)
-    fig.legend(handles=reply_handles, title="Reply mode", loc="upper left",
-               bbox_to_anchor=(0.75, 0.48), borderaxespad=0.0,
+    fig.legend(handles=reply_handles, title="Reply mode", loc="lower center",
+               bbox_to_anchor=(0.5, 0.1), borderaxespad=0.0, ncol=3,
                handletextpad=0.7, labelspacing=0.6)
-    fig.legend(handles=pin_handles, title="Pin status", loc="upper left",
-               bbox_to_anchor=(0.75, 0.3), borderaxespad=0.0,
+    fig.legend(handles=pin_handles, title="Pin status", loc="lower center",
+               bbox_to_anchor=(1.15, 0.15), borderaxespad=0.0, ncol=1,
                handletextpad=0.7, labelspacing=0.6)
-    fig.tight_layout(rect=(0, 0, 0.75, 1))
+    fig.tight_layout(rect=(0, 0.2, 0.85, 1))
     _show(show)
     return fig
 
@@ -97,7 +212,7 @@ def plot_forum_ndcg(
     """Plot FORUM against nDCG separately for top-10 and full-list depth."""
     depth_order = ["top10", "full"]
     depth_labels = {"top10": "Top 10", "full": "Full list"}
-    fig, axes = plt.subplots(1, 2, figsize=(14, 9), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7), sharex=True, sharey=True)
     for axis, depth in zip(axes, depth_order):
         panel = frame[frame["depth"].eq(depth)]
         for feature in feature_order:
@@ -130,8 +245,8 @@ def plot_forum_ndcg(
         axis.set_ylabel("Mean nDCG" if axis is axes[0] else "")
         axis.set_title(f"{depth_labels[depth]}")
     _add_common_legends(fig, feature_palette, reply_markers, reply_labels,
-                        bbox_to_anchor=(0.82, 0.90), reply_anchor=(0.82, 0.42),
-                        pin_anchor=(0.82, 0.2))
+                        bbox_to_anchor=(0.82, 0.90), reply_anchor=(0.82, 0.32),
+                        pin_anchor=(0.96, 0.32))
     fig.suptitle("FORUM versus nDCG", y=0.92)
     fig.tight_layout(rect=(0, 0, 0.82, 0.94), w_pad=1.2)
     _show(show)

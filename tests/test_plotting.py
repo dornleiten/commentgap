@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from commentgap_analysis.forum_plotting import plot_forum_calculation
 from commentgap_analysis.paper1_plotting import plot_regression_selector_differences
 from commentgap_analysis.plotting import save_display_figure
 
@@ -59,6 +60,29 @@ class PlottingOutputTests(unittest.TestCase):
             )
             self.assertFalse(output_root.exists())
             self.assertEqual(len(figure.axes), 1)
+            plt.close(figure)
+
+    def test_forum_calculation_plot_writes_requested_formats(self):
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        values = np.linspace(0.1, 0.9, 10)
+        policy = np.cumsum(values[::-1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            figure = plot_forum_calculation(
+                values,
+                policy,
+                rank_i=5,
+                output_paths=(root / "feature_score.pdf", root / "feature_score.svg"),
+                show=False,
+            )
+            self.assertEqual(len(figure.axes), 1)
+            self.assertTrue((root / "feature_score.pdf").exists())
+            self.assertTrue((root / "feature_score.svg").exists())
             plt.close(figure)
 
 

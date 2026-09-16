@@ -588,7 +588,7 @@ gram_diagnostics <- function(gram, scope, variant) {
   )
 }
 
-covariance_diagnostics <- function(fit, scope) {
+covariance_diagnostics <- function(fit, scope, variant) {
   rbindlist(lapply(c("model_based", "cluster_robust"), function(kind) {
     covariance <- if (kind == "model_based") {
       fit$model_covariance
@@ -602,7 +602,7 @@ covariance_diagnostics <- function(fit, scope) {
     )$values
     positive <- values[values > max(values) * .Machine$double.eps * length(values)]
     data.table(
-      scope = scope, covariance = kind,
+      scope = scope, variant = variant, covariance = kind,
       raw_covariance_condition_number = kappa(covariance, exact = TRUE),
       correlation_scale_condition_number = kappa(
         covariance_correlation, exact = TRUE
@@ -745,7 +745,6 @@ run_scope <- function(scope) {
     stop("Saved primary model does not match the feature contract")
   }
 
-  covariance_summary <- covariance_diagnostics(primary, scope)
   coefficient_pairs <- coefficient_correlation_pairs(primary, scope)
   blocks <- feature_blocks(scope, full_features)
   block_tests <- rbindlist(lapply(names(blocks), function(block_name) {
@@ -782,6 +781,9 @@ run_scope <- function(scope) {
   variance_rows <- list()
   design_pair_rows <- list()
   exact_rows <- list()
+  covariance_rows <- list(
+    full_reference = covariance_diagnostics(primary, scope, "full_reference")
+  )
   full_scores <- score_compact(primary, prepared_full$training)
 
   for (variant_name in names(analysis_variants)) {
@@ -804,6 +806,11 @@ run_scope <- function(scope) {
       comparison_term = term
     )]
     association_rows[[variant_name]] <- association
+    if (variant_name != "full_reference") {
+      covariance_rows[[variant_name]] <- covariance_diagnostics(
+        fit, scope, variant_name
+      )
+    }
     fit_rows[[variant_name]] <- data.table(
       scope = scope, variant = variant_name, coding = fit$coding,
       parameters = length(fit$coefficients),
@@ -854,6 +861,7 @@ run_scope <- function(scope) {
   design_variance <- rbindlist(variance_rows)
   design_pairs <- rbindlist(design_pair_rows, use.names = TRUE, fill = TRUE)
   exact_checks <- rbindlist(exact_rows, use.names = TRUE, fill = TRUE)
+  covariance_summary <- rbindlist(covariance_rows, use.names = TRUE)
 
   full_associations <- associations[variant == "full_reference",
     .(comparison_term, full_audience = audience, full_curator = curator,

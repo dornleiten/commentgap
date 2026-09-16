@@ -851,7 +851,7 @@ def plot_topic_policy_metric_effects(
     figure.suptitle(metric_label, y=0.98)
     figure.tight_layout(rect=(0, 0, 1, 0.96), pad=0.3)
     path = output_root / f"{output_stem}.png"
-    figure.savefig(path, dpi=220)
+    figure.savefig(path, dpi=220, bbox_inches="tight")
     plt.show()
     plt.close(figure)
     return effect_plot
@@ -1353,16 +1353,16 @@ def plot_article_relative_votes_progress_scatter(
     metric_specs = [
         (
             "js_gain",
-            "Article vs Relative Votes Discussion Alignment - All Policies",
+            "Article vs Relative Votes Agenda Alignment,\nAll Algorithms",
             "Discussion-Article JS alignment change",
             "Discussion-Relative Votes JS alignment change",
             f"{output_prefix}topic_policy_js_article_relative_votes_raw_gain_scatter.png",
         ),
         (
             "cosine_gain",
-            "Article vs Relative Votes Discussion Alignment - All Policies",
-            "Discussion-Article cosine similarity change",
-            "Discussion-Relative Votes cosine similarity change",
+            "Article vs Relative Votes Agenda Alignment,\nAll Algorithms",
+            "Discussion-Article cosine gain",
+            "Discussion-Relative Votes cosine gain",
             f"{output_prefix}topic_policy_cosine_article_relative_votes_raw_gain_scatter.png",
         ),
     ]
@@ -1392,7 +1392,7 @@ def plot_article_relative_votes_progress_scatter(
         lower = float(np.nanmin(reference_values) - padding)
         upper = float(np.nanmax(reference_values) + padding)
 
-        figure, axis = plt.subplots(figsize=(14, 6))
+        figure, axis = plt.subplots(figsize=(6.6, 6))
         for reply_mode, marker in reply_markers.items():
             for pinned in (False, True):
                 subset = frame[
@@ -1452,7 +1452,7 @@ def plot_article_relative_votes_progress_scatter(
             ha="center",
             va="center",
             color="0.35",
-            backgroundcolor="white",
+            # backgroundcolor="white",
         )
         axis.text(
             label_position,
@@ -1463,7 +1463,7 @@ def plot_article_relative_votes_progress_scatter(
             ha="center",
             va="center",
             color="0.35",
-            backgroundcolor="white",
+            # backgroundcolor="white",
         )
         axis.set_xlabel(x_label)
         axis.set_ylabel(y_label)
@@ -1508,7 +1508,7 @@ def plot_article_relative_votes_progress_scatter(
             handles=ordering_handles,
             title="Primary ordering",
             loc="upper left",
-            bbox_to_anchor=(0.63, 0.97),
+            bbox_to_anchor=(0.63, 0.92),
             labelspacing=0.3,
             borderaxespad=0.0,
             handlelength=1.8,
@@ -1518,20 +1518,22 @@ def plot_article_relative_votes_progress_scatter(
         reply_legend = figure.legend(
             handles=reply_handles,
             title="Reply status",
-            loc="upper left",
-            bbox_to_anchor=(0.63, 0.43),
+            bbox_to_anchor=(0.36, 0.16),
+            loc="lower center",
+            ncol=3,
             labelspacing=0.35,
             borderaxespad=0.0,
         )
         figure.legend(
             handles=pin_handles,
             title="Pin status",
-            loc="upper left",
-            bbox_to_anchor=(0.63, 0.27),
+            bbox_to_anchor=(0.73, 0.27),
+            loc="lower center",
+            ncol=1,
             labelspacing=0.35,
             borderaxespad=0.0,
         )
-        figure.tight_layout(rect=(0, 0, 0.72, 1))
+        figure.tight_layout(rect=(0, 0.2, 0.63, 1))
         figure.savefig(output_root / output_name, dpi=220, bbox_inches="tight")
         plt.show()
         plt.close(figure)
@@ -1553,3 +1555,131 @@ __all__ = [
     "plot_topic_search_metrics",
     *_POLICY_PLOT_EXPORTS,
 ]
+
+
+def article_oracle_target_gains(
+    oracle_visible: pd.DataFrame,
+    relative_votes_visible: pd.DataFrame,
+    oracle_metrics: pd.DataFrame,
+    reference_target_metrics: pd.DataFrame,
+    *,
+    distance_metric: str = "cosine",
+) -> pd.DataFrame:
+    """Evaluate the article oracle against both agendas and the common random base.
+
+    The vote agenda is the mean of relative-vote draw distributions. Random
+    similarities/distances are expected draw-level metrics, never metrics of
+    the mean random distribution. The oracle optimises the article target only.
+    """
+    from .topic_metrics import cosine_similarity, jensen_shannon_distance
+
+    if distance_metric not in {"cosine", "jsd"}:
+        raise ValueError("distance_metric must be cosine or jsd")
+    topics = [c for c in oracle_visible if c.startswith("topic_") and c[6:].isdigit()]
+    votes = relative_votes_visible.copy()
+    votes["story_id"] = votes["story_id"].astype(str)
+    votes = votes.groupby("story_id")[topics].mean()
+    oracle = oracle_visible.copy()
+    oracle["story_id"] = oracle["story_id"].astype(str)
+    oracle = oracle.set_index("story_id")[topics]
+    common = oracle.index.intersection(votes.index)
+    metric = cosine_similarity if distance_metric == "cosine" else jensen_shannon_distance
+    vote_values = metric(oracle.loc[common].to_numpy(), votes.loc[common].to_numpy())
+    values = pd.DataFrame({"relative_votes": vote_values}, index=common)
+    article = oracle_metrics.copy()
+    article["story_id"] = article["story_id"].astype(str)
+    column = "article_visible_cosine" if distance_metric == "cosine" else "article_visible_js_distance"
+    values = values.join(article.set_index("story_id")[column].rename("article"), how="inner")
+    baseline = reference_target_metrics.loc[
+        reference_target_metrics["policy_id"].eq("random__loose__unpinned")
+    ].copy()
+    baseline["story_id"] = baseline["story_id"].astype(str)
+    base_column = "cosine_similarity_to_target" if distance_metric == "cosine" else "js_distance_to_target"
+    baseline = baseline.pivot(index="story_id", columns="target", values=base_column)
+    gains = (values - baseline[["article", "relative_votes"]]) * (1 if distance_metric == "cosine" else -1)
+    gains = gains.dropna(subset=["article", "relative_votes"])
+    gains["article_minus_votes"] = gains["article"] - gains["relative_votes"]
+    return gains.rename_axis("story_id").reset_index()
+
+
+def plot_combined_article_alignment_effects(
+    reference_target_metrics: pd.DataFrame,
+    oracle_gains: pd.DataFrame,
+    *,
+    contrast_order: Sequence[tuple[str, str]],
+    output_root: Path | str,
+    ordering_labels: Mapping[str, str],
+    reply_labels: Mapping[str, str],
+    distance_metric: str = "cosine",
+    output_prefix: str = "",
+) -> pd.DataFrame:
+    """Combine paired article-gain and article-minus-vote-gain effects."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    if distance_metric not in {"cosine", "jsd"}:
+        raise ValueError("distance_metric must be cosine or jsd")
+    gain = "cosine_raw_target_gain" if distance_metric == "cosine" else "js_raw_target_gain"
+    keys = ["story_id", "policy_id", "ordering", "reply_mode", "pinned"]
+    paired = reference_target_metrics.pivot(index=keys, columns="target", values=gain).reset_index()
+    paired["article_minus_votes"] = paired["article"] - paired["relative_votes"]
+    series = [("article", "#0072B2", -.13, "vs random: article gain"),
+              ("article_minus_votes", "#D55E00", .13, "vs relative votes: article − vote gain")]
+    rows = []
+    for name, _, _, _ in series:
+        for family, contrast in contrast_order:
+            values = _policy_contrast_values(paired, family, contrast, name)["difference"]
+            mean, lower, upper, n = _mean_interval(values)
+            rows.append(dict(series=name, family=family, contrast=contrast,
+                             label=_policy_contrast_label(family, contrast, ordering_labels=ordering_labels,
+                                                          reply_labels=reply_labels),
+                             mean=mean, lower=lower, upper=upper, n=n))
+    result = pd.DataFrame(rows)
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    stem = f"{output_prefix}topic_policy_combined_article_{distance_metric}_gain_effects"
+    result.to_csv(output_root / f"{stem}.csv", index=False)
+    oracle_gains.to_csv(output_root / f"{stem}_oracle_by_story.csv", index=False)
+    figure, axis = plt.subplots(figsize=(6.6, max(5.2, .30 * len(contrast_order))))
+    handles = []
+    for name, color, offset, label in series:
+        panel = result.loc[result.series.eq(name)]
+        for row_index, (_, row) in enumerate(panel.iterrows()):
+            marker, _, _ = _contrast_style(row["family"])
+            axis.errorbar(row["mean"], row_index + offset,
+                          xerr=[[row["mean"]-row["lower"]], [row["upper"]-row["mean"]]],
+                          fmt=marker, markersize=3.5 if marker == "o" else 4.5,
+                          capsize=3, color=color, ecolor=color, alpha=.9)
+        reference = oracle_gains[name].mean()
+        axis.axvline(reference, color=color, linewidth=1.1, linestyle="--", alpha=.8)
+        oracle_label = "Oracle vs random" if name == "article" else "Oracle vs relative votes"
+        axis.text(
+            reference,
+            .5,
+            oracle_label,
+            transform=axis.get_xaxis_transform(),
+            rotation=90,
+            rotation_mode="anchor",
+            va="center",
+            ha="center",
+            color=color,
+            fontsize=8,
+            backgroundcolor="white",
+        )
+        handles.append(Line2D([], [], color=color, marker='o', linestyle='none', label=label))
+    axis.axvline(0, color="0.5", linewidth=.8, linestyle=":")
+    axis.grid(axis="x", color="0.9", linewidth=.6)
+    axis.set_yticks(np.arange(len(contrast_order)))
+    axis.set_yticklabels(result.loc[result.series.eq('article'), 'label'])
+    _add_contrast_divider(axis, contrast_order)
+    axis.margins(x=.07)
+    axis.set_xlabel("Average effect on cosine gain" if distance_metric == 'cosine' else "Average effect on JS gain")
+    figure.suptitle("Discussion–Article Agenda Alignment", y=.985)
+    figure.legend(handles=handles, loc='upper center', ncol=2, frameon=False,
+                  fontsize=8, bbox_to_anchor=(.5, .95), columnspacing=1.5)
+    figure.tight_layout(rect=(0, .01, 1, .89), pad=.3)
+    figure.savefig(output_root / f"{stem}.png", dpi=220, bbox_inches="tight")
+    figure.savefig(output_root / f"{stem}.pdf", bbox_inches="tight")
+    plt.show()
+    plt.close(figure)
+    return result

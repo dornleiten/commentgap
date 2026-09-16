@@ -184,8 +184,7 @@ def plot_ordering_effects(
         axis.grid(axis="x", color="0.9", linewidth=0.6)
     depth_label = "top 10" if depth == "top10" else "full discussion (N-1)"
     figure.suptitle(
-        f"Ordering and average interface effects at {depth_label} "
-        "(paired 95% bootstrap intervals)"
+        f"Ordering and average interface effects at {depth_label}"
     )
     axes[0, 0].invert_yaxis()
 
@@ -199,7 +198,10 @@ def plot_ordering_effects(
 
 
 def plot_combined_ordering_effects(
-    effects: pd.DataFrame, output_root: Path, *, show: bool = False
+    effects: pd.DataFrame,
+    output_root: Path,
+    *,
+    show: bool = False,
 ) -> list[Path]:
     """Plot top-10 and full-discussion ordering effects in one figure."""
     plt, _ = _plot_modules()
@@ -306,8 +308,7 @@ def plot_combined_ordering_effects(
         axis.grid(axis="x", color="0.9", linewidth=0.6)
     axes[0, 0].invert_yaxis()
     figure.suptitle(
-        "Ordering and average interface effects at top 10 and full discussion "
-        "(paired 95% bootstrap intervals)"
+        "Ordering and average interface effects at top 10 and full discussion"
     )
     from matplotlib.lines import Line2D
 
@@ -334,16 +335,18 @@ def plot_ordering_policy_variants(
     summary: pd.DataFrame,
     output_root: Path,
     *,
-    depth: str = "top10",
     show: bool = False,
 ) -> list[Path]:
-    """Plot all substantive reply/pinning variants for each ordering."""
+    """Plot all substantive reply/pinning variants at both depths."""
     plt, _ = _plot_modules()
-    data = _primary_depth(summary, depth)
-    data = data[data["deployable"]].copy()
+    data = summary[
+        summary["sample"].eq("primary")
+        & summary["depth"].isin(("top10", "full"))
+        & summary["outcome"].isin(PRIMARY_OUTCOMES)
+        & summary["deployable"]
+    ].copy()
     orderings = list(ORDERING_LABELS)
     positions = np.arange(len(orderings), dtype=float)
-    plot_color = DEPTH_COLORS[depth]
     reply_markers = REPLY_DISPLAY_MARKERS
     # Small deterministic offsets keep the six variants legible at each ordering.
     offsets = {
@@ -354,81 +357,140 @@ def plot_ordering_policy_variants(
         ("hidden", False): 0.14,
         ("hidden", True): 0.22,
     }
-    figure, axes = plt.subplots(2, 5, figsize=(14, 9), sharex=True, sharey=True)
-    for panel_index, (axis, outcome) in enumerate(zip(axes.flat, OUTCOME_DISPLAY_ORDER)):
-        panel = data[data["outcome"].eq(outcome)]
-        for reply_mode in reply_markers:
-            for pinned in (False, True):
-                subset = (
-                    panel[panel["reply_mode"].eq(reply_mode) & panel["pinned"].eq(pinned)]
-                    .set_index("ordering")
-                    .reindex(orderings)
+    figure, axes = plt.subplots(4, 5, figsize=(14, 17), sharex=True, sharey=True)
+    for depth_index, depth in enumerate(("top10", "full")):
+        plot_color = DEPTH_COLORS[depth]
+        depth_data = data[data["depth"].eq(depth)]
+        for outcome_index, outcome in enumerate(OUTCOME_DISPLAY_ORDER):
+            panel_index = depth_index * len(OUTCOME_DISPLAY_ORDER) + outcome_index
+            axis = axes.flat[panel_index]
+            panel = depth_data[depth_data["outcome"].eq(outcome)]
+            for reply_mode in reply_markers:
+                for pinned in (False, True):
+                    subset = (
+                        panel[
+                            panel["reply_mode"].eq(reply_mode)
+                            & panel["pinned"].eq(pinned)
+                        ]
+                        .set_index("ordering")
+                        .reindex(orderings)
+                    )
+                    y = positions + offsets[(reply_mode, pinned)]
+                    axis.plot(
+                        subset["estimate"],
+                        y,
+                        linestyle="none",
+                        marker=reply_markers[reply_mode],
+                        color=plot_color,
+                        markerfacecolor=plot_color if pinned else "none",
+                        markeredgecolor=plot_color,
+                        alpha=0.88,
+                        markersize=4.5,
+                    )
+            default = panel[
+                panel["ordering"].eq("reverse_chronological")
+                & panel["reply_mode"].eq("trees")
+                & panel["pinned"].eq(True)
+            ]
+            if len(default) != 1:
+                raise ValueError(
+                    "Expected one default policy row for "
+                    f"{depth} / {outcome}, found {len(default)}"
                 )
-                y = positions + offsets[(reply_mode, pinned)]
-                axis.plot(
-                    subset["estimate"],
-                    y,
-                    linestyle="none",
-                    marker=reply_markers[reply_mode],
-                    color=plot_color,
-                    markerfacecolor=plot_color if pinned else "none",
-                    markeredgecolor=plot_color,
-                    alpha=0.88,
-                    markersize=4.5,
-                )
-        axis.axvline(0, color="0.55", linewidth=0.8)
-        axis.set_title(SUBPLOT_OUTCOME_LABELS[outcome])
-        axis.set_xlabel("Mean FORUM")
-        axis.grid(axis="x", color="0.9", linewidth=0.6)
-        axis.set_yticks(positions)
-        if panel_index % axes.shape[1] == 0:
-            axis.set_yticklabels(
-                [ORDERING_LABELS.get(value, value) for value in orderings],
-                fontsize=7,
+            axis.axvline(
+                default["estimate"].iloc[0],
+                color="0.35",
+                linewidth=1.0,
+                linestyle="--",
+                alpha=0.9,
             )
-        else:
-            axis.tick_params(labelleft=False)
+            axis.axvline(0, color="0.55", linewidth=0.8)
+            axis.set_title(SUBPLOT_OUTCOME_LABELS[outcome])
+            axis.set_xlabel("Mean FORUM")
+            axis.grid(axis="x", color="0.9", linewidth=0.6)
+            axis.set_yticks(positions)
+            if panel_index % axes.shape[1] == 0:
+                axis.set_yticklabels(
+                    [ORDERING_LABELS.get(value, value) for value in orderings],
+                    fontsize=7,
+                )
+            else:
+                axis.tick_params(labelleft=False)
     axes[0, 0].invert_yaxis()
 
     from matplotlib.lines import Line2D
 
-    legend_handles = [
+    depth_handles = [
         Line2D(
-            [0], [0], marker="o", linestyle="none", color=plot_color,
-            markerfacecolor=plot_color, markeredgecolor=plot_color,
+            [0], [0], marker="o", linestyle="none", color=DEPTH_COLORS[depth],
+            markerfacecolor=DEPTH_COLORS[depth], markeredgecolor=DEPTH_COLORS[depth],
             label=DEPTH_LABELS[depth],
         )
-    ] + [
+        for depth in ("top10", "full")
+    ]
+    reply_handles = [
         Line2D(
             [0], [0], marker=reply_markers[reply], linestyle="none",
-            color=plot_color, markerfacecolor=plot_color,
-            markeredgecolor=plot_color,
+            color="0.25", markerfacecolor="0.25", markeredgecolor="0.25",
             label=reply,
         )
         for reply in reply_markers
-    ] + [
+    ]
+    pin_handles = [
         Line2D(
             [0], [0], marker="o", linestyle="none", color="0.25",
             markerfacecolor=fill, markeredgecolor="0.25", label=label,
         )
         for fill, label in (("none", "Unpinned"), ("0.25", "Pinned"))
     ]
-    depth_label = "top 10" if depth == "top10" else "full discussion (N-1)"
-    figure.suptitle(f"Ordering × reply × pin variants at {depth_label}")
+    default_handle = [
+        Line2D(
+            [0], [0], color="0.35", linestyle="--",
+            label="Default: reverse-chronological / trees / pinned",
+        )
+    ]
+    figure.suptitle("Ordering × reply × pin variants at top 10 and full discussion")
     figure.legend(
-        handles=legend_handles,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.965),
-        ncol=len(legend_handles),
+        handles=depth_handles,
+        title="Depth",
+        loc="upper left",
+        bbox_to_anchor=(0.04, 0.965),
         frameon=False,
+        borderaxespad=0.0,
+        handletextpad=0.6,
+        labelspacing=0.45,
     )
-    figure.tight_layout(rect=(0, 0, 1, 0.955), pad=0.6, h_pad=0.8, w_pad=0.8)
-    figure_name = (
-        "figure_ordering_policy_variants"
-        if depth == "top10"
-        else f"figure_ordering_policy_variants_{depth}"
+    figure.legend(
+        handles=reply_handles,
+        title="Reply status",
+        loc="upper left",
+        bbox_to_anchor=(0.25, 0.965),
+        frameon=False,
+        borderaxespad=0.0,
+        handletextpad=0.6,
+        labelspacing=0.45,
     )
-    paths = _save_figure(figure, output_root / figure_name)
+    figure.legend(
+        handles=pin_handles,
+        title="Pin status",
+        loc="upper left",
+        bbox_to_anchor=(0.48, 0.965),
+        frameon=False,
+        borderaxespad=0.0,
+        handletextpad=0.6,
+        labelspacing=0.45,
+    )
+    figure.legend(
+        handles=default_handle,
+        loc="upper left",
+        bbox_to_anchor=(0.68, 0.965),
+        frameon=False,
+        borderaxespad=0.0,
+        handletextpad=0.6,
+        labelspacing=0.45,
+    )
+    figure.tight_layout(rect=(0, 0, 1, 0.92), pad=0.6, h_pad=0.8, w_pad=0.8)
+    paths = _save_figure(figure, output_root / "figure_ordering_policy_variants")
     if show:
         plt.show()
     plt.close(figure)
@@ -474,7 +536,7 @@ def plot_structure_effects(
         axis.set_xlabel("Average FORUM contrast")
         axis.grid(axis="x", color="0.9", linewidth=0.6)
     depth_label = "top 10" if depth == "top10" else "full discussion (N-1)"
-    figure.suptitle(f"Reply and pinning effects at {depth_label} (paired 95% bootstrap intervals)")
+    figure.suptitle(f"Reply and pinning effects at {depth_label}")
     figure.tight_layout()
     figure_name = "figure_structure_effects" if depth == "top10" else f"figure_structure_effects_{depth}"
     paths = _save_figure(figure, output_root / figure_name)
@@ -661,8 +723,7 @@ def write_primary_effects_table(effects: pd.DataFrame, output_root: Path) -> Pat
         table.to_latex(
             escape=True,
             caption=(
-                "Top-10 FORUM effects relative to random ordering. "
-                "Cells show paired-bootstrap means and 95\\% intervals."
+                "Top-10 FORUM effects relative to random ordering."
             ),
             label="tab:ranking-algorithm-ordering-effects",
         )

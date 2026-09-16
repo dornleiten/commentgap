@@ -8,6 +8,7 @@ batch reporter, without reading a previously rendered image back from disk.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
@@ -22,6 +23,29 @@ _MODEL_VARIANT_SPECS = (
     ("neural", "metadata", "NN", "o", "#A63603"),
     ("neural", "metadata_bge", "NN-T", "^", "#FDAE6B"),
 )
+
+
+# Keep figure labels aligned with the feature vocabulary used in the
+# CommentGap1 submission.  The cached reporting tables may contain older
+# labels, so figures must canonicalise by feature key as well as by label.
+_PUBLICATION_FEATURE_LABELS = {
+    "log_words": "Comment length",
+    "toxicity_probability": "Maximum toxicity",
+    "article_similarity_top3": "Article similarity",
+    "novelty_prior_roots_model": "Novelty",
+    "novelty_prior_all_model": "Novelty",
+    "log_hours_since_article": "Hours since publication",
+    "discussion_pace": "Discussion pace",
+    "vienna_overnight": "Overnight posting",
+    "vienna_weekday_shoulder_evening": "Weekday shoulder/evening",
+    "vienna_weekend_day_evening": "Weekend daytime/evening",
+    "log_author_prior_30d_comments": "Author comments in prior 30 days",
+    "author_prior_30d_upvote_reception": "Prior upvote reception",
+    "author_prior_30d_downvote_reception": "Prior downvote reception",
+    "prior_reply_composition": "Earlier reply-to-root composition",
+    "reply_depth_centered": "Centred reply depth",
+    "text_bge": "BGE-M3 comment embedding",
+}
 
 
 def _scope_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -50,20 +74,43 @@ def _vertical_spread(axis: Any, x: pd.Series, y: pd.Series, low: pd.Series, high
     )
 
 
+def _normalise_publication_label(value: Any) -> str:
+    """Use the submission's spelling and remove implementation details."""
+    text = str(value)
+    text = text.replace(" (raw expected ordinal score)", "")
+    text = text.replace(" (log words)", "")
+    text = text.replace(" (top-three passages)", "")
+    text = text.replace(" (top three passages)", "")
+    text = re.sub(r"^aqua\s+", "AQuA: ", text, flags=re.IGNORECASE)
+    return re.sub(r"\burl\b", "URL", text, flags=re.IGNORECASE)
+
+
 def _label_column(frame: pd.DataFrame) -> pd.Series:
     if "feature_label" in frame:
-        return frame["feature_label"]
-    features = frame["feature"].astype(str)
+        fallback = frame["feature_label"].astype(str)
+    elif "feature" in frame:
+        fallback = frame["feature"].astype(str)
+    else:
+        fallback = pd.Series(frame.index.astype(str), index=frame.index)
+
+    features = frame["feature"].astype(str) if "feature" in frame else fallback
     try:
         from .features import _feature_registry
 
-        labels = {
+        registry_labels = {
             name: metadata["label"]
             for name, metadata in _feature_registry(aqua_available=True)["features"].items()
         }
     except (ImportError, KeyError):
-        labels = {}
-    return features.map(labels).fillna(features.str.replace("_", " ", regex=False).str.capitalize())
+        registry_labels = {}
+
+    labels = features.map(registry_labels).combine_first(fallback)
+    # Prefer stable internal keys over labels persisted in older artifacts.
+    for column in ("feature", "term"):
+        if column in frame:
+            mapped = frame[column].map(_PUBLICATION_FEATURE_LABELS)
+            labels = mapped.combine_first(labels)
+    return labels.map(_normalise_publication_label)
 
 
 def _clean_feature_labels(frame: pd.DataFrame) -> pd.Series:
@@ -117,7 +164,7 @@ def plot_regression_selector_differences(
     axis.grid(axis="x", color="0.9", linewidth=0.6)
     axis.set_yticks(y, _clean_feature_labels(shown))
     axis.set(
-        xlabel="Log-odds gap (editor − audience)",
+        xlabel="Log-odds gap (journalist − audience)",
         title="Largest stacked-model selector differences",
     )
     return _finish(fig, output_root, "all_regression_selector_differences", show=show)
@@ -144,7 +191,7 @@ def plot_regression_selector_coefficients(
     y = np.arange(len(shown))
     for offset, estimate, low, high, color, label in (
         (-0.12, "audience_log_odds", "audience_conf_low", "audience_conf_high", "#356a8a", "Audience"),
-        (0.12, "curator_log_odds", "curator_conf_low", "curator_conf_high", "#4b8b6f", "Editor"),
+        (0.12, "curator_log_odds", "curator_conf_low", "curator_conf_high", "#4b8b6f", "Journalist"),
     ):
         axis.errorbar(
             shown[estimate], y + offset,
@@ -188,7 +235,7 @@ def plot_winner_permutation_importance_gaps(
     axis.set_axisbelow(True)
     axis.grid(axis="x", color="0.9", linewidth=0.6)
     axis.set_yticks(y, shown["display"])
-    axis.set(xlabel="Permutation-importance gap (curator − audience nDCG loss)", title="Largest selector-specific permutation-importance gaps")
+    axis.set(xlabel="Permutation-importance gap (journalist − audience nDCG loss)", title="Largest selector-specific permutation-importance gaps")
     return _finish(fig, output_root, "all_winner_permutation_importance_gaps", show=show)
 
 
@@ -217,7 +264,7 @@ def plot_winner_permutation_importance(
     fig, axis = plt.subplots(figsize=(6.6, max(5, 0.3 * len(shown))))
     y = np.arange(len(shown))
     axis.plot(shown["audience_importance"], y - 0.12, "o", color="#356a8a", label="Audience")
-    axis.plot(shown["curator_importance"], y + 0.12, "o", color="#4b8b6f", label="Editor")
+    axis.plot(shown["curator_importance"], y + 0.12, "o", color="#4b8b6f", label="Journalist")
     axis.set_yticks(y, shown["display"])
     axis.set(xlabel="Mean permutation importance (nDCG loss)", title="Largest selector-specific permutation importances")
     axis.legend(frameon=False)
@@ -274,7 +321,7 @@ def plot_winner_shap_importance(
                 axis, shown[estimate], y + offset, shown[low], shown[high], color,
             )
     axis.plot(shown["mean_shap_audience"], y - 0.12, "o", color="#356a8a", label="Audience")
-    axis.plot(shown["mean_shap_curator"], y + 0.12, "o", color="#4b8b6f", label="Editor")
+    axis.plot(shown["mean_shap_curator"], y + 0.12, "o", color="#4b8b6f", label="Journalist")
     axis.set_yticks(y, _clean_feature_labels(shown["display"].to_frame(name="feature_label")))
     axis.axvline(0, color="black", linewidth=0.8)
     axis.set_axisbelow(True)
@@ -343,7 +390,7 @@ def plot_winner_shap_importance_gaps(
         axis.grid(axis="x", color="0.9", linewidth=0.6)
         axis.set_yticks(y, family_shown["display"])
         axis.set(
-            xlabel="Mean signed SHAP gap (editor − audience; story IQR)",
+            xlabel="Mean signed SHAP gap (journalist − audience; story IQR)",
             title=f"Largest {family_label} selector-specific signed SHAP gaps",
         )
         axis.legend(title="Model variant", frameon=False)
@@ -406,8 +453,8 @@ def plot_regression_vs_shap_gaps(
     axis.axhline(0, color="0.5", linewidth=0.8, linestyle=":")
     axis.axvline(0, color="0.5", linewidth=0.8, linestyle=":")
     axis.set(
-        xlabel="Log-odds gap (editor − audience)",
-        ylabel="Mean signed SHAP gap (editor − audience)",
+        xlabel="Log-odds gap (journalist − audience)",
+        ylabel="Mean signed SHAP gap (journalist − audience)",
         title="Regression log odds gaps vs ML SHAP gaps",
     )
     axis.grid(color="0.9", linewidth=0.6)

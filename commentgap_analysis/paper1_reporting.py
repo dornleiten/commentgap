@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -157,6 +158,196 @@ def _bootstrap_group_mean(
             }
         )
     return pd.DataFrame(rows)
+
+
+def training_ci(frame: pd.DataFrame, label: str, selector: str, metric: str) -> str:
+    """Format one bootstrap confidence interval from training metrics."""
+    row = frame.loc[
+        frame["Model"].eq(label)
+        & frame["selector"].eq(selector)
+        & frame["metric"].eq(metric)
+    ].iloc[0]
+    return f"{row['estimate']:.3f} [{row['conf_low']:.3f}, {row['conf_high']:.3f}]"
+
+
+def bold_best_latex(
+    frame: pd.DataFrame,
+    columns: list[str],
+    best_labels: dict[str, list[str]] | None = None,
+) -> pd.DataFrame:
+    """Bold the best estimate in each publication table column."""
+    output = frame.copy()
+    for column in columns:
+        if best_labels is None:
+            estimates = pd.to_numeric(
+                output[column].astype(str).str.extract(r"^\s*([-+]?[0-9]*\.?[0-9]+)")[0],
+                errors="coerce",
+            )
+            best_rows = estimates.eq(estimates.max())
+        else:
+            best_rows = output["Model"].isin(best_labels[column])
+        output.loc[best_rows, column] = output.loc[
+            best_rows, column
+        ].map(lambda value: rf"\textbf{{{value}}}")
+    return output
+
+
+def performance_ci(frame: pd.DataFrame, label: str, selector: str, metric: str) -> str:
+    """Format one bootstrap confidence interval from held-out metrics."""
+    row = frame.loc[
+        frame["model_pair_label"].eq(label)
+        & frame["selector"].eq(selector)
+        & frame["metric"].eq(metric)
+    ].iloc[0]
+    return f"{row['estimate']:.3f} [{row['conf_low']:.3f}, {row['conf_high']:.3f}]"
+
+
+def safe_re_sub(pattern: str, replacement: str, text: str, **kwargs: Any) -> str:
+    """Replace a regex match without interpreting backslashes in replacement."""
+    return re.sub(pattern, lambda _: replacement, text, **kwargs)
+
+
+def clean_regression_label(value: Any) -> str:
+    """Format a regression feature label for the publication table."""
+    return (
+        str(value)
+        .replace(" (raw expected ordinal score)", "")
+        .replace(" at the development-reply mean", " at the mean")
+        .replace("Overnight posting period", "Overnight posting period vs workday")
+        .replace("Weekday shoulder/evening", "Weekday shoulder/evening vs workday")
+        .replace("Weekend daytime/evening", "Weekend daytime/evening vs workday")
+        .removeprefix("AQuA ")
+    )
+
+
+def regression_feature_group(term: Any) -> str:
+    """Return the publication feature block for a regression term."""
+    if str(term).startswith("aqua_"):
+        return "aqua_expected"
+    if str(term) in {
+        "log_words", "sentiment_positive", "sentiment_negative",
+        "toxicity_probability", "lexdiv_length_adjusted",
+        "reading_level_length_adjusted", "url_present",
+    }:
+        return "text_nlp"
+    if str(term).startswith("log_author_") or str(term).startswith("author_prior_"):
+        return "author_history"
+    if str(term) in {"is_reply", "reply_depth_centered", "prior_reply_composition"}:
+        return "reply_structure"
+    return "semantic_timing_activity"
+
+
+def fmt_estimate(estimate: float, low: float, high: float) -> str:
+    """Format an estimate and confidence interval."""
+    return f"{estimate:.3f} [{low:.3f}, {high:.3f}]"
+
+
+def fmt_p_value(value: Any) -> str:
+    """Format a p-value for the publication table."""
+    if pd.isna(value):
+        return "--"
+    return "<0.001" if value < 0.001 else f"{value:.3f}"
+
+
+def as_number(value: Any) -> float | None:
+    """Convert a diagnostic value to a number where possible."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def fmt_diagnostic(key: str, value: Any) -> str:
+    """Format one regression diagnostic value for HTML and LaTeX."""
+    if value is None or pd.isna(value):
+        return "--"
+    text = str(value)
+    if text in {"TRUE", "True"}:
+        return "yes"
+    if text in {"FALSE", "False"}:
+        return "no"
+    number = as_number(value)
+    if number is None:
+        return text
+    if key.endswith("p_value"):
+        return fmt_p_value(number)
+    if key in {
+        "n_observations", "n_events", "n_parameters", "n_strata",
+        "development_articles", "paper2_test_articles",
+        "development_candidate_comments", "paper2_test_candidate_comments",
+        "development_curator_selections", "development_audience_selections",
+        "development_events_total", "development_stacked_rows",
+        "tie_draws_fitted", "article_selector_strata",
+        "n_model_parameters", "iterations", "likelihood_ratio_df",
+        "model_wald_df", "robust_score_df",
+        "reference_design_dimensions_over_15",
+        "midpoint_design_dimensions_over_15",
+        "reference_design_dimensions_over_30",
+        "midpoint_design_dimensions_over_30",
+    }:
+        return f"{int(number):,}"
+    if key in {"concordance", "concordance_se"}:
+        return f"{number:.3f}"
+    return f"{number:,.2f}"
+
+
+def heldout_regression_metrics(scores: pd.DataFrame) -> pd.DataFrame:
+    """Calculate held-out pairwise concordance and fixed-k set log loss."""
+    rows = []
+    for (story_id, selector), frame in scores.groupby(["story_id", "selector"], sort=False):
+        values = frame["score"].to_numpy(dtype=float)
+        selected = frame["selected"].to_numpy(dtype=bool)
+        selected_scores = values[selected]
+        unselected_scores = np.sort(values[~selected])
+        n_pairs = len(selected_scores) * len(unselected_scores)
+        if n_pairs:
+            below = np.searchsorted(unselected_scores, selected_scores, side="left")
+            tied = np.searchsorted(unselected_scores, selected_scores, side="right") - below
+            concordant_pairs = float(np.sum(below + 0.5 * tied))
+        else:
+            concordant_pairs = np.nan
+        k = int(frame["n_picks"].iloc[0])
+        log_elementary = np.full(k + 1, -np.inf)
+        log_elementary[0] = 0.0
+        seen = 0
+        for score in values:
+            upper = min(k, seen + 1)
+            for degree in range(upper, 0, -1):
+                log_elementary[degree] = np.logaddexp(
+                    log_elementary[degree], log_elementary[degree - 1] + score
+                )
+            seen += 1
+        conditional_log_loss = -(float(values[selected].sum()) - log_elementary[k])
+        rows.append({
+            "story_id": story_id,
+            "selector": selector,
+            "concordant_pairs": concordant_pairs,
+            "comparable_pairs": n_pairs,
+            "conditional_log_loss": conditional_log_loss,
+        })
+    return pd.DataFrame(rows)
+
+
+def heldout_metric_summary(
+    stratum_metrics: pd.DataFrame, draws: int = 1000, seed: int = 90210
+) -> dict[str, str]:
+    """Summarize held-out regression diagnostics with article bootstrap CIs."""
+    story_metrics = stratum_metrics.groupby("story_id", as_index=False).agg(
+        concordant_pairs=("concordant_pairs", "sum"),
+        comparable_pairs=("comparable_pairs", "sum"),
+        conditional_log_loss=("conditional_log_loss", "mean"),
+    )
+    estimate_concordance = story_metrics["concordant_pairs"].sum() / story_metrics["comparable_pairs"].sum()
+    estimate_log_loss = story_metrics["conditional_log_loss"].mean()
+    rng = np.random.default_rng(seed)
+    indices = rng.integers(0, len(story_metrics), size=(draws, len(story_metrics)))
+    sampled = story_metrics.iloc[indices.ravel()][["concordant_pairs", "comparable_pairs", "conditional_log_loss"]].to_numpy(dtype=float).reshape(draws, len(story_metrics), -1)
+    concordance_draws = sampled[:, :, 0].sum(axis=1) / sampled[:, :, 1].sum(axis=1)
+    log_loss_draws = sampled[:, :, 2].mean(axis=1)
+    return {
+        "heldout_concordance": f"{estimate_concordance:.3f} [{np.quantile(concordance_draws, 0.025):.3f}, {np.quantile(concordance_draws, 0.975):.3f}]",
+        "heldout_conditional_log_loss": f"{estimate_log_loss:.2f} [{np.quantile(log_loss_draws, 0.025):.2f}, {np.quantile(log_loss_draws, 0.975):.2f}]",
+    }
 
 
 def summarize_model_implied_gaps(

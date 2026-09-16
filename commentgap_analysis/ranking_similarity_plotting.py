@@ -40,7 +40,7 @@ def plot_umap_clusters(
         if cluster != -1
     ]
     cluster_numbers = {cluster: index + 1 for index, cluster in enumerate(cluster_ids)}
-    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     for axis, depth in zip(axes, depths):
         display_embedding = umap.UMAP(
             n_components=2, n_neighbors=15, min_dist=0.15,
@@ -170,16 +170,16 @@ def plot_umap_clusters(
     fig.legend(handles=ordering_handles, title="Ordering policy", loc="upper left",
                bbox_to_anchor=(0.78, 0.94), borderaxespad=0.0,
                handlelength=1.8, handleheight=1.2, handletextpad=0.6, labelspacing=0.5)
-    fig.legend(handles=[boundary_handle], loc="upper left", bbox_to_anchor=(0.78, 0.07),
+    fig.legend(handles=[boundary_handle], loc="upper left", bbox_to_anchor=(0.78, 0.13),
                borderaxespad=0.0, handletextpad=0.7, labelspacing=0.6)
     fig.legend(handles=reply_handles, title="Reply mode", loc="upper left",
-               bbox_to_anchor=(0.78, 0.365), borderaxespad=0.0,
-               handletextpad=0.7, labelspacing=0.6)
+               bbox_to_anchor=(0.3, 0.1), borderaxespad=0.0,
+               handletextpad=0.7, labelspacing=0.6, ncol=3)
     fig.legend(handles=pin_handles, title="Pin status", loc="upper left",
-               bbox_to_anchor=(0.78, 0.2), borderaxespad=0.0,
+               bbox_to_anchor=(0.78, 0.28), borderaxespad=0.0,
                handletextpad=0.7, labelspacing=0.6)
     fig.suptitle("UMAP-HDBSCAN Clustering of Ranking Policies in FORUM Regression Feature Space")
-    fig.tight_layout(rect=(0, 0, 0.78, 1))
+    fig.tight_layout(rect=(0, 0.05, 0.78, 1))
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     if show:
         plt.show()

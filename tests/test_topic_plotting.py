@@ -112,3 +112,28 @@ class TopicPlottingTests(unittest.TestCase):
             {value: SAMPLE_MARKERS[value] for value in (1, 3, 5, 10, 15)},
             {1: "o", 3: "^", 5: "s", 10: "D", 15: "P"},
         )
+
+
+@unittest.skipUnless(pd is not None, "Pandas is not installed")
+class ArticleOracleGainTests(unittest.TestCase):
+    def test_article_oracle_has_distinct_gain_difference_reference(self):
+        from commentgap_analysis.topic_plotting import article_oracle_target_gains
+        oracle = pd.DataFrame({'story_id': ['a'], 'topic_000': [1.], 'topic_001': [0.]})
+        votes = pd.DataFrame({'story_id': ['a', 'a'], 'topic_000': [0., 0.], 'topic_001': [1., 1.]})
+        metrics = pd.DataFrame({'story_id': ['a'], 'article_visible_cosine': [1.]})
+        base = pd.DataFrame({'story_id': ['a', 'a'], 'policy_id': ['random__loose__unpinned'] * 2,
+                             'target': ['article', 'relative_votes'], 'cosine_similarity_to_target': [.6, .8]})
+        result = article_oracle_target_gains(oracle, votes, metrics, base).iloc[0]
+        self.assertAlmostEqual(result['article'], .4)
+        self.assertAlmostEqual(result['relative_votes'], -.8)
+        self.assertAlmostEqual(result['article_minus_votes'], 1.2)
+
+    def test_vote_target_averages_draws_before_cosine(self):
+        from commentgap_analysis.topic_plotting import article_oracle_target_gains
+        oracle = pd.DataFrame({'story_id': ['a'], 'topic_000': [1.], 'topic_001': [0.]})
+        votes = pd.DataFrame({'story_id': ['a', 'a'], 'topic_000': [1., 0.], 'topic_001': [0., 1.]})
+        metrics = pd.DataFrame({'story_id': ['a'], 'article_visible_cosine': [1.]})
+        base = pd.DataFrame({'story_id': ['a', 'a'], 'policy_id': ['random__loose__unpinned'] * 2,
+                             'target': ['article', 'relative_votes'], 'cosine_similarity_to_target': [.6, .4]})
+        result = article_oracle_target_gains(oracle, votes, metrics, base).iloc[0]
+        self.assertAlmostEqual(result['relative_votes'], 2 ** -.5 - .4)
