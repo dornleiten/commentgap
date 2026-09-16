@@ -1,15 +1,12 @@
 # CommentGap
 
-This repository now centres the retrospective 2025 collection and two separate
+This repository now centres the retrospective 2025 collection and two separate main
 paper workflows:
 
 - [Paper 1](papers/paper1/README.md): reader and journalist preferences,
   including the comment-gap measure, conditional-logit regression, XGBoost,
   neural rankers, and publication reporting. The `all`-comment scope is primary;
   `root` is an appendix sensitivity.
-- [FORUM and ranking-algorithm effects](papers/forum_ranking_analysis/README.md): the FORUM and ranking-algorithm effects
-  pipeline, with a frozen Paper 1 ranker handoff, 90 policy bundles, static
-  novelty, paired inference, and an explicit random-ordering reference.
 - [Paper 2 topic agenda analysis](papers/topic_modeling/README.md): the common
   article/comment topic model and ranking-induced topic-distribution analysis.
 - [`legacy/`](legacy): the earlier paper code and pre-2025 gap-analysis
