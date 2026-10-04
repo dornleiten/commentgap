@@ -830,7 +830,8 @@ def run_ranker_workflow(
     force_recompute: bool = False,
     fold_feature_columns: dict[int, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    output_dir = Path(output_dir) / scope
+    from .paths import require_writable_destination
+    output_dir = require_writable_destination(Path(output_dir) / scope)
     output_dir.mkdir(parents=True, exist_ok=True)
     required_split_columns = {
         "story_id",

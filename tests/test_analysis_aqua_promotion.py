@@ -81,7 +81,7 @@ class AquaPromotionTests(unittest.TestCase):
                 runtime_python=runtime_python,
                 adapter_root=root / "adapters",
                 artifact_manifest=artifact_manifest,
-                requirements_lock=Path("requirements-aqua-legacy.txt").resolve(),
+                requirements_lock=Path("requirements-aqua-cpu.txt").resolve(),
                 require_parity=False,
             )
 

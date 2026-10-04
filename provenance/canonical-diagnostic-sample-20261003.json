@@ -1,0 +1,493 @@
+{
+  "date": "2026-10-03",
+  "purpose": "New canonical notebook04 diagnostic sample, authorized as replacement for unavailable historical sample",
+  "historical_sample_identity_claimed": false,
+  "notebook_validation": {
+    "notebook": "04_feature_distribution_diagnostics.ipynb",
+    "seconds": 8.7,
+    "cell_output_counts": {
+      "cg1-04-000": 0,
+      "34ab39fe": 1,
+      "8ed855e3": 1,
+      "b2075f47": 1,
+      "601d590c": 2,
+      "aab0a3c3": 1,
+      "c695fdd9": 8,
+      "5cb0489a": 1,
+      "9f9b84f7": 3,
+      "0514fbf0": 3,
+      "ad7f9a68": 2
+    },
+    "mime_counts": {
+      "text/plain": 23,
+      "text/html": 7,
+      "image/png": 13
+    },
+    "unavailable": [],
+    "objects": {
+      "BINARY_FEATURES": {
+        "type": "builtins.set",
+        "length": 5
+      },
+      "SEED": {
+        "type": "builtins.int"
+      },
+      "SAMPLE_ROWS": {
+        "type": "builtins.int"
+      },
+      "CORRELATION_ROWS": {
+        "type": "builtins.int"
+      },
+      "DUCKDB_THREADS": {
+        "type": "builtins.int"
+      },
+      "STRICT_CHECKS": {
+        "type": "builtins.bool"
+      },
+      "SOURCE_FEATURE_ROOT": {
+        "type": "pathlib.PosixPath"
+      },
+      "MODEL_DATA_ROOT": {
+        "type": "pathlib.PosixPath"
+      },
+      "OUTPUT_ROOT": {
+        "type": "pathlib.PosixPath"
+      },
+      "SAVED_DIAGNOSTICS_ROOT": {
+        "type": "pathlib.PosixPath"
+      },
+      "connection": {
+        "type": "_duckdb.DuckDBPyConnection"
+      },
+      "build_state": {
+        "type": "builtins.dict",
+        "length": 12,
+        "keys": [
+          "build_identity",
+          "build_signature",
+          "config",
+          "dataset_fingerprint",
+          "history_identity",
+          "history_signature",
+          "local_text_identity",
+          "local_text_signature",
+          "manifest",
+          "stages",
+          "status",
+          "watermark"
+        ]
+      },
+      "provenance": {
+        "type": "builtins.dict",
+        "length": 9,
+        "keys": [
+          "all",
+          "environment",
+          "execution",
+          "local_text",
+          "models",
+          "qa",
+          "root",
+          "source",
+          "watermark"
+        ]
+      },
+      "registry": {
+        "type": "builtins.dict",
+        "length": 9,
+        "keys": [
+          "categorical_reference",
+          "features",
+          "length_adjustment",
+          "local_text",
+          "models",
+          "nlp",
+          "replaced_model_features",
+          "shared_preprocessing_version",
+          "version"
+        ]
+      },
+      "choice_paths": {
+        "type": "builtins.dict",
+        "length": 2,
+        "keys": [
+          "root",
+          "all"
+        ]
+      },
+      "model_features": {
+        "type": "builtins.dict",
+        "length": 2,
+        "keys": [
+          "root",
+          "all"
+        ]
+      },
+      "scope": {
+        "type": "builtins.str",
+        "length": 3
+      },
+      "path": {
+        "type": "pathlib.PosixPath"
+      },
+      "aqua": {
+        "type": "builtins.list",
+        "length": 20
+      },
+      "available": {
+        "type": "builtins.set",
+        "length": 116
+      },
+      "missing": {
+        "type": "builtins.set",
+        "length": 0
+      },
+      "contract": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          2,
+          4
+        ]
+      },
+      "distribution_summary": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          80,
+          23
+        ]
+      },
+      "flags": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          19,
+          23
+        ]
+      },
+      "invariants": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          17,
+          3
+        ]
+      },
+      "within_story": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          80,
+          5
+        ]
+      },
+      "samples": {
+        "type": "builtins.dict",
+        "length": 2,
+        "keys": [
+          "root",
+          "all"
+        ]
+      },
+      "sample_accounting": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          2,
+          7
+        ]
+      },
+      "group": {
+        "type": "builtins.str",
+        "length": 15
+      },
+      "selected": {
+        "type": "builtins.list",
+        "length": 3
+      },
+      "aqua_features": {
+        "type": "builtins.list",
+        "length": 20
+      },
+      "correlations": {
+        "type": "builtins.dict",
+        "length": 2,
+        "keys": [
+          "root",
+          "all"
+        ]
+      },
+      "high_correlations": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          1,
+          4
+        ]
+      },
+      "selection_contrasts": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          160,
+          7
+        ]
+      },
+      "critical_distribution_failures": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          0,
+          23
+        ]
+      },
+      "critical_invariant_failures": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          0,
+          3
+        ]
+      },
+      "unidentified_features": {
+        "type": "pandas.DataFrame",
+        "shape": [
+          0,
+          5
+        ]
+      },
+      "status": {
+        "type": "builtins.dict",
+        "length": 7,
+        "keys": [
+          "status",
+          "critical_distribution_failures",
+          "critical_invariant_failures",
+          "features_without_within_story_variation",
+          "informational_heavy_tail_flags",
+          "high_correlation_pairs",
+          "output_root"
+        ]
+      }
+    },
+    "code_sha256": "f81d2bb038d28ab0d54628f783162a029819677d94d54c1c4f74007e6a99709b"
+  },
+  "tests": {
+    "passed": 313,
+    "subtests_passed": 2
+  },
+  "submitted_paper_checksums": "passed",
+  "bundle_files": [
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/additional_consistency_checks.csv",
+      "bytes": 1347,
+      "sha256": "8de5133fad812f27e83172ad2aa9e66ee5b542890e438505b763ebd426bd8b02"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_author_history_distributions.pdf",
+      "bytes": 19042,
+      "sha256": "78e4dc36eeda652a5008987d5d306a4f050b1450c93c13637c65e6f5115514a8"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_author_history_distributions.png",
+      "bytes": 101331,
+      "sha256": "7e938f2b06db8c7af4a4b4bf7f05b5415dfa04c2caa49d84cde04bca6375c2a6"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_reply_structure_distributions.pdf",
+      "bytes": 16238,
+      "sha256": "e313c4492e75164f3e05b60610600ee7e5f57dd85e5993dd0a106b75b619a8d0"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_reply_structure_distributions.png",
+      "bytes": 68055,
+      "sha256": "14f29940efd2d9a6a512736e7b924840fd9ec747aef22449c2259b1561f3e06a"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_selection_standardized_mean_differences.pdf",
+      "bytes": 23290,
+      "sha256": "81bd65da929b034c6fcd7d9e8e1d37a3de433337bb2a41ccebc2f5a6bc6a36e8"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_selection_standardized_mean_differences.png",
+      "bytes": 376591,
+      "sha256": "c93dd94a5692777ba435ae241ca189c068f18a220e0b4d674bab175b02b4eeac"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_semantic_timing_activity_distributions.pdf",
+      "bytes": 22939,
+      "sha256": "68091950172cfc2286f843a7ae8763ac87f5df4830e8f23451dce8feb4cc584b"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_semantic_timing_activity_distributions.png",
+      "bytes": 164298,
+      "sha256": "4cbb9101003d440131b3628c8499443a4e9b1b40ba412855ddb34800167e4c75"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_spearman_correlation_heatmap.pdf",
+      "bytes": 46834,
+      "sha256": "1e586d96a3496ace99eb366f13866b2d785ba41249f8c9ced60bff0fc99d2c2f"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_spearman_correlation_heatmap.png",
+      "bytes": 366261,
+      "sha256": "ee8b2d37cb2056e5f4cb28e8afd072f38ad79271d391b2df6546cf58a7dec619"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_spearman_correlations.csv",
+      "bytes": 35979,
+      "sha256": "daf612f6940dbc709c94b89523ccd8dc5d466ccdcdae2d2e05e77138a8b1d2ef"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_text_nlp_distributions.pdf",
+      "bytes": 26399,
+      "sha256": "e9b5f0d601664d1e1351b0b1d6c8ceea6872683762f2e858f47f5e0a045b7aaa"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/all_text_nlp_distributions.png",
+      "bytes": 163842,
+      "sha256": "c2d7bc0b5da04ea4e36859fe2aac6918bbe27a5398da7563d87f8c5ff44792be"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/aqua_expected_distributions_root_vs_all.pdf",
+      "bytes": 34039,
+      "sha256": "edab43020b049d16c415d1e7f91f464b29e6c18cd620a2ae15ed6aa3ecab8aa7"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/aqua_expected_distributions_root_vs_all.png",
+      "bytes": 317202,
+      "sha256": "23b9a1341afbfae63b6b64766454a35bcb1978b7980c108a699332e7884050b1"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/aqua_hard_label_distribution.csv",
+      "bytes": 6618,
+      "sha256": "2216014aa0826e3716d52c3c7b11afe59dca4348432aa2637b30d0d41abc607a"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/aqua_runtime_summary.csv",
+      "bytes": 338,
+      "sha256": "e4bc626c215fcc58446e21d5fc323a43ec3695bf23db1dcd2eb1442c8b50b27d"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/canonical_sample_provenance.json",
+      "bytes": 11772,
+      "sha256": "0ab0735686d946b5e92321363032a4c2452fec8119da1a9a95f4c82e10fa9e21"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/diagnostic_status.json",
+      "bytes": 350,
+      "sha256": "4b7b054766fd3322e584fce4d1b4af774ae53674d60474708ae7126c8453cdfc"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/full_distribution_summary.csv",
+      "bytes": 25387,
+      "sha256": "078c3ffbfee316390ca95120c70bb345f6c3c2fe854a46f5f642c48cc15a79b9"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/high_correlation_pairs.csv",
+      "bytes": 96,
+      "sha256": "8b417457d662ff8a0760277dd1585621f28d7b389ebcc11c9578137b8fe4df08"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/monthly_coverage_summary.csv",
+      "bytes": 1154,
+      "sha256": "b0b0083ea490f6d7134723f75cf1cb1f0d36cf987dc6f21f00e515a5aff1e08f"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/nlp_threshold_prevalence.csv",
+      "bytes": 407,
+      "sha256": "bec1ec4468f124a253e6958e5213d4b5d029ee52b3b2262359b4e067bb09aefe"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_author_history_distributions.pdf",
+      "bytes": 19793,
+      "sha256": "a7ec353a112580098ed7de9fd3df6fdfa07696276de4b25cf2eaafcf7a5e54f9"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_author_history_distributions.png",
+      "bytes": 101297,
+      "sha256": "b327b6243e94f7c10e7c727eda00dee7a452d2db8b9ae304136713080c17d5b5"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_reply_structure_distributions.pdf",
+      "bytes": 13800,
+      "sha256": "f7555595f9ee5e9e90078b0b5ce95dcb165b2e5c06057b0e95f13699d1ccda78"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_reply_structure_distributions.png",
+      "bytes": 39506,
+      "sha256": "a51b1e7617859b2a26708c69c472ed88e64af4ab825ee5c2a9758c7285d0d676"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_selection_standardized_mean_differences.pdf",
+      "bytes": 23963,
+      "sha256": "07f04b390cc520a1b30da661b76c3e3bc432a0833ff31671ca68f7c36508abc8"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_selection_standardized_mean_differences.png",
+      "bytes": 366304,
+      "sha256": "3a71352a3e1ff8b043a3520c1bbcaa315dfb4c23c7ec0eeb7fd1f99abd5936e9"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_semantic_timing_activity_distributions.pdf",
+      "bytes": 23345,
+      "sha256": "d3458bd93f977ee31b06ae7e5b6839a3539d6318d00774ad2424f8fd05b4fe62"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_semantic_timing_activity_distributions.png",
+      "bytes": 168281,
+      "sha256": "6148ca0c3b3eb264f87bb9d4341728a56a17907eb076ef87c4a56854554ed87c"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_spearman_correlation_heatmap.pdf",
+      "bytes": 44426,
+      "sha256": "af34b05ba5f7867df293cdb87bfbc3a9c78ebe32e0d04c1bb426ef5644927674"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_spearman_correlation_heatmap.png",
+      "bytes": 357592,
+      "sha256": "13c7191f8563abd44a8cd52112124a37e83f852211dad07c03b8c317c696859b"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_spearman_correlations.csv",
+      "bytes": 32651,
+      "sha256": "dc7f4d832263eb74eb560f61eeb304e520e8a7128c78c0bc9859bed519cc982c"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_text_nlp_distributions.pdf",
+      "bytes": 26186,
+      "sha256": "7972c8feb2fe9123bd92b866f5c3100be4267856fa61eee2191ffe8a38d311ea"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/root_text_nlp_distributions.png",
+      "bytes": 163443,
+      "sha256": "0eb359fdce4976b3883b85e4f810811504ff99b2df356c4dc5a6db94b3b87696"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/row_invariant_checks.csv",
+      "bytes": 670,
+      "sha256": "c4961f020ebb18122c1cd485ebfce6a387024ccb8d5436a1326e990e235ffc9f"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/sample_accounting.csv",
+      "bytes": 267,
+      "sha256": "d707b96d30f0a533d40b79c64dfbfff8a41814308b07064ff41df89cec56083c"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/sample_all.parquet",
+      "bytes": 34256059,
+      "sha256": "1b217e4ec255def0e442f5c3ae9d66c3583903625132d859bf9bfbe40f38aebc"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/sample_root.parquet",
+      "bytes": 34086641,
+      "sha256": "5f10f840f430a330271404778c9fafe17150550c51f62e31d0d81ae08bf4f569"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/selection_distribution_contrasts.csv",
+      "bytes": 18791,
+      "sha256": "73b051ebbc77d2434598c7e2868cd943c911b63dfdeb92b6985f76b6f190e9a3"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/story_choice_set_summary.csv",
+      "bytes": 313,
+      "sha256": "4a1b8d76f98ba2f565b2f54c81b509fd033c263ca1603b435074e4bb330ff45d"
+    },
+    {
+      "path": "artifacts/reconstructed/20261003/CG1/feature_diagnostics/within_story_feature_variation.csv",
+      "bytes": 3774,
+      "sha256": "861607de0de3620e1cdb886c5b73ac20e4653799740c9ede972cb0faf54877b9"
+    }
+  ]
+}

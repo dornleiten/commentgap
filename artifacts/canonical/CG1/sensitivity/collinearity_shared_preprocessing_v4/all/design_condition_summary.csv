@@ -1,0 +1,8 @@
+scope,variant,maximum_condition_index,dimensions_over_30,dimensions_over_15
+all,full_reference,26.7728627860308,0,6
+all,no_author_history,26.7551385249905,0,6
+all,no_aqua,13.2927113734117,0,0
+all,reply_indicator_only,26.7543921484416,0,6
+all,reply_depth_only,26.6765514217828,0,5
+all,reduced_activity,26.7681661115899,0,5
+all,selector_effect_coding_exact,11.0896828695279,0,0

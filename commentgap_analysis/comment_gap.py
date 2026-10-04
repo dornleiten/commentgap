@@ -70,6 +70,13 @@ def weighted_median(values: Sequence[float], weights: Sequence[float]) -> float:
     return float(ordered_values[index])
 
 
+def jaccard_summary(frame: pd.DataFrame, groups: Sequence[str]) -> pd.DataFrame:
+    """Average article-level Jaccard measures within the requested groups."""
+    return frame.groupby(
+        list(groups), as_index=False, observed=True,
+    )[["jaccard_mean", "jaccard_gap_mean"]].mean()
+
+
 def _require_gap_columns(path: Path) -> None:
     if not path.exists():
         raise FileNotFoundError(path)
@@ -332,16 +339,90 @@ def plot_comment_gap_by_topic(
     return save_display_figure(fig, output_root, f"{scope}_comment_gap_by_topic", show=show)
 
 
+def plot_comment_gap_by_size(
+    scores: pd.DataFrame,
+    scope: str,
+    output_root: Path | None = None,
+    *,
+    show: bool = True,
+):
+    """Draw the discussion-size plot from unlinked article plotting values."""
+    import matplotlib.pyplot as plt
+
+    size_gap = scores.query("scope == @scope").dropna(
+        subset=["n_candidates", "n_picks", "gap_score"]
+    ).copy()
+    size_gap["log_candidates"] = np.log10(size_gap["n_candidates"].astype(float))
+    size_gap["size_bin"] = pd.qcut(size_gap["log_candidates"], q=12, duplicates="drop")
+    binned = (
+        size_gap.groupby("size_bin", observed=True)
+        .agg(
+            x=("log_candidates", "mean"), gap_mean=("gap_score", "mean"),
+            gap_median=("gap_score", "median"),
+            gap_q25=("gap_score", lambda values: values.quantile(0.25)),
+            gap_q75=("gap_score", lambda values: values.quantile(0.75)),
+        ).reset_index(drop=True)
+    )
+    pick_binned = (
+        size_gap.groupby("n_picks", observed=True)
+        .agg(
+            x=("n_picks", "first"), gap_mean=("gap_score", "mean"),
+            gap_median=("gap_score", "median"),
+            gap_q25=("gap_score", lambda values: values.quantile(0.25)),
+            gap_q75=("gap_score", lambda values: values.quantile(0.75)),
+        ).reset_index(drop=True)
+    )
+    fig, (axis, pick_axis) = plt.subplots(1, 2, figsize=(11.0, 4.8), sharey=True)
+    axis.scatter(size_gap["log_candidates"], size_gap["gap_score"],
+                 color="0.55", s=12, alpha=0.20, linewidths=0, rasterized=True)
+    for current_axis in (axis, pick_axis):
+        current_axis.axhline(0.5, color="0.35", linestyle="--", linewidth=1,
+                             label="Random-set expectation")
+    axis.fill_between(binned["x"], binned["gap_q25"], binned["gap_q75"],
+                      color="tab:orange", alpha=0.20, linewidth=0)
+    axis.plot(binned["x"], binned["gap_mean"], color="tab:orange", linewidth=2,
+              label="Binned mean")
+    axis.plot(binned["x"], binned["gap_median"], color="tab:blue", linewidth=1.8,
+              label="Binned median")
+    pick_axis.scatter(
+        size_gap["n_picks"] + np.random.default_rng(20260912).uniform(-0.12, 0.12, len(size_gap)),
+        size_gap["gap_score"], color="0.55", s=12, alpha=0.20,
+        linewidths=0, rasterized=True,
+    )
+    pick_axis.fill_between(pick_binned["x"], pick_binned["gap_q25"], pick_binned["gap_q75"],
+                           color="tab:orange", alpha=0.20, linewidth=0)
+    pick_axis.plot(pick_binned["x"], pick_binned["gap_mean"], color="tab:orange", linewidth=2)
+    pick_axis.plot(pick_binned["x"], pick_binned["gap_median"], color="tab:blue", linewidth=1.8)
+    pick_axis.set_xticks(pick_binned["x"].astype(int))
+    pick_axis.set_xlabel("Number of Editors' Picks")
+    axis.set(xlabel="Discussion size, log10(candidate comments)",
+             ylabel="Normalized curator–audience rank gap",
+             title="Comment gap by discussion size", ylim=(0, 1))
+    for current_axis in (axis, pick_axis):
+        current_axis.grid(axis="y", color="0.88", linewidth=0.7)
+    axis.legend(frameon=False, loc="upper right")
+    fig.tight_layout()
+    return save_display_figure(fig, output_root, f"{scope}_comment_gap_vs_discussion_size",
+                               show=show, dpi=220)
+
+
 def run_comment_gap_analysis(
     *,
-    model_data_root: Path = Path("model_output/selection_2025/model_data"),
-    descriptives_root: Path = Path("model_output/selection_2025/paper1/descriptives"),
-    output_root: Path = Path("model_output/selection_2025/paper1/comment_gap"),
+    model_data_root: Path | None = None,
+    descriptives_root: Path | None = None,
+    output_root: Path | None = None,
     scopes: Iterable[str] = ("all",),
     threads: int = 4,
     make_figures: bool = True,
 ) -> dict:
     """Build stage-6 article scores, summaries, figures, and a final manifest."""
+    from .paths import ExecutionContext, require_writable_destination
+
+    context = ExecutionContext.from_values()
+    model_data_root = Path(model_data_root) if model_data_root is not None else context.read_root("model_data")
+    descriptives_root = Path(descriptives_root) if descriptives_root is not None else context.read_root("frozen_cg1_descriptives")
+    output_root = Path(output_root) if output_root is not None else context.output_root("CG1/comment_gap")
+    output_root = require_writable_destination(output_root)
     scopes = _normalise_scopes(scopes)
     split_path = model_data_root / "master_article_split.parquet"
     topics_path = descriptives_root / "article_topics.parquet"

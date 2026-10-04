@@ -377,19 +377,60 @@ def plot_topic_search_metrics(
     final_fit_corpus: str | None = None,
     combine: bool = False,
     show: bool = True,
+    saved_frontier: pd.DataFrame | None = None,
+    output_root: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build the search summary and write the AMI/coverage figures."""
+    """Build the search summary and write the AMI/coverage figures.
+
+    ``saved_frontier`` supplies topic-size diagnostics without reading per-run
+    assignments. The Pareto membership is recalculated from the search inputs.
+    ``output_root`` sends figures to a separate writable location,
+    leaving the saved search directory read-only.
+    """
     plot_data = build_topic_search_plot_data(search_report, search_seeds)
-    frontier = build_topic_search_frontier(plot_data, search_root, stability_seeds)
     frontier_columns = [
         "configuration", "article_coverage", "comment_coverage",
         "raw_pooled_common_ami", "topics",
         "docs_in_topics_le5", "docs_in_topics_le10",
     ]
-    frontier[frontier_columns].to_csv(
-        search_root / "pareto_frontier_article_comment_coverage_pooled_common_ami.csv",
-        index=False,
-    )
+    if saved_frontier is None:
+        frontier = build_topic_search_frontier(plot_data, search_root, stability_seeds)
+        frontier[frontier_columns].to_csv(
+            search_root / "pareto_frontier_article_comment_coverage_pooled_common_ami.csv",
+            index=False,
+        )
+    else:
+        missing_columns = set(frontier_columns).difference(saved_frontier.columns)
+        if missing_columns:
+            raise ValueError(
+                "Saved Pareto frontier is missing columns: "
+                + ", ".join(sorted(missing_columns))
+            )
+        saved_frontier = saved_frontier.loc[:, frontier_columns].copy()
+        if saved_frontier["configuration"].duplicated().any():
+            raise ValueError("Saved Pareto frontier contains duplicate configurations")
+        saved_configurations = set(saved_frontier["configuration"])
+        unknown_configurations = saved_configurations.difference(plot_data["configuration"])
+        if unknown_configurations:
+            raise ValueError(
+                "Saved Pareto frontier has configurations absent from the saved search summary: "
+                + ", ".join(sorted(unknown_configurations))
+            )
+        computed_configurations = set(
+            plot_data.loc[plot_data["pareto_frontier"], "configuration"]
+        )
+        if saved_configurations != computed_configurations:
+            raise ValueError(
+                "Saved Pareto diagnostics do not match the frontier recalculated "
+                "from the search summary and seed metrics"
+            )
+        diagnostics = saved_frontier[
+            ["configuration", "topics", "docs_in_topics_le5", "docs_in_topics_le10"]
+        ]
+        frontier = plot_data.loc[plot_data["pareto_frontier"]].merge(
+            diagnostics, on="configuration", validate="one_to_one",
+        )
+    plot_root = Path(output_root) if output_root is not None else search_root
     print(f"Three-objective Pareto frontier: {len(frontier)} of {len(plot_data)} configurations")
 
     cluster_size_values = sorted(plot_data.min_cluster_size.unique())
@@ -417,12 +458,12 @@ def plot_topic_search_metrics(
     ]
     if combine:
         _plot_combined_metrics(
-            plot_data, search_root, metrics, cluster_sizes, final_setup, show=show,
+            plot_data, plot_root, metrics, cluster_sizes, final_setup, show=show,
         )
     else:
         for x_column, x_label, y_column, y_label, title, file_stem in metrics:
             _plot_metric(
-                plot_data, search_root, x_column, x_label, y_column, y_label,
+                plot_data, plot_root, x_column, x_label, y_column, y_label,
                 file_stem, cluster_sizes, final_setup, title=title, show=show,
             )
     return plot_data, frontier
@@ -447,6 +488,7 @@ def plot_topic_policy_exposure_coverage(
     ordering_labels: Mapping[str, str],
     output_prefix: str = "",
     exposure_label: str = "inverse-rank",
+    show: bool = True,
 ) -> pd.DataFrame:
     """Plot policy mean valid exposure against article-alignment gain."""
 
@@ -537,7 +579,8 @@ def plot_topic_policy_exposure_coverage(
         dpi=220,
         bbox_inches="tight",
     )
-    plt.show()
+    if show:
+        plt.show()
     plt.close(figure)
     return coverage_summary
 
@@ -575,13 +618,15 @@ def _add_contrast_divider(
         axis.invert_yaxis()
 
 def plot_topic_policy_concentration_effects(
-    concentration_story: pd.DataFrame,
+    concentration_story: pd.DataFrame | None,
     *,
     contrast_order: Sequence[tuple[str, str]],
     output_root: Path | str,
     ordering_labels: Mapping[str, str],
     reply_labels: Mapping[str, str],
     output_stem: str = "topic_policy_concentration_effects",
+    saved_effects: pd.DataFrame | None = None,
+    show: bool = True,
 ) -> pd.DataFrame:
     """Plot absolute and comparative normalized-entropy policy effects."""
 
@@ -606,37 +651,32 @@ def plot_topic_policy_concentration_effects(
             "Entropy difference",
         ),
     ]
-    rows = []
-    for column, _, _ in panel_specs:
-        for family, contrast in contrast_order:
-            paired = _policy_contrast_values(
-                concentration_story,
-                family,
-                contrast,
-                column,
-            )
-            values = (
-                paired["treatment"]
-                if family == "ordering_vs_random"
-                else paired["difference"]
-            )
-            mean, lower, upper, n = _mean_interval(values)
-            rows.append({
-                "metric": column,
-                "family": family,
-                "contrast": contrast,
-                "label": _policy_contrast_label(
-                    family,
-                    contrast,
-                    ordering_labels=ordering_labels,
-                    reply_labels=reply_labels,
-                ),
-                "mean": mean,
-                "lower": lower,
-                "upper": upper,
-                "n": n,
-            })
-    effects = pd.DataFrame(rows)
+    if saved_effects is None:
+        if concentration_story is None:
+            raise ValueError("concentration_story or saved_effects is required")
+        rows = []
+        for column, _, _ in panel_specs:
+            for family, contrast in contrast_order:
+                paired = _policy_contrast_values(
+                    concentration_story, family, contrast, column,
+                )
+                values = (paired["treatment"] if family == "ordering_vs_random"
+                          else paired["difference"])
+                mean, lower, upper, n = _mean_interval(values)
+                rows.append({
+                    "metric": column, "family": family, "contrast": contrast,
+                    "label": _policy_contrast_label(
+                        family, contrast, ordering_labels=ordering_labels,
+                        reply_labels=reply_labels,
+                    ),
+                    "mean": mean, "lower": lower, "upper": upper, "n": n,
+                })
+        effects = pd.DataFrame(rows)
+    else:
+        effects = saved_effects.copy()
+        required = {"metric", "family", "contrast", "label", "mean", "lower", "upper", "n"}
+        if not required.issubset(effects):
+            raise ValueError("Saved concentration effects are incomplete")
     effects["contrast_index"] = pd.Categorical(
         list(zip(effects["family"], effects["contrast"])),
         categories=list(contrast_order),
@@ -676,7 +716,8 @@ def plot_topic_policy_concentration_effects(
     figure.tight_layout(rect=(0, 0, 1, 0.96), pad=0.3)
     path = output_root / f"{output_stem}.png"
     figure.savefig(path, dpi=220, bbox_inches="tight")
-    plt.show()
+    if show:
+        plt.show()
     plt.close(figure)
     return effects
 
@@ -1258,15 +1299,18 @@ def plot_article_relative_votes_marginal_effects(
     return result
 
 def plot_article_relative_votes_progress_scatter(
-    reference_target_metrics: pd.DataFrame,
-    metrics: pd.DataFrame,
-    js_oracle_metrics: pd.DataFrame,
+    reference_target_metrics: pd.DataFrame | None,
+    metrics: pd.DataFrame | None,
+    js_oracle_metrics: pd.DataFrame | None,
     *,
     score_policies: Mapping[str, object],
     output_root: Path | str,
     ordering_labels: Mapping[str, str],
     output_prefix: str = "",
     distance_metric: str | None = None,
+    saved_summary: pd.DataFrame | None = None,
+    saved_oracle_gain: Mapping[str, float] | None = None,
+    show: bool = True,
 ) -> pd.DataFrame:
     """Plot two independent raw-gain axes toward article and relative votes."""
 
@@ -1276,68 +1320,66 @@ def plot_article_relative_votes_progress_scatter(
 
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
-    source = reference_target_metrics.loc[
-        reference_target_metrics["target"].isin(["article", "relative_votes"]),
-        [
-            "story_id",
-            "policy_id",
-            "ordering",
-            "reply_mode",
-            "pinned",
-            "target",
-            "js_raw_target_gain",
-            "cosine_raw_target_gain",
-        ],
-    ].copy()
-    summary = (
-        source
-        .groupby(["target", "policy_id", "ordering", "reply_mode", "pinned"], as_index=False)
-        .agg(
-            js_gain=("js_raw_target_gain", "mean"),
-            cosine_gain=("cosine_raw_target_gain", "mean"),
-            n_stories=("story_id", "nunique"),
+    if saved_summary is None:
+        if reference_target_metrics is None or metrics is None or js_oracle_metrics is None:
+            raise ValueError("Per-story metrics or saved plot summary and oracle gain are required")
+        source = reference_target_metrics.loc[
+            reference_target_metrics["target"].isin(["article", "relative_votes"]),
+            ["story_id", "policy_id", "ordering", "reply_mode", "pinned",
+             "target", "js_raw_target_gain", "cosine_raw_target_gain"],
+        ].copy()
+        summary = (
+            source.groupby(["target", "policy_id", "ordering", "reply_mode", "pinned"],
+                           as_index=False)
+            .agg(js_gain=("js_raw_target_gain", "mean"),
+                 cosine_gain=("cosine_raw_target_gain", "mean"),
+                 n_stories=("story_id", "nunique"))
+            .pivot_table(index=["policy_id", "ordering", "reply_mode", "pinned", "n_stories"],
+                         columns="target", values=["js_gain", "cosine_gain"])
+            .reset_index()
         )
-        .pivot_table(
-            index=["policy_id", "ordering", "reply_mode", "pinned", "n_stories"],
-            columns="target",
-            values=["js_gain", "cosine_gain"],
-        )
-        .reset_index()
-    )
-    summary.columns = [
-        "_".join(str(value) for value in column if str(value) != "")
-        if isinstance(column, tuple) else str(column)
-        for column in summary.columns
-    ]
+        summary.columns = [
+            "_".join(str(value) for value in column if str(value) != "")
+            if isinstance(column, tuple) else str(column)
+            for column in summary.columns
+        ]
+    else:
+        summary = saved_summary.copy()
+        required = {"policy_id", "ordering", "reply_mode", "pinned", "n_stories",
+                    "js_gain_article", "js_gain_relative_votes",
+                    "cosine_gain_article", "cosine_gain_relative_votes"}
+        if not required.issubset(summary):
+            raise ValueError("Saved article/vote plot summary is incomplete")
     summary.to_csv(
         output_root / f"{output_prefix}topic_policy_article_relative_votes_raw_gain_scatter.csv",
         index=False,
     )
 
-    random_reference = metrics.loc[
-        metrics["policy_id"].eq("random__loose__unpinned"),
-        ["story_id", "article_visible_js_distance", "article_visible_cosine"],
-    ].copy()
-    random_reference["story_id"] = random_reference["story_id"].astype(str)
-    oracle_reference = js_oracle_metrics[
-        ["story_id", "article_visible_js_distance", "article_visible_cosine"]
-    ].copy()
-    oracle_reference["story_id"] = oracle_reference["story_id"].astype(str)
-    oracle = random_reference.merge(
-        oracle_reference,
-        on="story_id",
-        suffixes=("_random", "_oracle"),
-    )
-    oracle_gain = {
-        "js_gain": float(
-            (oracle["article_visible_js_distance_random"]
-             - oracle["article_visible_js_distance_oracle"]).mean()
-        ),
-        "cosine_gain": float(
-            (oracle["article_visible_cosine_oracle"]
-             - oracle["article_visible_cosine_random"]).mean()
-        ),
-    }
+    if saved_oracle_gain is None:
+        if metrics is None or js_oracle_metrics is None:
+            raise ValueError("Oracle metrics or saved oracle gain are required")
+        random_reference = metrics.loc[
+            metrics["policy_id"].eq("random__loose__unpinned"),
+            ["story_id", "article_visible_js_distance", "article_visible_cosine"],
+        ].copy()
+        random_reference["story_id"] = random_reference["story_id"].astype(str)
+        oracle_reference = js_oracle_metrics[
+            ["story_id", "article_visible_js_distance", "article_visible_cosine"]
+        ].copy()
+        oracle_reference["story_id"] = oracle_reference["story_id"].astype(str)
+        oracle = random_reference.merge(
+            oracle_reference, on="story_id", suffixes=("_random", "_oracle")
+        )
+        oracle_gain = {
+            "js_gain": float((oracle["article_visible_js_distance_random"]
+                              - oracle["article_visible_js_distance_oracle"]).mean()),
+            "cosine_gain": float((oracle["article_visible_cosine_oracle"]
+                                  - oracle["article_visible_cosine_random"]).mean()),
+        }
+    else:
+        if not {"js_gain", "cosine_gain"}.issubset(saved_oracle_gain):
+            raise ValueError("Saved oracle gain lacks JS or cosine values")
+        oracle_gain = dict(saved_oracle_gain)
 
     reply_markers = REPLY_DISPLAY_MARKERS
     reply_labels = {
@@ -1535,7 +1577,8 @@ def plot_article_relative_votes_progress_scatter(
         )
         figure.tight_layout(rect=(0, 0.2, 0.63, 1))
         figure.savefig(output_root / output_name, dpi=220, bbox_inches="tight")
-        plt.show()
+        if show:
+            plt.show()
         plt.close(figure)
     return summary
 
@@ -1603,8 +1646,8 @@ def article_oracle_target_gains(
 
 
 def plot_combined_article_alignment_effects(
-    reference_target_metrics: pd.DataFrame,
-    oracle_gains: pd.DataFrame,
+    reference_target_metrics: pd.DataFrame | None,
+    oracle_gains: pd.DataFrame | None,
     *,
     contrast_order: Sequence[tuple[str, str]],
     output_root: Path | str,
@@ -1612,6 +1655,9 @@ def plot_combined_article_alignment_effects(
     reply_labels: Mapping[str, str],
     distance_metric: str = "cosine",
     output_prefix: str = "",
+    saved_effects: pd.DataFrame | None = None,
+    saved_oracle_mean: Mapping[str, float] | None = None,
+    show: bool = True,
 ) -> pd.DataFrame:
     """Combine paired article-gain and article-minus-vote-gain effects."""
     import matplotlib.pyplot as plt
@@ -1619,27 +1665,39 @@ def plot_combined_article_alignment_effects(
 
     if distance_metric not in {"cosine", "jsd"}:
         raise ValueError("distance_metric must be cosine or jsd")
-    gain = "cosine_raw_target_gain" if distance_metric == "cosine" else "js_raw_target_gain"
-    keys = ["story_id", "policy_id", "ordering", "reply_mode", "pinned"]
-    paired = reference_target_metrics.pivot(index=keys, columns="target", values=gain).reset_index()
-    paired["article_minus_votes"] = paired["article"] - paired["relative_votes"]
+    if saved_effects is None:
+        if reference_target_metrics is None or oracle_gains is None:
+            raise ValueError("Per-story metrics or saved effects and oracle means are required")
+        gain = "cosine_raw_target_gain" if distance_metric == "cosine" else "js_raw_target_gain"
+        keys = ["story_id", "policy_id", "ordering", "reply_mode", "pinned"]
+        paired = reference_target_metrics.pivot(index=keys, columns="target", values=gain).reset_index()
+        paired["article_minus_votes"] = paired["article"] - paired["relative_votes"]
     series = [("article", "#0072B2", -.13, "vs random: article gain"),
               ("article_minus_votes", "#D55E00", .13, "vs relative votes: article − vote gain")]
-    rows = []
-    for name, _, _, _ in series:
-        for family, contrast in contrast_order:
-            values = _policy_contrast_values(paired, family, contrast, name)["difference"]
-            mean, lower, upper, n = _mean_interval(values)
-            rows.append(dict(series=name, family=family, contrast=contrast,
-                             label=_policy_contrast_label(family, contrast, ordering_labels=ordering_labels,
-                                                          reply_labels=reply_labels),
-                             mean=mean, lower=lower, upper=upper, n=n))
-    result = pd.DataFrame(rows)
+    if saved_effects is None:
+        rows = []
+        for name, _, _, _ in series:
+            for family, contrast in contrast_order:
+                values = _policy_contrast_values(paired, family, contrast, name)["difference"]
+                mean, lower, upper, n = _mean_interval(values)
+                rows.append(dict(series=name, family=family, contrast=contrast,
+                                 label=_policy_contrast_label(family, contrast, ordering_labels=ordering_labels,
+                                                              reply_labels=reply_labels),
+                                 mean=mean, lower=lower, upper=upper, n=n))
+        result = pd.DataFrame(rows)
+    else:
+        result = saved_effects.copy()
+        if saved_oracle_mean is None or not {"article", "article_minus_votes"}.issubset(saved_oracle_mean):
+            raise ValueError("Saved combined effects require both oracle means")
+        required = {"series", "family", "contrast", "label", "mean", "lower", "upper", "n"}
+        if not required.issubset(result):
+            raise ValueError("Saved combined effects are incomplete")
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     stem = f"{output_prefix}topic_policy_combined_article_{distance_metric}_gain_effects"
     result.to_csv(output_root / f"{stem}.csv", index=False)
-    oracle_gains.to_csv(output_root / f"{stem}_oracle_by_story.csv", index=False)
+    if oracle_gains is not None:
+        oracle_gains.to_csv(output_root / f"{stem}_oracle_by_story.csv", index=False)
     figure, axis = plt.subplots(figsize=(6.6, max(5.2, .30 * len(contrast_order))))
     handles = []
     for name, color, offset, label in series:
@@ -1650,7 +1708,8 @@ def plot_combined_article_alignment_effects(
                           xerr=[[row["mean"]-row["lower"]], [row["upper"]-row["mean"]]],
                           fmt=marker, markersize=3.5 if marker == "o" else 4.5,
                           capsize=3, color=color, ecolor=color, alpha=.9)
-        reference = oracle_gains[name].mean()
+        reference = (oracle_gains[name].mean() if saved_oracle_mean is None
+                     else saved_oracle_mean[name])
         axis.axvline(reference, color=color, linewidth=1.1, linestyle="--", alpha=.8)
         oracle_label = "Oracle vs random" if name == "article" else "Oracle vs relative votes"
         axis.text(
@@ -1680,6 +1739,7 @@ def plot_combined_article_alignment_effects(
     figure.tight_layout(rect=(0, .01, 1, .89), pad=.3)
     figure.savefig(output_root / f"{stem}.png", dpi=220, bbox_inches="tight")
     figure.savefig(output_root / f"{stem}.pdf", bbox_inches="tight")
-    plt.show()
+    if show:
+        plt.show()
     plt.close(figure)
     return result

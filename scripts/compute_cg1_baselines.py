@@ -23,6 +23,7 @@ from commentgap_analysis.paper1_reporting import (
     balanced_macro_f1_at_k,
 )
 from commentgap_analysis.ranking import bootstrap_metric_summary, evaluate_rank_scores
+from commentgap_analysis.paths import ExecutionContext, add_execution_arguments
 
 
 BASELINES = {
@@ -177,41 +178,37 @@ def compute_baselines(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--choice-set",
-        type=Path,
-        default=Path("model_output/selection_2025/model_data/choice_set_all.parquet"),
-    )
-    parser.add_argument(
-        "--split",
-        type=Path,
-        default=Path("model_output/selection_2025/model_data/master_article_split.parquet"),
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=Path("model_output/selection_2025/paper1/reporting/tables/cg1_baseline_performance.csv"),
-    )
-    parser.add_argument(
-        "--assumptions-output",
-        type=Path,
-        default=Path("model_output/selection_2025/paper1/reporting/tables/cg1_baseline_assumptions.json"),
-    )
+    parser.add_argument("--choice-set", type=Path, default=None)
+    parser.add_argument("--split", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--assumptions-output", type=Path, default=None)
     parser.add_argument("--bootstrap-draws", type=int, default=1_000)
     parser.add_argument("--balance-draws", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20_260_813)
+    add_execution_arguments(parser)
     args = parser.parse_args()
+    context = ExecutionContext.from_values(mode=args.mode, run_id=args.run_id, repo_root=args.repo_root)
+    choice_set = context.read_root("model_data") / "choice_set_all.parquet" if args.choice_set is None else context.read_path(args.choice_set)
+    split = context.read_root("model_data") / "master_article_split.parquet" if args.split is None else context.read_path(args.split)
+    if context.mode == "frozen":
+        report_root = context.staging_output("rendered/CG1/baselines", explicit=args.output.parent if args.output else None)
+    else:
+        report_root = context.output_root("CG1/baselines", explicit=args.output.parent if args.output else None)
+    output_path = args.output if args.output is not None else report_root / "cg1_baseline_performance.csv"
+    assumptions_path = args.assumptions_output if args.assumptions_output is not None else report_root / "cg1_baseline_assumptions.json"
+    output_path = context.paths.require_writable(output_path, cwd=context.cwd)
+    assumptions_path = context.paths.require_writable(assumptions_path, cwd=context.cwd)
     output, assumptions = compute_baselines(
-        args.choice_set,
-        args.split,
+        choice_set,
+        split,
         draws=args.bootstrap_draws,
         balance_draws=args.balance_draws,
         seed=args.seed,
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.assumptions_output.parent.mkdir(parents=True, exist_ok=True)
-    output.to_csv(args.output, index=False)
-    args.assumptions_output.write_text(json.dumps(assumptions, indent=2) + "\n")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    assumptions_path.parent.mkdir(parents=True, exist_ok=True)
+    output.to_csv(output_path, index=False)
+    assumptions_path.write_text(json.dumps(assumptions, indent=2) + "\n")
     print(output.to_string(index=False))
     print(json.dumps(assumptions, sort_keys=True))
 

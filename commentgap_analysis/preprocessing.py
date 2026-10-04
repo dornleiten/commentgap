@@ -347,8 +347,9 @@ def prepare_shared_model_data(
     """Materialize the frozen split and shared transformed choice sets."""
     import pyarrow.parquet as pq
 
+    from .paths import require_writable_destination
     feature_root = Path(feature_root)
-    output_root = Path(output_root)
+    output_root = require_writable_destination(output_root)
     source_paths = {
         scope: feature_root / f"choice_set_{scope}.parquet" for scope in ("root", "all")
     }

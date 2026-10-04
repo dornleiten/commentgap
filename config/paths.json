@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "paths": {
+    "outputs": "outputs",
+    "raw_scrape": {
+      "path": "data/raw/scrape_2025",
+      "legacy": [
+        "data/scrape_2025"
+      ]
+    },
+    "aqua": {
+      "path": "data/derived/aqua",
+      "legacy": [
+        "model_output/selection_2025/aqua"
+      ]
+    },
+    "embeddings": {
+      "path": "data/derived/embeddings",
+      "legacy": [
+        "model_output/selection_2025/embeddings"
+      ]
+    },
+    "similarities": {
+      "path": "data/derived/similarities",
+      "legacy": [
+        "model_output/selection_2025/similarities"
+      ]
+    },
+    "features": {
+      "path": "data/derived/features",
+      "legacy": [
+        "model_output/selection_2025/features"
+      ]
+    },
+    "model_data": {
+      "path": "data/derived/model_data",
+      "legacy": [
+        "model_output/selection_2025/model_data"
+      ]
+    },
+    "source_split": {
+      "path": "provenance/splits/master_article_split.parquet",
+      "legacy": [
+        "model_output/selection_2025/xgboost_paper2/master_article_split.parquet"
+      ]
+    },
+    "frozen_shared": "artifacts/canonical/shared",
+    "frozen_cg1_feature_diagnostics": {
+      "path": "artifacts/canonical/CG1/feature_diagnostics",
+      "legacy": [
+        "model_output/selection_2025/feature_diagnostics"
+      ]
+    },
+    "frozen_cg1_regression": {
+      "path": "artifacts/canonical/CG1/regression",
+      "legacy": [
+        "model_output/selection_2025/regression"
+      ]
+    },
+    "frozen_cg1_sensitivity": {
+      "path": "artifacts/canonical/CG1/sensitivity",
+      "legacy": [
+        "model_output/selection_2025/regression_sensitivity"
+      ]
+    },
+    "frozen_cg1_factorial_rankers": {
+      "path": "artifacts/canonical/CG1/rankers/factorial",
+      "legacy": [
+        "model_output/selection_2025/factorial_rankers"
+      ]
+    },
+    "frozen_cg1_neural_rankers": {
+      "path": "artifacts/canonical/CG1/rankers/neural",
+      "legacy": [
+        "model_output/selection_2025/neural_rankers"
+      ]
+    },
+    "frozen_cg1_descriptives": {
+      "path": "artifacts/canonical/CG1/descriptives",
+      "legacy": [
+        "model_output/selection_2025/paper1/descriptives"
+      ]
+    },
+    "frozen_cg1_comment_gap": {
+      "path": "artifacts/canonical/CG1/comment_gap",
+      "legacy": [
+        "model_output/selection_2025/paper1/comment_gap"
+      ]
+    },
+    "frozen_cg1_winners": {
+      "path": "artifacts/canonical/CG1/winners",
+      "legacy": [
+        "model_output/selection_2025/paper1/factorial_winners"
+      ]
+    },
+    "frozen_cg1_reporting": {
+      "path": "artifacts/canonical/CG1/reporting",
+      "legacy": [
+        "model_output/selection_2025/paper1/reporting"
+      ]
+    },
+    "frozen_cg1_rendered": {
+      "path": "artifacts/canonical/CG1/rendered",
+      "legacy": [
+        "html"
+      ]
+    },
+    "frozen_cg2_forum": {
+      "path": "artifacts/canonical/CG2/forum",
+      "legacy": [
+        "model_output/selection_2025/forum_ranking_analysis"
+      ]
+    },
+    "frozen_cg2_topic_source": {
+      "path": "artifacts/canonical/CG2/topic_source",
+      "legacy": [
+        "model_output/selection_2025/paper2"
+      ]
+    },
+    "frozen_cg2_ranking_similarity": {
+      "path": "artifacts/canonical/CG2/ranking_similarity",
+      "legacy": [
+        "model_output/selection_2025/ranking_policy_similarity"
+      ]
+    },
+    "frozen_cg2_topics_runs": {
+      "path": "artifacts/canonical/CG2/topics/runs",
+      "legacy": [
+        "model_output/selection_2025/paper2_topic_runs"
+      ]
+    },
+    "frozen_cg2_topics_diagnostics": {
+      "path": "artifacts/canonical/CG2/topics/diagnostics",
+      "legacy": [
+        "model_output/selection_2025/paper2_topic_diagnostics"
+      ]
+    },
+    "reconstruction_shared_scrape": "artifacts/canonical/shared/scrape_summaries",
+    "reconstruction_cg1_feature_diagnostics": "artifacts/canonical/CG1/feature_diagnostics",
+    "reconstruction_cg1_development_scores": "artifacts/canonical/CG1/development_scores",
+    "reconstruction_cg2_pipeline": "artifacts/canonical/CG2/pipeline",
+    "reconstruction_cg2_ranking_similarity": "artifacts/canonical/CG2/ranking_similarity"
+  }
+}

@@ -33,6 +33,7 @@ from aqua_runtime.schema import (
     sha256_file,
     text_hash,
 )
+from .paths import PathContractError, require_writable_destination
 
 from .features import (
     _atomic_json,
@@ -43,7 +44,7 @@ from .features import (
 )
 
 
-DEFAULT_AQUA_OUTPUT_ROOT = Path("model_output/selection_2025/aqua")
+DEFAULT_AQUA_OUTPUT_ROOT: Path | None = None
 DEFAULT_AQUA_RUNTIME_PYTHON = Path(".venv-aqua/bin/python")
 DEFAULT_AQUA_ADAPTER_ROOT = Path(
     f".cache/aqua-upstream-{AQUA_UPSTREAM_COMMIT[:7]}/trained adapters"
@@ -51,7 +52,7 @@ DEFAULT_AQUA_ADAPTER_ROOT = Path(
 DEFAULT_AQUA_ARTIFACT_MANIFEST = (
     Path(__file__).resolve().parents[1] / "aqua_runtime" / "artifacts.json"
 )
-DEFAULT_AQUA_REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements-aqua-legacy.txt"
+DEFAULT_AQUA_REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements-aqua-cpu.txt"
 DEFAULT_AQUA_CUDA_REQUIREMENTS = (
     Path(__file__).resolve().parents[1] / "requirements-aqua-cuda113.txt"
 )
@@ -59,8 +60,8 @@ DEFAULT_AQUA_CUDA_REQUIREMENTS = (
 
 @dataclass(frozen=True)
 class AquaBuildConfig:
-    data_root: Path = Path("data/scrape_2025")
-    output_root: Path = DEFAULT_AQUA_OUTPUT_ROOT
+    data_root: Path = Path("data/raw/scrape_2025")
+    output_root: Path | None = DEFAULT_AQUA_OUTPUT_ROOT
     year: int = 2025
     runtime_python: Path = DEFAULT_AQUA_RUNTIME_PYTHON
     adapter_root: Path = DEFAULT_AQUA_ADAPTER_ROOT
@@ -89,7 +90,9 @@ class AquaBuildConfig:
             "adapter_root",
             "artifact_manifest",
         ):
-            object.__setattr__(self, name, Path(getattr(self, name)))
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, Path(value))
         if self.device not in {"cpu", "cuda"}:
             raise ValueError("AQuA device must be explicitly 'cpu' or 'cuda'")
         requirements_lock = self.requirements_lock
@@ -551,6 +554,9 @@ def build_aqua_store(
     subprocess_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> dict[str, Any]:
     """Build a resumable AQuA store using only subprocess communication."""
+    if config.output_root is None:
+        raise PathContractError("output_root is required; use a run-scoped outputs/<run_id> directory")
+    require_writable_destination(config.output_root)
     started = time.monotonic()
     qa_path = config.data_root / "qa_summary" / f"year={config.year}" / "summary.json"
     if not qa_path.is_file():
@@ -804,9 +810,10 @@ def resolve_aqua_store(
         raise RuntimeError("AQuA store does not match the current source collection")
     if manifest.get("probability_status") != AQUA_PROBABILITY_STATUS:
         raise RuntimeError("AQuA store has an unsupported probability status")
-    validation_path = Path(manifest.get("validation_path", ""))
-    if not validation_path.is_file():
-        raise FileNotFoundError("AQuA store is missing its completed validation report")
+    from .paths import resolve_artifact_path
+    validation_path = resolve_artifact_path(
+        manifest.get("validation_path", ""), anchors=(store,)
+    )
     validation = json.loads(validation_path.read_text())
     invalid_validation = {
         key: validation.get(key)
@@ -823,9 +830,9 @@ def resolve_aqua_store(
         raise RuntimeError("AQuA validation report has an unsupported probability status")
     if require_production and manifest.get("watermark") != "PRODUCTION":
         raise RuntimeError("Inference requires a production AQuA store")
-    build_root = Path(manifest.get("build_root", store))
-    if not build_root.is_absolute():
-        build_root = store / build_root
+    build_root = resolve_artifact_path(
+        manifest.get("build_root", str(store)), anchors=(store,)
+    )
     year_root = build_root / f"year={year}"
     if not year_root.is_dir():
         raise FileNotFoundError(year_root)

@@ -6,6 +6,28 @@ output:
     toc_depth: 2
 ---
 
+```{r public-replay, echo=FALSE, results='asis'}
+if (tolower(Sys.getenv("COMMENTGAP_MODE", "replay")) %in% c("replay", "frozen")) {
+  public_root <- file.path(getwd(), "artifacts", "canonical")
+  manifest <- jsonlite::fromJSON(file.path(public_root, "replay_manifest.json"), simplifyVector = FALSE)
+  selected <- unlist(manifest$stages[["07"]], use.names = FALSE)
+  selected <- selected[startsWith(selected, "CG1/regression/")]
+  cat("## Public replay\n\nThe saved model estimates are loaded from the verified public bundle and formatted into the report tables below.\n\n")
+  for (relative in selected) {
+    input <- file.path(public_root, relative)
+    if (!file.exists(input) || !identical(digest::digest(file = input, algo = "sha256", serialize = FALSE), manifest$products[[relative]]$sha256)) {
+      stop("Public replay product missing or changed: ", input)
+    }
+    values <- utils::read.csv(input, check.names = FALSE)
+    cat("### ", relative, " (", nrow(values), " rows)\n\n", sep = "")
+    print(knitr::kable(values, digits = 4))
+    cat("\n\n")
+  }
+  knitr::opts_chunk$set(eval = FALSE)
+}
+```
+
+
 # Objective
 
 Fit a common-scale conditional-logit model for the requested candidate scopes.
@@ -40,18 +62,34 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 # Configuration and shared feature contract
 
 ```{r configuration}
-source_feature_root <- Sys.getenv(
-  "COMMENTGAP_FEATURE_ROOT",
-  "model_output/selection_2025/features"
+source(file.path("scripts", "paths.R"))
+rmd_paths <- commentgap_paths()
+rmd_mode <- commentgap_mode()
+source_feature_root <- commentgap_read_root(
+  rmd_paths, "features",
+  explicit = if (nzchar(Sys.getenv("COMMENTGAP_FEATURE_ROOT", "")))
+    Sys.getenv("COMMENTGAP_FEATURE_ROOT") else NULL
 )
-feature_root <- Sys.getenv(
-  "COMMENTGAP_MODEL_DATA_ROOT",
-  "model_output/selection_2025/model_data"
+feature_root <- commentgap_read_root(
+  rmd_paths, "model_data",
+  explicit = if (nzchar(Sys.getenv("COMMENTGAP_MODEL_DATA_ROOT", "")))
+    Sys.getenv("COMMENTGAP_MODEL_DATA_ROOT") else NULL
 )
-output_root <- Sys.getenv(
-  "COMMENTGAP_REGRESSION_ROOT",
-  "model_output/selection_2025/regression"
-)
+stage_area <- "CG1/regression"
+stage_prepared <- identical(Sys.getenv("COMMENTGAP_STAGE_PREPARED", "0"), "1")
+output_root <- if (identical(rmd_mode, "frozen")) {
+  commentgap_read_root(rmd_paths, "frozen_cg1_regression")
+} else if (stage_prepared) {
+  commentgap_stage_path(rmd_paths, stage_area,
+                        explicit = if (nzchar(Sys.getenv("COMMENTGAP_REGRESSION_ROOT", "")))
+                          Sys.getenv("COMMENTGAP_REGRESSION_ROOT") else NULL)
+} else {
+  commentgap_stage(
+    rmd_paths, stage_area,
+    inputs = c(source_feature_root, feature_root),
+    contract = list(workflow = "rmarkdown", stage = "07")
+  )
+}
 split_path <- file.path(feature_root, "master_article_split.parquet")
 tie_draws_requested <- as.integer(Sys.getenv("COMMENTGAP_TIE_DRAWS", "10"))
 probability_draws <- as.integer(Sys.getenv("COMMENTGAP_PROBABILITY_DRAWS", "5000"))
@@ -61,7 +99,7 @@ fit_cache_root <- Sys.getenv(
   "COMMENTGAP_REGRESSION_CACHE_ROOT",
   file.path(output_root, "fit_cache")
 )
-log_root <- Sys.getenv("COMMENTGAP_LOG_ROOT", "logs")
+log_root <- file.path(output_root, "logs")
 force_recompute <- tolower(Sys.getenv(
   "COMMENTGAP_REGRESSION_FORCE_RECOMPUTE", "0"
 )) %in% c("1", "true", "yes")
@@ -89,13 +127,18 @@ if (!length(requested_scopes) ||
 if (!file.exists(split_path)) {
   stop("Run 03_shared_model_preprocessing.ipynb first; missing shared split: ", split_path)
 }
-dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
-dir.create(fit_cache_root, recursive = TRUE, showWarnings = FALSE)
+if (!identical(rmd_mode, "frozen")) {
+  commentgap_stage_child(rmd_paths, output_root, output_root)
+  fit_cache_root <- commentgap_stage_child(rmd_paths, output_root, fit_cache_root)
+}
 progress_log_path <- Sys.getenv(
   "COMMENTGAP_REGRESSION_PROGRESS_LOG",
   file.path(log_root, "07_stacked_selection_models_progress.log")
 )
-dir.create(dirname(progress_log_path), recursive = TRUE, showWarnings = FALSE)
+if (!identical(rmd_mode, "frozen")) {
+  progress_log_path <- commentgap_stage_child(rmd_paths, output_root, progress_log_path)
+  dir.create(dirname(progress_log_path), recursive = TRUE, showWarnings = FALSE)
+}
 progress_state <- new.env(parent = emptyenv())
 progress_state$run_started <- Sys.time()
 progress_state$completed_fits <- 0L
@@ -128,7 +171,7 @@ progress_message <- function(message) {
   flush.console()
 }
 
-progress_message(sprintf(
+if (!identical(rmd_mode, "frozen")) progress_message(sprintf(
   paste0(
     "Run started; scopes=%s; planned conditional-logit fits=%d ",
     "(%d scopes x %d tie draws); cache=%s; force_recompute=%s"
@@ -709,6 +752,23 @@ probability_summary <- function(
 
 ```{r run-scope}
 run_scope <- function(scope) {
+  if (identical(rmd_mode, "frozen")) {
+    input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
+    if (!file.exists(input_path)) {
+      stop("Frozen input for `choice_set` is missing: ", input_path, call. = FALSE)
+    }
+    choice_set <- as.data.table(arrow::read_parquet(input_path))
+    features <- unlist(feature_manifest$models[[scope]]$features, use.names = FALSE)
+    primary_path <- file.path(output_root, scope, "stacked_selection_model.rds")
+    if (!file.exists(primary_path)) {
+      stop("Frozen input for `primary` is missing: ", primary_path, call. = FALSE)
+    }
+    primary <- readRDS(primary_path)
+    source(file.path("scripts", "frozen_rmd_load.R"))
+    return(commentgap_frozen_results(
+      rmd_paths, "07_stacked_selection_models", scope
+    )[[1L]])
+  }
   progress_message(paste("Starting candidate scope:", scope))
   input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
   if (!file.exists(input_path)) stop("Missing choice set: ", input_path)
@@ -914,6 +974,7 @@ run_scope <- function(scope) {
   )
 
   scope_output <- file.path(output_root, scope)
+  scope_output <- commentgap_stage_child(rmd_paths, output_root, scope_output)
   dir.create(scope_output, recursive = TRUE, showWarnings = FALSE)
   fwrite(scaling, file.path(scope_output, "feature_scaling.csv"))
   fwrite(coefficients, file.path(scope_output, "model_coefficients.csv"))
@@ -1024,7 +1085,9 @@ run_scope <- function(scope) {
 }
 
 results <- lapply(requested_scopes, run_scope)
-progress_message("Analysis and artifact generation completed successfully")
+if (!identical(rmd_mode, "frozen")) {
+  progress_message("Analysis and artifact generation completed successfully")
+}
 ```
 
 # Compact results

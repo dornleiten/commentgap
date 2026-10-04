@@ -376,7 +376,7 @@ class SentenceTransformerEmbedder:
         except ImportError as exc:
             raise RuntimeError(
                 "Dense embeddings require sentence-transformers; "
-                "install requirements-analysis.txt"
+                "install requirements.txt"
             ) from exc
         self.device = select_torch_device(self.device)
         self.resolved_revision = resolve_hf_model_revision(self.model_id, self.revision)
@@ -440,7 +440,7 @@ class TransformerTokenLengthInspector:
             from transformers import AutoTokenizer
         except ImportError as exc:
             raise RuntimeError(
-                "Token diagnostics require transformers; install requirements-analysis.txt"
+                "Token diagnostics require transformers; install requirements.txt"
             ) from exc
         self.resolved_revision = resolve_hf_model_revision(self.model_id, self.revision)
         kwargs = {"revision": self.resolved_revision}

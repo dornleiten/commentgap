@@ -410,7 +410,8 @@ def input_signature(
     repo_root, membership_path, comments_path, topic_root = map(
         Path, (repo_root, membership_path, comments_path, topic_root)
     )
-    split_path = repo_root / "model_output/selection_2025/model_data/master_article_split.parquet"
+    from .paths import ProjectPaths
+    split_path = ProjectPaths.load(repo_root=repo_root).read_root("model_data") / "master_article_split.parquet"
     model_manifest = topic_root / "topic_model_manifest.json"
     return {
         "membership_path": str(membership_path),

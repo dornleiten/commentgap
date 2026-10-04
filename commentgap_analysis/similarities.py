@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from .paths import PathContractError, require_writable_destination
 import platform
 import time
 from typing import Any
@@ -49,10 +50,10 @@ BASE_SEED = 20260813
 class SimilarityBuildConfig:
     """Configuration that uniquely identifies a scalar-similarity build."""
 
-    data_root: Path = Path("data/scrape_2025")
-    embedding_root: Path = Path("model_output/selection_2025/embeddings")
+    data_root: Path = Path("data/raw/scrape_2025")
+    embedding_root: Path = Path("data/derived/embeddings")
     embedding_store: Path | None = None
-    output_root: Path = Path("model_output/selection_2025/similarities")
+    output_root: Path | None = None
     years: tuple[int, ...] = (2025,)
     model_id: str = DEFAULT_EMBEDDING_MODEL_ID
     revision: str | None = None
@@ -67,7 +68,9 @@ class SimilarityBuildConfig:
 
     def __post_init__(self) -> None:
         for name in ("data_root", "embedding_root", "output_root"):
-            object.__setattr__(self, name, Path(getattr(self, name)))
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, Path(value))
         if self.embedding_store is not None:
             object.__setattr__(self, "embedding_store", Path(self.embedding_store))
         object.__setattr__(self, "years", tuple(sorted(set(map(int, self.years)))))
@@ -377,6 +380,9 @@ def _story_similarity(
 
 def build_similarity_store(config: SimilarityBuildConfig) -> dict[str, Any]:
     """Build resumable per-story scalar similarities from saved embeddings."""
+    if config.output_root is None:
+        raise PathContractError("output_root is required; use a run-scoped outputs/<run_id> directory")
+    require_writable_destination(config.output_root)
     requested_store = config.embedding_store or config.embedding_root
     embedding_store, embedding_manifest = resolve_embedding_store(
         requested_store,

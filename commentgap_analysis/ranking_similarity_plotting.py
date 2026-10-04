@@ -11,6 +11,20 @@ import pandas as pd
 from .ranking_policy_plotting import plot_policy_space
 
 
+def joined_unique_values(values: Sequence[str]) -> str:
+    """Show distinct categorical values in stable alphabetical order."""
+    return ', '.join(sorted(set(values)))
+
+
+def configure_similarity_plot_style() -> None:
+    """Use the ranking-similarity figure style in every execution mode."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    sns.set_theme(style='whitegrid', context='notebook')
+    plt.rcParams['figure.dpi'] = 120
+
+
 def plot_umap_clusters(
     matrices: Mapping[str, pd.DataFrame],
     membership: pd.DataFrame,
@@ -26,8 +40,9 @@ def plot_umap_clusters(
     cluster_corner_cut: float = 0.2,
     label_clusters: bool = True,
     show: bool = True,
+    display_embeddings: Mapping[str, pd.DataFrame] | None = None,
 ):
-    """Render the fixed 2-D display embedding and save the UMAP figure."""
+    """Plot saved keyed coordinates, or fit the display embedding when omitted."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
@@ -42,13 +57,27 @@ def plot_umap_clusters(
     cluster_numbers = {cluster: index + 1 for index, cluster in enumerate(cluster_ids)}
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     for axis, depth in zip(axes, depths):
-        display_embedding = umap.UMAP(
-            n_components=2, n_neighbors=15, min_dist=0.15,
-            metric="euclidean", random_state=20260902,
-        ).fit_transform(matrices[depth])
+        if display_embeddings is None:
+            display_embedding = umap.UMAP(
+                n_components=2, n_neighbors=15, min_dist=0.15,
+                metric="euclidean", random_state=20260902,
+            ).fit_transform(matrices[depth])
+        else:
+            coordinates = display_embeddings[depth]
+            if not coordinates.index.is_unique or set(coordinates.index) != set(matrices[depth].index):
+                raise ValueError(f"Saved {depth} coordinates do not match the matrix policy IDs")
+            display_embedding = coordinates.loc[matrices[depth].index, ["umap1", "umap2"]].to_numpy()
+            if not np.isfinite(display_embedding).all():
+                raise ValueError(f"Non-finite saved {depth} display coordinates")
         display_scale = np.linalg.norm(np.ptp(display_embedding, axis=0))
         minimum_gap = display_scale * cluster_min_gap_fraction
-        frame = membership[membership["depth"].eq(depth)].copy()
+        frame = (
+            membership[membership["depth"].eq(depth)]
+            .set_index("policy_id")
+            .loc[matrices[depth].index]
+            .rename_axis("policy_id")
+            .reset_index()
+        )
         frame["umap1"], frame["umap2"] = display_embedding[:, 0], display_embedding[:, 1]
         plot_policy_space(
             axis, frame, "umap1", "umap2", colour_column="ordering",

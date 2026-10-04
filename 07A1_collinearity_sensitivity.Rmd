@@ -6,6 +6,28 @@ output:
     toc_depth: 3
 ---
 
+```{r public-replay, echo=FALSE, results='asis'}
+if (tolower(Sys.getenv("COMMENTGAP_MODE", "replay")) %in% c("replay", "frozen")) {
+  public_root <- file.path(getwd(), "artifacts", "canonical")
+  manifest <- jsonlite::fromJSON(file.path(public_root, "replay_manifest.json"), simplifyVector = FALSE)
+  selected <- unlist(manifest$stages[["07"]], use.names = FALSE)
+  selected <- selected[startsWith(selected, "CG1/sensitivity/collinearity_")]
+  cat("## Public replay\n\nVerified aggregate tables from the public canonical bundle. Model fitting requires the private archive.\n\n")
+  for (relative in selected) {
+    input <- file.path(public_root, relative)
+    if (!file.exists(input) || !identical(digest::digest(file = input, algo = "sha256", serialize = FALSE), manifest$products[[relative]]$sha256)) {
+      stop("Public replay product missing or changed: ", input)
+    }
+    values <- utils::read.csv(input, check.names = FALSE)
+    cat("### ", relative, " (", nrow(values), " rows)\n\n", sep = "")
+    print(knitr::kable(values, digits = 4))
+    cat("\n\n")
+  }
+  knitr::opts_chunk$set(eval = FALSE)
+}
+```
+
+
 # Purpose
 
 This analysis diagnoses dependence among terms in the stacked conditional-logit
@@ -40,17 +62,36 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 # Configuration and held-out-test guard
 
 ```{r configuration}
-feature_root <- Sys.getenv(
-  "COMMENTGAP_MODEL_DATA_ROOT", "model_output/selection_2025/model_data"
+source(file.path("scripts", "paths.R"))
+rmd_paths <- commentgap_paths()
+rmd_mode <- commentgap_mode()
+feature_root <- commentgap_read_root(
+  rmd_paths, "model_data",
+  explicit = if (nzchar(Sys.getenv("COMMENTGAP_MODEL_DATA_ROOT", "")))
+    Sys.getenv("COMMENTGAP_MODEL_DATA_ROOT") else NULL
 )
-regression_root <- Sys.getenv(
-  "COMMENTGAP_REGRESSION_ROOT", "model_output/selection_2025/regression"
+regression_root <- commentgap_read_root(
+  rmd_paths, "frozen_cg1_regression",
+  explicit = if (nzchar(Sys.getenv("COMMENTGAP_REGRESSION_ROOT", "")))
+    Sys.getenv("COMMENTGAP_REGRESSION_ROOT") else NULL
 )
 
-output_root <- Sys.getenv(
-  "COMMENTGAP_COLLINEARITY_ROOT",
-  "model_output/selection_2025/regression_sensitivity/collinearity_shared_preprocessing_v4"
-)
+stage_area <- "CG1/sensitivity/collinearity"
+stage_prepared <- identical(Sys.getenv("COMMENTGAP_STAGE_PREPARED", "0"), "1")
+output_root <- if (identical(rmd_mode, "frozen")) {
+  file.path(commentgap_read_root(rmd_paths, "frozen_cg1_sensitivity"),
+            "collinearity_shared_preprocessing_v4")
+} else if (stage_prepared) {
+  commentgap_stage_path(rmd_paths, stage_area,
+                        explicit = if (nzchar(Sys.getenv("COMMENTGAP_COLLINEARITY_ROOT", "")))
+                          Sys.getenv("COMMENTGAP_COLLINEARITY_ROOT") else NULL)
+} else {
+  commentgap_stage(
+    rmd_paths, stage_area,
+    inputs = c(feature_root, regression_root),
+    contract = list(workflow = "rmarkdown", stage = "07A1")
+  )
+}
 cache_root <- file.path(output_root, "fit_cache")
 split_path <- file.path(feature_root, "master_article_split.parquet")
 parameters_path <- file.path(feature_root, "preprocessing_parameters.json")
@@ -88,8 +129,11 @@ if (!is.finite(bootstrap_draws) || bootstrap_draws < 100L) {
 if (!file.exists(split_path) || !file.exists(manifest_path) || !file.exists(parameters_path)) {
   stop("Missing shared preprocessing artifacts; run 03_shared_model_preprocessing.ipynb first")
 }
-dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
-dir.create(cache_root, recursive = TRUE, showWarnings = FALSE)
+if (!identical(rmd_mode, "frozen")) {
+  commentgap_stage_child(rmd_paths, output_root, output_root)
+  cache_root <- commentgap_stage_child(rmd_paths, output_root, cache_root)
+  dir.create(cache_root, recursive = TRUE, showWarnings = FALSE)
+}
 
 article_split <- as.data.table(arrow::read_parquet(split_path))
 required_split <- c("story_id", "split_role", "development_fold")
@@ -678,6 +722,22 @@ paired_cv_summary <- function(metrics, full_name, draws, seed) {
 
 ```{r run-scope}
 run_scope <- function(scope) {
+  if (identical(rmd_mode, "frozen")) {
+    input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
+    if (!file.exists(input_path)) {
+      stop("Frozen input for `choice_set` is missing: ", input_path, call. = FALSE)
+    }
+    choice_set <- as.data.table(arrow::read_parquet(input_path))
+    primary_path <- file.path(regression_root, scope, "stacked_selection_model.rds")
+    if (!file.exists(primary_path)) {
+      stop("Frozen input for `primary` is missing: ", primary_path, call. = FALSE)
+    }
+    primary <- readRDS(primary_path)
+    source(file.path("scripts", "frozen_rmd_load.R"))
+    return(commentgap_frozen_results(
+      rmd_paths, "07A1_collinearity_sensitivity", scope
+    )[[1L]])
+  }
   progress_message("Starting scope=", scope)
   input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
   primary_path <- file.path(regression_root, scope, "stacked_selection_model.rds")
@@ -989,6 +1049,7 @@ run_scope <- function(scope) {
   ), by = .(scope, variant)]
 
   scope_output <- file.path(output_root, scope)
+  scope_output <- commentgap_stage_child(rmd_paths, output_root, scope_output)
   dir.create(scope_output, recursive = TRUE, showWarnings = FALSE)
   fwrite(covariance_summary, file.path(scope_output, "covariance_conditioning.csv"))
   fwrite(coefficient_pairs,
@@ -1045,7 +1106,9 @@ run_scope <- function(scope) {
 }
 
 results <- lapply(requested_scopes, run_scope)
-progress_message("Collinearity sensitivity completed successfully")
+if (!identical(rmd_mode, "frozen")) {
+  progress_message("Collinearity sensitivity completed successfully")
+}
 ```
 
 # Results

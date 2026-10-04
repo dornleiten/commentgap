@@ -1,0 +1,2556 @@
+{
+  "privacy_note": "Explicit aggregate and unlinked numeric plotting-input allowlist. No raw comment text, original comment IDs, story IDs, or author IDs. Review article-level plot coordinates and notebook outputs before publication.",
+  "products": {
+    "CG1/comment_gap/article_plot_coordinates.parquet": {
+      "bytes": 83139,
+      "columns": [
+        "scope",
+        "n_candidates",
+        "n_picks",
+        "gap_score"
+      ],
+      "sha256": "3c946569598b0717dbd17d8b0dbeaa3a79770d388a920d3249a8e059ee1962b0",
+      "transformation": "Numeric article plot coordinates or aggregated Jaccard means; no article IDs."
+    },
+    "CG1/comment_gap/comment_gap_summary.csv": {
+      "bytes": 1643,
+      "columns": [
+        "scope",
+        "analysis_partition",
+        "n_articles",
+        "gap_mean",
+        "gap_sd",
+        "gap_q25",
+        "gap_median",
+        "gap_q75",
+        "overlap_mean",
+        "overlap_tie_sd_mean",
+        "candidates_mean",
+        "picks_mean",
+        "articles_with_vote_ties",
+        "candidate_comments",
+        "gap_comment_weighted_mean",
+        "gap_comment_weighted_median"
+      ],
+      "sha256": "b33d5aeeb4b40632dd170c0a80ac887e04b19d0d32fcf87de289938143866cec",
+      "source_sha256": "b33d5aeeb4b40632dd170c0a80ac887e04b19d0d32fcf87de289938143866cec"
+    },
+    "CG1/comment_gap/comment_gap_topic_summary.csv": {
+      "bytes": 30084,
+      "columns": [
+        "scope",
+        "analysis_partition",
+        "primary_topic",
+        "n_articles",
+        "gap_mean",
+        "gap_sd",
+        "gap_q25",
+        "gap_median",
+        "gap_q75",
+        "overlap_mean",
+        "overlap_tie_sd_mean",
+        "candidates_mean",
+        "picks_mean",
+        "articles_with_vote_ties",
+        "candidate_comments",
+        "gap_comment_weighted_mean",
+        "gap_comment_weighted_median",
+        "primary_topic_label"
+      ],
+      "sha256": "baae2b2c16e0322d634b9cd29af37835bb482ebc8573bcc78799bf99586564e0",
+      "source_sha256": "baae2b2c16e0322d634b9cd29af37835bb482ebc8573bcc78799bf99586564e0"
+    },
+    "CG1/comment_gap/jaccard_overall_means.csv": {
+      "bytes": 396,
+      "columns": [
+        "scope",
+        "analysis_partition",
+        "jaccard_mean",
+        "jaccard_gap_mean"
+      ],
+      "sha256": "6ecb8519fd6078d5defe7cf9dd2752f2764874eefc3563ca38592a4216ae977d",
+      "transformation": "Numeric article plot coordinates or aggregated Jaccard means; no article IDs."
+    },
+    "CG1/comment_gap/jaccard_topic_means.csv": {
+      "bytes": 7867,
+      "columns": [
+        "scope",
+        "analysis_partition",
+        "primary_topic",
+        "jaccard_mean",
+        "jaccard_gap_mean"
+      ],
+      "sha256": "54e505f9f4858759d7b3421285d8d9d15d8d1d8bc2df1f6ee3c497f2454e3ab9",
+      "transformation": "Numeric article plot coordinates or aggregated Jaccard means; no article IDs."
+    },
+    "CG1/descriptives/feature_summary.csv": {
+      "bytes": 18331,
+      "columns": [
+        "scope",
+        "feature",
+        "label",
+        "feature_source",
+        "feature_group",
+        "candidate_n",
+        "candidate_mean",
+        "candidate_sd",
+        "candidate_min",
+        "candidate_q25",
+        "candidate_median",
+        "candidate_q75",
+        "candidate_max",
+        "curator_n",
+        "curator_mean",
+        "audience_effective_n",
+        "audience_mean",
+        "curator_minus_audience_sd"
+      ],
+      "sha256": "a71f98de9253549d0557feb1f4d64b9fba96c48aad5782a6230fa7dc0122e3d2",
+      "source_sha256": "a71f98de9253549d0557feb1f4d64b9fba96c48aad5782a6230fa7dc0122e3d2"
+    },
+    "CG1/descriptives/sample_flow.csv": {
+      "bytes": 363,
+      "columns": [
+        "scope",
+        "primary_or_appendix",
+        "stage",
+        "n_articles",
+        "n_comment_rows",
+        "n_candidates",
+        "n_picks"
+      ],
+      "sha256": "f2f28aba575f56baacf3600b93cc7c77fea4ee6dc41ee9c81fb23f892a23db92",
+      "source_sha256": "f2f28aba575f56baacf3600b93cc7c77fea4ee6dc41ee9c81fb23f892a23db92"
+    },
+    "CG1/descriptives/topic_summary.csv": {
+      "bytes": 8911,
+      "columns": [
+        "scope",
+        "analysis_partition",
+        "primary_topic",
+        "n_articles",
+        "n_candidates",
+        "n_curator_picks",
+        "n_audience_picks_mean",
+        "candidates_per_article_mean",
+        "candidates_per_article_median",
+        "picks_per_article_mean",
+        "picks_per_article_median",
+        "reply_share_mean",
+        "relative_votes_mean",
+        "relative_votes_sum",
+        "primary_topic_label"
+      ],
+      "sha256": "78a9aa35e96780c3e24717a24337618fdf4bae9c5788cd040903ad7e0d3161fa",
+      "source_sha256": "78a9aa35e96780c3e24717a24337618fdf4bae9c5788cd040903ad7e0d3161fa"
+    },
+    "CG1/development_scores/figure_26_training_model_performance.csv": {
+      "bytes": 552,
+      "columns": [
+        "Model",
+        "Audience nDCG@k",
+        "Editor nDCG@k",
+        "Audience macro-F1",
+        "Editor macro-F1"
+      ],
+      "sha256": "afb0654132901cd333cd9a02d2ccc99352c4a45143a78edc87daf6f6a791db24",
+      "source_sha256": "afb0654132901cd333cd9a02d2ccc99352c4a45143a78edc87daf6f6a791db24"
+    },
+    "CG1/development_scores/training_metrics.parquet": {
+      "bytes": 5690,
+      "columns": [
+        "Model",
+        "selector",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "n_articles",
+        "bootstrap_draws",
+        "metric"
+      ],
+      "sha256": "e468acac59af93f1d722eafa2ac3cf1369d89312e53c9271ae1dec651c255209",
+      "source_sha256": "e468acac59af93f1d722eafa2ac3cf1369d89312e53c9271ae1dec651c255209"
+    },
+    "CG1/feature_diagnostics/all_spearman_correlations.csv": {
+      "bytes": 35979,
+      "columns": [
+        "",
+        "log_words",
+        "sentiment_positive",
+        "sentiment_negative",
+        "toxicity_probability",
+        "lexdiv_length_adjusted",
+        "reading_level_length_adjusted",
+        "url_present",
+        "article_similarity_top3",
+        "novelty_prior_all_model",
+        "log_hours_since_article",
+        "prior_reply_composition",
+        "discussion_pace",
+        "vienna_overnight",
+        "vienna_weekday_shoulder_evening",
+        "vienna_weekend_day_evening",
+        "log_author_prior_30d_comments",
+        "author_prior_30d_upvote_reception",
+        "author_prior_30d_downvote_reception",
+        "log_author_prior_comments_story",
+        "is_reply",
+        "reply_depth_centered",
+        "aqua_relevance_expected",
+        "aqua_fact_expected",
+        "aqua_opinion_expected",
+        "aqua_justification_expected",
+        "aqua_solution_proposal_expected",
+        "aqua_additional_knowledge_expected",
+        "aqua_question_expected",
+        "aqua_referencing_users_expected",
+        "aqua_referencing_medium_expected",
+        "aqua_referencing_contents_expected",
+        "aqua_referencing_personal_expected",
+        "aqua_referencing_format_expected",
+        "aqua_polite_address_expected",
+        "aqua_respect_expected",
+        "aqua_screaming_expected",
+        "aqua_vulgarity_expected",
+        "aqua_insult_expected",
+        "aqua_sarcasm_expected",
+        "aqua_discrimination_expected",
+        "aqua_storytelling_expected"
+      ],
+      "sha256": "daf612f6940dbc709c94b89523ccd8dc5d466ccdcdae2d2e05e77138a8b1d2ef",
+      "source_sha256": "daf612f6940dbc709c94b89523ccd8dc5d466ccdcdae2d2e05e77138a8b1d2ef"
+    },
+    "CG1/feature_diagnostics/aqua_expected_histograms.csv": {
+      "bytes": 83726,
+      "columns": [
+        "scope",
+        "feature",
+        "left",
+        "right",
+        "height"
+      ],
+      "sha256": "5353acbb0fb4920fd72c03e5933e53ac6109bc197ea4cfbf395d33d4d0441384",
+      "transformation": "Exact plotting bins from private diagnostic sample; no rows or IDs."
+    },
+    "CG1/feature_diagnostics/feature_histograms.csv": {
+      "bytes": 478742,
+      "columns": [
+        "scope",
+        "feature",
+        "kind",
+        "left",
+        "right",
+        "height",
+        "median",
+        "clip_low",
+        "clip_high"
+      ],
+      "sha256": "278c14a1cca8a5b5e5b39be5e25e12290e32c81b38d4ce0f69860a42e42571c9",
+      "transformation": "Exact plotting bins from private diagnostic sample; no rows or IDs."
+    },
+    "CG1/feature_diagnostics/full_distribution_summary.csv": {
+      "bytes": 25387,
+      "columns": [
+        "scope",
+        "feature",
+        "label",
+        "rows",
+        "nulls",
+        "nonfinite",
+        "distinct_approx",
+        "minimum",
+        "maximum",
+        "mean",
+        "sd",
+        "p001",
+        "p010",
+        "p050",
+        "p500",
+        "p950",
+        "p990",
+        "p999",
+        "expected_minimum",
+        "expected_maximum",
+        "range_violation",
+        "constant_or_near_constant",
+        "heavy_right_tail"
+      ],
+      "sha256": "078c3ffbfee316390ca95120c70bb345f6c3c2fe854a46f5f642c48cc15a79b9",
+      "source_sha256": "078c3ffbfee316390ca95120c70bb345f6c3c2fe854a46f5f642c48cc15a79b9"
+    },
+    "CG1/feature_diagnostics/high_correlation_pairs.csv": {
+      "bytes": 96,
+      "columns": [
+        "scope",
+        "feature_1",
+        "feature_2",
+        "spearman"
+      ],
+      "sha256": "8b417457d662ff8a0760277dd1585621f28d7b389ebcc11c9578137b8fe4df08",
+      "source_sha256": "8b417457d662ff8a0760277dd1585621f28d7b389ebcc11c9578137b8fe4df08"
+    },
+    "CG1/feature_diagnostics/root_spearman_correlations.csv": {
+      "bytes": 32651,
+      "columns": [
+        "",
+        "log_words",
+        "sentiment_positive",
+        "sentiment_negative",
+        "toxicity_probability",
+        "lexdiv_length_adjusted",
+        "reading_level_length_adjusted",
+        "url_present",
+        "article_similarity_top3",
+        "novelty_prior_roots_model",
+        "log_hours_since_article",
+        "prior_reply_composition",
+        "discussion_pace",
+        "vienna_overnight",
+        "vienna_weekday_shoulder_evening",
+        "vienna_weekend_day_evening",
+        "log_author_prior_30d_comments",
+        "author_prior_30d_upvote_reception",
+        "author_prior_30d_downvote_reception",
+        "log_author_prior_comments_story",
+        "aqua_relevance_expected",
+        "aqua_fact_expected",
+        "aqua_opinion_expected",
+        "aqua_justification_expected",
+        "aqua_solution_proposal_expected",
+        "aqua_additional_knowledge_expected",
+        "aqua_question_expected",
+        "aqua_referencing_users_expected",
+        "aqua_referencing_medium_expected",
+        "aqua_referencing_contents_expected",
+        "aqua_referencing_personal_expected",
+        "aqua_referencing_format_expected",
+        "aqua_polite_address_expected",
+        "aqua_respect_expected",
+        "aqua_screaming_expected",
+        "aqua_vulgarity_expected",
+        "aqua_insult_expected",
+        "aqua_sarcasm_expected",
+        "aqua_discrimination_expected",
+        "aqua_storytelling_expected"
+      ],
+      "sha256": "dc7f4d832263eb74eb560f61eeb304e520e8a7128c78c0bc9859bed519cc982c",
+      "source_sha256": "dc7f4d832263eb74eb560f61eeb304e520e8a7128c78c0bc9859bed519cc982c"
+    },
+    "CG1/feature_diagnostics/row_invariant_checks.csv": {
+      "bytes": 670,
+      "columns": [
+        "scope",
+        "check",
+        "failures"
+      ],
+      "sha256": "c4961f020ebb18122c1cd485ebfce6a387024ccb8d5436a1326e990e235ffc9f",
+      "source_sha256": "c4961f020ebb18122c1cd485ebfce6a387024ccb8d5436a1326e990e235ffc9f"
+    },
+    "CG1/feature_diagnostics/sample_accounting.csv": {
+      "bytes": 267,
+      "columns": [
+        "scope",
+        "sample_rows",
+        "sample_stories",
+        "requested_sample_rows",
+        "seed",
+        "sampling_method",
+        "sampling_method_version"
+      ],
+      "sha256": "d707b96d30f0a533d40b79c64dfbfff8a41814308b07064ff41df89cec56083c",
+      "source_sha256": "d707b96d30f0a533d40b79c64dfbfff8a41814308b07064ff41df89cec56083c"
+    },
+    "CG1/feature_diagnostics/selection_distribution_contrasts.csv": {
+      "bytes": 18791,
+      "columns": [
+        "scope",
+        "selector",
+        "feature",
+        "selected_mean",
+        "unselected_mean",
+        "standardized_mean_difference",
+        "ks_statistic"
+      ],
+      "sha256": "73b051ebbc77d2434598c7e2868cd943c911b63dfdeb92b6985f76b6f190e9a3",
+      "source_sha256": "73b051ebbc77d2434598c7e2868cd943c911b63dfdeb92b6985f76b6f190e9a3"
+    },
+    "CG1/feature_diagnostics/within_story_feature_variation.csv": {
+      "bytes": 3774,
+      "columns": [
+        "scope",
+        "feature",
+        "stories",
+        "stories_with_variation",
+        "proportion_stories_with_variation"
+      ],
+      "sha256": "861607de0de3620e1cdb886c5b73ac20e4653799740c9ede972cb0faf54877b9",
+      "source_sha256": "861607de0de3620e1cdb886c5b73ac20e4653799740c9ede972cb0faf54877b9"
+    },
+    "CG1/rankers/factorial/experiment_variants.csv": {
+      "bytes": 33232,
+      "columns": [
+        "variant_id",
+        "family",
+        "feature_set",
+        "draw_policy",
+        "negative_sampling",
+        "schedule",
+        "heads",
+        "network",
+        "scope",
+        "status",
+        "output_root"
+      ],
+      "sha256": "fa14b520fb87ff4ef47b1a29eeb86551be9e67fbd6b1ce18d941d7834addb76b",
+      "source_sha256": "fa14b520fb87ff4ef47b1a29eeb86551be9e67fbd6b1ce18d941d7834addb76b"
+    },
+    "CG1/regression/all/feature_scaling.csv": {
+      "bytes": 2564,
+      "columns": [
+        "term",
+        "mean",
+        "sd",
+        "standardized"
+      ],
+      "sha256": "01255075cd2f074e6925d20aa18501f58162a04e44b7150c55e10531cab2dab8",
+      "source_sha256": "01255075cd2f074e6925d20aa18501f58162a04e44b7150c55e10531cab2dab8"
+    },
+    "CG1/regression/all/model_coefficients.csv": {
+      "bytes": 10366,
+      "columns": [
+        "term",
+        "estimate",
+        "std_error_article_clustered",
+        "conf_low",
+        "conf_high",
+        "p_value"
+      ],
+      "sha256": "62daa08c1a8075cf887214384c26112d49acac4eb6e76987874946a19c32f5d7",
+      "source_sha256": "62daa08c1a8075cf887214384c26112d49acac4eb6e76987874946a19c32f5d7"
+    },
+    "CG1/regression/all/model_diagnostics.csv": {
+      "bytes": 818,
+      "columns": [
+        "statistic",
+        "value"
+      ],
+      "sha256": "d597c5e62046b9eff50d2d0484e4a9137145660809a5a877e8f1af72a3bc665b",
+      "source_sha256": "d597c5e62046b9eff50d2d0484e4a9137145660809a5a877e8f1af72a3bc665b"
+    },
+    "CG1/regression/all/probability_contrasts.csv": {
+      "bytes": 14990,
+      "columns": [
+        "term",
+        "feature",
+        "unit",
+        "interpretation",
+        "reference_probability_mean",
+        "audience_change_pp",
+        "audience_conf_low_pp",
+        "audience_conf_high_pp",
+        "curator_change_pp",
+        "curator_conf_low_pp",
+        "curator_conf_high_pp",
+        "curator_minus_audience_pp",
+        "difference_conf_low_pp",
+        "difference_conf_high_pp"
+      ],
+      "sha256": "452088fe3d2de8cd90faa3008d1ce1e82f4ab803717296b37ab050308f57a819",
+      "source_sha256": "452088fe3d2de8cd90faa3008d1ce1e82f4ab803717296b37ab050308f57a819"
+    },
+    "CG1/regression/all/selector_associations.csv": {
+      "bytes": 20043,
+      "columns": [
+        "term",
+        "feature",
+        "unit",
+        "audience_log_odds",
+        "audience_se",
+        "audience_conf_low",
+        "audience_conf_high",
+        "audience_odds_ratio",
+        "audience_p_value",
+        "curator_log_odds",
+        "curator_se",
+        "curator_conf_low",
+        "curator_conf_high",
+        "curator_odds_ratio",
+        "curator_p_value",
+        "curator_minus_audience_log_odds",
+        "difference_se",
+        "difference_conf_low",
+        "difference_conf_high",
+        "difference_p_value",
+        "audience_q_value_bh",
+        "curator_q_value_bh",
+        "difference_q_value_bh"
+      ],
+      "sha256": "439571f3e5748e7049742d0685529c2e00b55f070f138aa0930c57121e28ed2f",
+      "source_sha256": "439571f3e5748e7049742d0685529c2e00b55f070f138aa0930c57121e28ed2f"
+    },
+    "CG1/regression/all/tie_sensitivity_summary.csv": {
+      "bytes": 6673,
+      "columns": [
+        "term",
+        "draws",
+        "estimate_median",
+        "estimate_min",
+        "estimate_max",
+        "estimate_sd",
+        "sign_changes_across_draws",
+        "feature"
+      ],
+      "sha256": "a5630d8bbe7acda272f8197b95309e7089d748e1972751a3cc277d0dcc739b68",
+      "source_sha256": "a5630d8bbe7acda272f8197b95309e7089d748e1972751a3cc277d0dcc739b68"
+    },
+    "CG1/regression/root/feature_scaling.csv": {
+      "bytes": 2478,
+      "columns": [
+        "term",
+        "mean",
+        "sd",
+        "standardized"
+      ],
+      "sha256": "b44ffa6aa53c54604a385c3186758428073aa55984eb9a8102018ae0c1f3941f",
+      "source_sha256": "b44ffa6aa53c54604a385c3186758428073aa55984eb9a8102018ae0c1f3941f"
+    },
+    "CG1/regression/root/model_coefficients.csv": {
+      "bytes": 9900,
+      "columns": [
+        "term",
+        "estimate",
+        "std_error_article_clustered",
+        "conf_low",
+        "conf_high",
+        "p_value"
+      ],
+      "sha256": "8c986d4263a24545f69036fa5d2e426beb754fcf3ccbfa954f412aa28333feed",
+      "source_sha256": "8c986d4263a24545f69036fa5d2e426beb754fcf3ccbfa954f412aa28333feed"
+    },
+    "CG1/regression/root/model_diagnostics.csv": {
+      "bytes": 812,
+      "columns": [
+        "statistic",
+        "value"
+      ],
+      "sha256": "b2a521d336f5f7514c371b176ae66c4994e6bc2d61c5ff643be3a352cd8e7a84",
+      "source_sha256": "b2a521d336f5f7514c371b176ae66c4994e6bc2d61c5ff643be3a352cd8e7a84"
+    },
+    "CG1/regression/root/probability_contrasts.csv": {
+      "bytes": 14189,
+      "columns": [
+        "term",
+        "feature",
+        "unit",
+        "interpretation",
+        "reference_probability_mean",
+        "audience_change_pp",
+        "audience_conf_low_pp",
+        "audience_conf_high_pp",
+        "curator_change_pp",
+        "curator_conf_low_pp",
+        "curator_conf_high_pp",
+        "curator_minus_audience_pp",
+        "difference_conf_low_pp",
+        "difference_conf_high_pp"
+      ],
+      "sha256": "5eb1da8c2726e7281bfe2c6acde9c25f20a7b77b953278e78904357a9d29c5d4",
+      "source_sha256": "5eb1da8c2726e7281bfe2c6acde9c25f20a7b77b953278e78904357a9d29c5d4"
+    },
+    "CG1/regression/root/selector_associations.csv": {
+      "bytes": 19111,
+      "columns": [
+        "term",
+        "feature",
+        "unit",
+        "audience_log_odds",
+        "audience_se",
+        "audience_conf_low",
+        "audience_conf_high",
+        "audience_odds_ratio",
+        "audience_p_value",
+        "curator_log_odds",
+        "curator_se",
+        "curator_conf_low",
+        "curator_conf_high",
+        "curator_odds_ratio",
+        "curator_p_value",
+        "curator_minus_audience_log_odds",
+        "difference_se",
+        "difference_conf_low",
+        "difference_conf_high",
+        "difference_p_value",
+        "audience_q_value_bh",
+        "curator_q_value_bh",
+        "difference_q_value_bh"
+      ],
+      "sha256": "b035b2f818970e7eca4e1e5324fb86ced254561c8a8a580fa83611ce40cf4a90",
+      "source_sha256": "b035b2f818970e7eca4e1e5324fb86ced254561c8a8a580fa83611ce40cf4a90"
+    },
+    "CG1/regression/root/tie_sensitivity_summary.csv": {
+      "bytes": 6407,
+      "columns": [
+        "term",
+        "draws",
+        "estimate_median",
+        "estimate_min",
+        "estimate_max",
+        "estimate_sd",
+        "sign_changes_across_draws",
+        "feature"
+      ],
+      "sha256": "dddd0ccdd69aa89fcbe25650d741e42f8a3be53ee18c0e8650c1c9712a0ef784",
+      "source_sha256": "dddd0ccdd69aa89fcbe25650d741e42f8a3be53ee18c0e8650c1c9712a0ef784"
+    },
+    "CG1/reporting/tables/cg1_baseline_performance.csv": {
+      "bytes": 1481,
+      "columns": [
+        "model",
+        "selector",
+        "metric",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "articles",
+        "bootstrap_draws",
+        "balance_draws"
+      ],
+      "sha256": "c67a0592a2cc48134ccfc620439be7c25edfefdd6bd59e4f08be082a528d6627",
+      "source_sha256": "c67a0592a2cc48134ccfc620439be7c25edfefdd6bd59e4f08be082a528d6627"
+    },
+    "CG1/reporting/tables/development_cv_variant_ranking.csv": {
+      "bytes": 6612,
+      "columns": [
+        "variant_id",
+        "family",
+        "scope",
+        "mean_macro_ndcg_at_k",
+        "sd_macro_ndcg_at_k",
+        "min_fold_macro_ndcg_at_k",
+        "completed_folds",
+        "mean_audience_ndcg_at_k",
+        "mean_curator_ndcg_at_k",
+        "feature_set",
+        "draw_policy",
+        "negative_sampling",
+        "schedule",
+        "heads",
+        "network",
+        "development_cv_rank"
+      ],
+      "sha256": "bdbfb1067d0c18602e354235c66eddf35aff149c413043901a267cbbd1803108",
+      "source_sha256": "bdbfb1067d0c18602e354235c66eddf35aff149c413043901a267cbbd1803108"
+    },
+    "CG1/reporting/tables/development_cv_winners.csv": {
+      "bytes": 930,
+      "columns": [
+        "completed_folds",
+        "development_cv_rank",
+        "draw_policy",
+        "family",
+        "feature_set",
+        "heads",
+        "mean_audience_ndcg_at_k",
+        "mean_curator_ndcg_at_k",
+        "mean_macro_ndcg_at_k",
+        "min_fold_macro_ndcg_at_k",
+        "negative_sampling",
+        "network",
+        "schedule",
+        "scope",
+        "sd_macro_ndcg_at_k",
+        "variant_id"
+      ],
+      "sha256": "613c65d418ee05b6ff88cc26ae01be6e6697bd3f6debaa66e797e8f6d52f94f0",
+      "source_sha256": "613c65d418ee05b6ff88cc26ae01be6e6697bd3f6debaa66e797e8f6d52f94f0"
+    },
+    "CG1/reporting/tables/figure_26_test_model_performance.csv": {
+      "bytes": 552,
+      "columns": [
+        "Model",
+        "Audience nDCG@k",
+        "Editor nDCG@k",
+        "Audience macro-F1",
+        "Editor macro-F1"
+      ],
+      "sha256": "da14b4a36fbef96feeb22a670a5c1d940aa7ea1b48023ef741335c1b6c8e80ce",
+      "source_sha256": "da14b4a36fbef96feeb22a670a5c1d940aa7ea1b48023ef741335c1b6c8e80ce"
+    },
+    "CG1/reporting/tables/held_out_balanced_macro_f1.csv": {
+      "bytes": 1788,
+      "columns": [
+        "scope",
+        "model_family",
+        "model_id",
+        "model_label",
+        "selector",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "n_articles",
+        "bootstrap_draws",
+        "metric",
+        "model_pair_label"
+      ],
+      "sha256": "9d3ce099dc390396fbbb73f97e493a59250b16ce9e3a4081645571306d1ab53d",
+      "source_sha256": "9d3ce099dc390396fbbb73f97e493a59250b16ce9e3a4081645571306d1ab53d"
+    },
+    "CG1/reporting/tables/held_out_model_implied_gap_summary.csv": {
+      "bytes": 1480,
+      "columns": [
+        "scope",
+        "model_family",
+        "model_id",
+        "model_label",
+        "gap_mean",
+        "conf_low",
+        "conf_high",
+        "n_articles",
+        "bootstrap_draws",
+        "gap_comment_weighted_mean",
+        "weighted_conf_low",
+        "weighted_conf_high",
+        "gap_comment_weighted_median",
+        "weighted_median_conf_low",
+        "weighted_median_conf_high",
+        "candidate_comments"
+      ],
+      "sha256": "3bd84b0e6182865653949b502c2a592972078355a586c7d672d438156e6957a7",
+      "source_sha256": "3bd84b0e6182865653949b502c2a592972078355a586c7d672d438156e6957a7"
+    },
+    "CG1/reporting/tables/held_out_model_performance.csv": {
+      "bytes": 7414,
+      "columns": [
+        "selector",
+        "metric",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "articles",
+        "bootstrap_draws",
+        "split_role",
+        "model_id",
+        "model_family",
+        "model_label",
+        "feature_set",
+        "scope",
+        "analysis_partition",
+        "model_pair_label"
+      ],
+      "sha256": "6f0fe30ee1461efb6004094f56f72e4db9f511821511605a2c6d0d2831d84330",
+      "source_sha256": "6f0fe30ee1461efb6004094f56f72e4db9f511821511605a2c6d0d2831d84330"
+    },
+    "CG1/reporting/tables/held_out_paired_balanced_macro_f1.csv": {
+      "bytes": 4659,
+      "columns": [
+        "scope",
+        "selector",
+        "comparison",
+        "model_first",
+        "model_second",
+        "model_first_id",
+        "model_second_id",
+        "metric",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "n_articles",
+        "bootstrap_draws"
+      ],
+      "sha256": "65cd18998604fa6435f468ff12250f57f2212d9fd4783645ac7d39a79d8780c5",
+      "source_sha256": "65cd18998604fa6435f468ff12250f57f2212d9fd4783645ac7d39a79d8780c5"
+    },
+    "CG1/reporting/tables/held_out_paired_model_differences.csv": {
+      "bytes": 17324,
+      "columns": [
+        "scope",
+        "selector",
+        "comparison",
+        "model_first",
+        "model_second",
+        "model_first_id",
+        "model_second_id",
+        "metric",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "n_articles",
+        "bootstrap_draws"
+      ],
+      "sha256": "b9ff21bc623aa356fc9b34c0a885434fed264032a52103be7dc986e43d902483",
+      "source_sha256": "b9ff21bc623aa356fc9b34c0a885434fed264032a52103be7dc986e43d902483"
+    },
+    "CG1/reporting/tables/held_out_permutation_importance_gaps.csv": {
+      "bytes": 42687,
+      "columns": [
+        "scope",
+        "model_family",
+        "model_id",
+        "model_label",
+        "feature",
+        "permutation_importance_gap",
+        "conf_low",
+        "conf_high",
+        "n_articles",
+        "bootstrap_draws",
+        "audience_importance",
+        "curator_importance",
+        "permutation_repeats",
+        "feature_label"
+      ],
+      "sha256": "3030252eadead0c69c0e0df6e2293ddd267ae2bf405bfb2db4dfb0716f8ad732",
+      "source_sha256": "3030252eadead0c69c0e0df6e2293ddd267ae2bf405bfb2db4dfb0716f8ad732"
+    },
+    "CG1/reporting/tables/held_out_shap_importance.csv": {
+      "bytes": 77382,
+      "columns": [
+        "scope",
+        "model_family",
+        "model_id",
+        "feature_set",
+        "feature",
+        "mean_shap",
+        "mean_abs_shap",
+        "n_stories",
+        "sampled_comments",
+        "mean_abs_shap_audience",
+        "mean_abs_shap_curator",
+        "mean_shap_audience",
+        "mean_shap_curator",
+        "mean_shap_gap",
+        "mean_abs_shap_gap",
+        "aggregation",
+        "mean_shap_audience_story_q25",
+        "mean_shap_audience_story_q75",
+        "mean_shap_curator_story_q25",
+        "mean_shap_curator_story_q75",
+        "mean_shap_gap_story_q25",
+        "mean_shap_gap_story_q75",
+        "story_count",
+        "story_lower_quantile",
+        "story_upper_quantile"
+      ],
+      "sha256": "d165705c86e57d48348cf127c14082b6b9584132254ddcc1ef25cc4492f97a50",
+      "source_sha256": "d165705c86e57d48348cf127c14082b6b9584132254ddcc1ef25cc4492f97a50"
+    },
+    "CG1/reporting/tables/held_out_shap_importance.parquet": {
+      "bytes": 37976,
+      "columns": [
+        "scope",
+        "model_family",
+        "model_id",
+        "feature_set",
+        "feature",
+        "mean_shap",
+        "mean_abs_shap",
+        "n_stories",
+        "sampled_comments",
+        "mean_abs_shap_audience",
+        "mean_abs_shap_curator",
+        "mean_shap_audience",
+        "mean_shap_curator",
+        "mean_shap_gap",
+        "mean_abs_shap_gap",
+        "aggregation",
+        "mean_shap_audience_story_q25",
+        "mean_shap_audience_story_q75",
+        "mean_shap_curator_story_q25",
+        "mean_shap_curator_story_q75",
+        "mean_shap_gap_story_q25",
+        "mean_shap_gap_story_q75",
+        "story_count",
+        "story_lower_quantile",
+        "story_upper_quantile"
+      ],
+      "sha256": "6d8bda5bd0596c68e2c95f5ae91405302e49d9a37b9904ad01f303ff0244b9a1",
+      "source_sha256": "6d8bda5bd0596c68e2c95f5ae91405302e49d9a37b9904ad01f303ff0244b9a1"
+    },
+    "CG1/reporting/tables/held_out_shap_story_variability.parquet": {
+      "bytes": 19209,
+      "columns": [
+        "scope",
+        "model_family",
+        "model_id",
+        "feature_set",
+        "feature",
+        "mean_shap_audience_story_q25",
+        "mean_shap_audience_story_q75",
+        "mean_shap_curator_story_q25",
+        "mean_shap_curator_story_q75",
+        "mean_shap_gap_story_q25",
+        "mean_shap_gap_story_q75",
+        "story_count",
+        "story_lower_quantile",
+        "story_upper_quantile"
+      ],
+      "sha256": "e545deb529c4f75a26abaec84c6935f2888a84835e02958ddba7ec912af9c124",
+      "source_sha256": "e545deb529c4f75a26abaec84c6935f2888a84835e02958ddba7ec912af9c124"
+    },
+    "CG1/reporting/tables/held_out_tie_sensitivity.csv": {
+      "bytes": 9934,
+      "columns": [
+        "selector",
+        "audience_tie_draw",
+        "ndcg_at_k",
+        "top_k_overlap",
+        "jaccard",
+        "mean_selected_rank",
+        "model_id",
+        "model_family",
+        "model_label",
+        "feature_set",
+        "scope",
+        "analysis_partition",
+        "model_pair_label"
+      ],
+      "sha256": "3599462b638c9460d9451ba0bc1bf6d62bda0ac0c023d66f589ff72fb12a7192",
+      "source_sha256": "3599462b638c9460d9451ba0bc1bf6d62bda0ac0c023d66f589ff72fb12a7192"
+    },
+    "CG1/reporting/tables/regression_coefficients_all.csv": {
+      "bytes": 6503,
+      "columns": [
+        "Feature",
+        "Unit",
+        "Editor beta [95% CI]",
+        "Editor $p$",
+        "Editor $q$",
+        "Audience beta [95% CI]",
+        "Audience p",
+        "Audience q",
+        "Editor $-$ audience $\\Delta\\beta$ [95\\% CI]",
+        "Gap $p$",
+        "Gap $q$",
+        "scope"
+      ],
+      "sha256": "2420e7c9379000eeb7932c907469803e3d14b26016c71d610f61ac4254b89c6e",
+      "source_sha256": "2420e7c9379000eeb7932c907469803e3d14b26016c71d610f61ac4254b89c6e"
+    },
+    "CG1/reporting/tables/regression_diagnostics_all.csv": {
+      "bytes": 2483,
+      "columns": [
+        "Diagnostic",
+        "Value",
+        "statistic"
+      ],
+      "sha256": "434282755dc403ae83a2206978cd48d3f4a740121fe6432cede69e3a8d4d0d47",
+      "source_sha256": "434282755dc403ae83a2206978cd48d3f4a740121fe6432cede69e3a8d4d0d47"
+    },
+    "CG1/reporting/tables/regression_feature_gaps.csv": {
+      "bytes": 23359,
+      "columns": [
+        "term",
+        "feature",
+        "unit",
+        "audience_log_odds",
+        "audience_se",
+        "audience_conf_low",
+        "audience_conf_high",
+        "audience_odds_ratio",
+        "audience_p_value",
+        "curator_log_odds",
+        "curator_se",
+        "curator_conf_low",
+        "curator_conf_high",
+        "curator_odds_ratio",
+        "curator_p_value",
+        "curator_minus_audience_log_odds",
+        "difference_se",
+        "difference_conf_low",
+        "difference_conf_high",
+        "difference_p_value",
+        "audience_q_value_bh",
+        "curator_q_value_bh",
+        "difference_q_value_bh",
+        "scope",
+        "feature_gap_log_odds",
+        "feature_gap_conf_low",
+        "feature_gap_conf_high",
+        "curator_to_audience_odds_ratio"
+      ],
+      "sha256": "e496e4db18d058af6a2746d85dad4136cd3af90aeb03ce2ca92f773dca122a42",
+      "source_sha256": "e496e4db18d058af6a2746d85dad4136cd3af90aeb03ce2ca92f773dca122a42"
+    },
+    "CG1/reporting/tables/regression_missing_numbers.csv": {
+      "bytes": 1,
+      "columns": [],
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "CG1/reporting/tables/regression_model_diagnostics.csv": {
+      "bytes": 936,
+      "columns": [
+        "statistic",
+        "value",
+        "scope"
+      ],
+      "sha256": "ea0638c74d41cb0a81dc924fb8e4c38bc2f7c0a4933440dc7aed38637a019c0a",
+      "source_sha256": "ea0638c74d41cb0a81dc924fb8e4c38bc2f7c0a4933440dc7aed38637a019c0a"
+    },
+    "CG1/reporting/tables/regression_selector_associations.csv": {
+      "bytes": 20145,
+      "columns": [
+        "term",
+        "feature",
+        "unit",
+        "audience_log_odds",
+        "audience_se",
+        "audience_conf_low",
+        "audience_conf_high",
+        "audience_odds_ratio",
+        "audience_p_value",
+        "curator_log_odds",
+        "curator_se",
+        "curator_conf_low",
+        "curator_conf_high",
+        "curator_odds_ratio",
+        "curator_p_value",
+        "curator_minus_audience_log_odds",
+        "difference_se",
+        "difference_conf_low",
+        "difference_conf_high",
+        "difference_p_value",
+        "audience_q_value_bh",
+        "curator_q_value_bh",
+        "difference_q_value_bh",
+        "scope"
+      ],
+      "sha256": "a3ce947bc6e03abfa2f3a70918f0e972523c34a5a0a53c4642c648289571826f",
+      "source_sha256": "a3ce947bc6e03abfa2f3a70918f0e972523c34a5a0a53c4642c648289571826f"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/covariance_conditioning.csv": {
+      "bytes": 1388,
+      "columns": [
+        "scope",
+        "variant",
+        "covariance",
+        "raw_covariance_condition_number",
+        "correlation_scale_condition_number",
+        "corresponding_max_condition_index",
+        "coefficients"
+      ],
+      "sha256": "5c9bbefba26e419f4056d3299b73a4dc37bbafac0edb8b9fbc01a506356d5419",
+      "source_sha256": "5c9bbefba26e419f4056d3299b73a4dc37bbafac0edb8b9fbc01a506356d5419"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/design_condition_summary.csv": {
+      "bytes": 376,
+      "columns": [
+        "scope",
+        "variant",
+        "maximum_condition_index",
+        "dimensions_over_30",
+        "dimensions_over_15"
+      ],
+      "sha256": "cff6c6b0bb9dfcd149f60f95916f6504e624865ec7d4bf921f31ae197f23737f",
+      "source_sha256": "cff6c6b0bb9dfcd149f60f95916f6504e624865ec7d4bf921f31ae197f23737f"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/development_cv_metric_summary.csv": {
+      "bytes": 3780,
+      "columns": [
+        "scope",
+        "variant",
+        "selector",
+        "metric",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "articles",
+        "bootstrap_draws"
+      ],
+      "sha256": "75defdea8d733e1720de1a36fda0f0a392d3af9585894b6be9a77dfc856e60e9",
+      "source_sha256": "75defdea8d733e1720de1a36fda0f0a392d3af9585894b6be9a77dfc856e60e9"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/development_cv_paired_differences.csv": {
+      "bytes": 4530,
+      "columns": [
+        "variant",
+        "selector",
+        "metric",
+        "full_estimate",
+        "variant_estimate",
+        "variant_minus_full",
+        "conf_low",
+        "conf_high",
+        "articles",
+        "bootstrap_draws",
+        "scope"
+      ],
+      "sha256": "0b2f08839502abf1110d15ebf0c8c960eb96e1d8c79918e55d5795484a115d42",
+      "source_sha256": "0b2f08839502abf1110d15ebf0c8c960eb96e1d8c79918e55d5795484a115d42"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/exact_reparameterisation_checks.csv": {
+      "bytes": 168,
+      "columns": [
+        "scope",
+        "variant",
+        "log_likelihood_difference",
+        "maximum_absolute_within_stratum_score_difference",
+        "ranking_identical"
+      ],
+      "sha256": "05021abde456c877cf20d6e1f58728789989ac97a9932cd21f020bdbb0817329",
+      "source_sha256": "05021abde456c877cf20d6e1f58728789989ac97a9932cd21f020bdbb0817329"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/joint_block_wald_tests.csv": {
+      "bytes": 1726,
+      "columns": [
+        "family",
+        "terms",
+        "df",
+        "chisq",
+        "p_value",
+        "scope",
+        "block",
+        "q_value_bh"
+      ],
+      "sha256": "7836f0b72363648428ec81bb5584c3a26d03394df4c0373ca7c445a4edbd1b98",
+      "source_sha256": "7836f0b72363648428ec81bb5584c3a26d03394df4c0373ca7c445a4edbd1b98"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/variant_coefficient_stability.csv": {
+      "bytes": 99570,
+      "columns": [
+        "scope",
+        "variant",
+        "comparison_term",
+        "estimand",
+        "estimate",
+        "full_estimate",
+        "estimate_change",
+        "absolute_estimate_change",
+        "relative_absolute_change",
+        "sign_change",
+        "material_sign_change"
+      ],
+      "sha256": "69ad55020fd1572abefbb0bf04a4e36efcf2306b370d8f8c8d054ff74b71530d",
+      "source_sha256": "69ad55020fd1572abefbb0bf04a4e36efcf2306b370d8f8c8d054ff74b71530d"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/variant_fit_summary.csv": {
+      "bytes": 477,
+      "columns": [
+        "scope",
+        "variant",
+        "coding",
+        "parameters",
+        "fitted_log_likelihood",
+        "iterations",
+        "warning_count"
+      ],
+      "sha256": "900b832d8a2c09e4c271b4c9a1ed431a9353a337a8eb6cd1bc2c7742c9ebb413",
+      "source_sha256": "900b832d8a2c09e4c271b4c9a1ed431a9353a337a8eb6cd1bc2c7742c9ebb413"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/covariance_conditioning.csv": {
+      "bytes": 859,
+      "columns": [
+        "scope",
+        "variant",
+        "covariance",
+        "raw_covariance_condition_number",
+        "correlation_scale_condition_number",
+        "corresponding_max_condition_index",
+        "coefficients"
+      ],
+      "sha256": "e73dae08c6edf8f671700c576716514c2398d16432904282d8de66fe3af344df",
+      "source_sha256": "e73dae08c6edf8f671700c576716514c2398d16432904282d8de66fe3af344df"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/design_condition_summary.csv": {
+      "bytes": 250,
+      "columns": [
+        "scope",
+        "variant",
+        "maximum_condition_index",
+        "dimensions_over_30",
+        "dimensions_over_15"
+      ],
+      "sha256": "ae4105643391786d508e5c3d37ec500c6be5bc37e1a910bc4f08ec612d7582d5",
+      "source_sha256": "ae4105643391786d508e5c3d37ec500c6be5bc37e1a910bc4f08ec612d7582d5"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/development_cv_metric_summary.csv": {
+      "bytes": 1912,
+      "columns": [
+        "scope",
+        "variant",
+        "selector",
+        "metric",
+        "estimate",
+        "conf_low",
+        "conf_high",
+        "articles",
+        "bootstrap_draws"
+      ],
+      "sha256": "8763fe457a1007ab0e8072ecf7d650a8f4a5c5a04da568d057223a701e6ee0e7",
+      "source_sha256": "8763fe457a1007ab0e8072ecf7d650a8f4a5c5a04da568d057223a701e6ee0e7"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/development_cv_paired_differences.csv": {
+      "bytes": 1864,
+      "columns": [
+        "variant",
+        "selector",
+        "metric",
+        "full_estimate",
+        "variant_estimate",
+        "variant_minus_full",
+        "conf_low",
+        "conf_high",
+        "articles",
+        "bootstrap_draws",
+        "scope"
+      ],
+      "sha256": "31b9248b15c073b81ad01cc2d2555f5a29a592741459877d47b078bd8f371478",
+      "source_sha256": "31b9248b15c073b81ad01cc2d2555f5a29a592741459877d47b078bd8f371478"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/exact_reparameterisation_checks.csv": {
+      "bytes": 189,
+      "columns": [
+        "scope",
+        "variant",
+        "log_likelihood_difference",
+        "maximum_absolute_within_stratum_score_difference",
+        "ranking_identical"
+      ],
+      "sha256": "9e70d05290884314f7ef0828297f14f4ca141161077f9046f6a31636d304fa46",
+      "source_sha256": "9e70d05290884314f7ef0828297f14f4ca141161077f9046f6a31636d304fa46"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/joint_block_wald_tests.csv": {
+      "bytes": 1487,
+      "columns": [
+        "family",
+        "terms",
+        "df",
+        "chisq",
+        "p_value",
+        "scope",
+        "block",
+        "q_value_bh"
+      ],
+      "sha256": "67ad87a92c13337daa7a2e5927168e8631f304bc1c7342b5eb367667383e115c",
+      "source_sha256": "67ad87a92c13337daa7a2e5927168e8631f304bc1c7342b5eb367667383e115c"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/variant_coefficient_stability.csv": {
+      "bytes": 39381,
+      "columns": [
+        "scope",
+        "variant",
+        "comparison_term",
+        "estimand",
+        "estimate",
+        "full_estimate",
+        "estimate_change",
+        "absolute_estimate_change",
+        "relative_absolute_change",
+        "sign_change",
+        "material_sign_change"
+      ],
+      "sha256": "b381073802c78e53ecaa974dbbda9a5c47ec16491683afa15f1b230ffc0ef49b",
+      "source_sha256": "b381073802c78e53ecaa974dbbda9a5c47ec16491683afa15f1b230ffc0ef49b"
+    },
+    "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/variant_fit_summary.csv": {
+      "bytes": 306,
+      "columns": [
+        "scope",
+        "variant",
+        "coding",
+        "parameters",
+        "fitted_log_likelihood",
+        "iterations",
+        "warning_count"
+      ],
+      "sha256": "e60faebf973c35aed904841518f897980c4ae2aba95c04460950476df56679ec",
+      "source_sha256": "e60faebf973c35aed904841518f897980c4ae2aba95c04460950476df56679ec"
+    },
+    "CG1/sensitivity/efron_exact_shared_preprocessing_v4/all/coefficient_comparison.csv": {
+      "bytes": 4393,
+      "columns": [
+        "term",
+        "efron",
+        "exact",
+        "difference_exact_minus_efron",
+        "absolute_difference",
+        "sign_agreement",
+        "material_sign_flip"
+      ],
+      "sha256": "ef9c511eb1967c66c2716c5cfc65ad8ccee8383374644a965180e304fc686281",
+      "source_sha256": "ef9c511eb1967c66c2716c5cfc65ad8ccee8383374644a965180e304fc686281"
+    },
+    "CG1/sensitivity/efron_exact_shared_preprocessing_v4/all/sensitivity_summary.csv": {
+      "bytes": 610,
+      "columns": [
+        "statistic",
+        "value"
+      ],
+      "sha256": "e1dd82e8462f1160f400f9a651fc52f2a463d74b1e97844c1892fb216abfe5de",
+      "source_sha256": "e1dd82e8462f1160f400f9a651fc52f2a463d74b1e97844c1892fb216abfe5de"
+    },
+    "CG1/sensitivity/efron_exact_shared_preprocessing_v4/root/coefficient_comparison.csv": {
+      "bytes": 3963,
+      "columns": [
+        "term",
+        "efron",
+        "exact",
+        "difference_exact_minus_efron",
+        "absolute_difference",
+        "sign_agreement",
+        "material_sign_flip"
+      ],
+      "sha256": "f3234c1bec6949fb615a80d1838f67ae162a012688803e35d930b8de53fad86d",
+      "source_sha256": "f3234c1bec6949fb615a80d1838f67ae162a012688803e35d930b8de53fad86d"
+    },
+    "CG1/sensitivity/efron_exact_shared_preprocessing_v4/root/sensitivity_summary.csv": {
+      "bytes": 621,
+      "columns": [
+        "statistic",
+        "value"
+      ],
+      "sha256": "fb8c249551df64e2320ff1885bdb11fd69b89ce71df3ed302277b1d7dc988695",
+      "source_sha256": "fb8c249551df64e2320ff1885bdb11fd69b89ce71df3ed302277b1d7dc988695"
+    },
+    "CG1/winners/development_cv_variant_ranking.csv": {
+      "bytes": 6711,
+      "columns": [
+        "variant_id",
+        "family",
+        "scope",
+        "mean_macro_ndcg_at_k",
+        "sd_macro_ndcg_at_k",
+        "min_fold_macro_ndcg_at_k",
+        "completed_folds",
+        "mean_audience_ndcg_at_k",
+        "mean_curator_ndcg_at_k",
+        "feature_set",
+        "draw_policy",
+        "negative_sampling",
+        "schedule",
+        "heads",
+        "network",
+        "development_cv_rank"
+      ],
+      "sha256": "92ebfb2c2684ec2bd1437e0f55f9ec0ac758650e8716c7cf401318b7cdce591f",
+      "source_sha256": "92ebfb2c2684ec2bd1437e0f55f9ec0ac758650e8716c7cf401318b7cdce591f"
+    },
+    "CG1/winners/development_cv_winners.csv": {
+      "bytes": 930,
+      "columns": [
+        "variant_id",
+        "family",
+        "scope",
+        "mean_macro_ndcg_at_k",
+        "sd_macro_ndcg_at_k",
+        "min_fold_macro_ndcg_at_k",
+        "completed_folds",
+        "mean_audience_ndcg_at_k",
+        "mean_curator_ndcg_at_k",
+        "feature_set",
+        "draw_policy",
+        "negative_sampling",
+        "schedule",
+        "heads",
+        "network",
+        "development_cv_rank"
+      ],
+      "sha256": "02db1ed530d456a90ee8e191fa8a0725b6eef95daee898734e430213c48288b5",
+      "source_sha256": "02db1ed530d456a90ee8e191fa8a0725b6eef95daee898734e430213c48288b5"
+    },
+    "CG2/forum/inference/forum_ndcg_agreement.csv": {
+      "bytes": 223332,
+      "columns": [
+        "sample",
+        "outcome",
+        "depth",
+        "variant_group",
+        "reply_mode",
+        "pinned",
+        "n_stories",
+        "constant_outcome_stories_excluded",
+        "n_orderings",
+        "spearman_forum_ndcg",
+        "ci_lower",
+        "ci_upper",
+        "scope"
+      ],
+      "sha256": "089fdb5a2914555b786ad7a0b54839242cd45301d49d09303c82e59432f90663",
+      "source_sha256": "089fdb5a2914555b786ad7a0b54839242cd45301d49d09303c82e59432f90663"
+    },
+    "CG2/forum/inference/marginal_effects.csv": {
+      "bytes": 475681,
+      "columns": [
+        "sample",
+        "outcome",
+        "depth",
+        "contrast_family",
+        "contrast",
+        "reference",
+        "n_stories",
+        "estimate",
+        "ci_lower",
+        "ci_upper"
+      ],
+      "sha256": "97a507443a14037223fb17a43d2c5153c557585385c4a1683acf57d1e690f410",
+      "source_sha256": "97a507443a14037223fb17a43d2c5153c557585385c4a1683acf57d1e690f410"
+    },
+    "CG2/forum/inference/mechanism_alignment.csv": {
+      "bytes": 25365,
+      "columns": [
+        "sample",
+        "score",
+        "outcome",
+        "n_stories",
+        "mean_within_story_spearman",
+        "ci_lower",
+        "ci_upper"
+      ],
+      "sha256": "1c370418b482ffb7c582aed29ee376c1315918472ae9db672e8ac20d44ec5e9d",
+      "source_sha256": "1c370418b482ffb7c582aed29ee376c1315918472ae9db672e8ac20d44ec5e9d"
+    },
+    "CG2/forum/inference/policy_summary.csv": {
+      "bytes": 3124418,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "deployable",
+        "sample",
+        "outcome",
+        "depth",
+        "n_stories",
+        "estimate",
+        "ci_lower",
+        "ci_upper",
+        "probability_highest_forum",
+        "probability_top_three_forum"
+      ],
+      "sha256": "1668c734ba31ff5e72f612714e79cf8c0cade8a6deef5aeb2e6187c11ace2da8",
+      "source_sha256": "1668c734ba31ff5e72f612714e79cf8c0cade8a6deef5aeb2e6187c11ace2da8"
+    },
+    "CG2/forum/input_summary.csv": {
+      "bytes": 112,
+      "columns": [
+        "quantity",
+        "value"
+      ],
+      "sha256": "eb68b2949f218c3576ee4401c71ea41f8c6caec9365dee0650063f9ea9d09c65",
+      "transformation": "Aggregate input and policy row counts only; no comment or story IDs."
+    },
+    "CG2/forum/policy_row_counts.csv": {
+      "bytes": 3551,
+      "columns": [
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "rows"
+      ],
+      "sha256": "33d873c79eb5f3bf53faef1aa93f2dbcab9b51a320fd6c044864301cd1d1efdc",
+      "transformation": "Aggregate input and policy row counts only; no comment or story IDs."
+    },
+    "CG2/forum/ranker_handoff/development_cv_rankings.csv": {
+      "bytes": 6711,
+      "columns": [
+        "variant_id",
+        "family",
+        "scope",
+        "mean_macro_ndcg_at_k",
+        "sd_macro_ndcg_at_k",
+        "min_fold_macro_ndcg_at_k",
+        "completed_folds",
+        "mean_audience_ndcg_at_k",
+        "mean_curator_ndcg_at_k",
+        "feature_set",
+        "draw_policy",
+        "negative_sampling",
+        "schedule",
+        "heads",
+        "network",
+        "development_cv_rank"
+      ],
+      "sha256": "92ebfb2c2684ec2bd1437e0f55f9ec0ac758650e8716c7cf401318b7cdce591f",
+      "source_sha256": "92ebfb2c2684ec2bd1437e0f55f9ec0ac758650e8716c7cf401318b7cdce591f"
+    },
+    "CG2/forum/ranker_handoff/selected_rankers_public.csv": {
+      "bytes": 430,
+      "columns": [
+        "family",
+        "feature_set",
+        "variant_id",
+        "scope",
+        "audience_column",
+        "editor_column"
+      ],
+      "sha256": "879d5767762a65e9acde4437904f3d8d31cc10a092a2864d794d7cd7c933f629",
+      "transformation": "Selected model identities with private score paths removed."
+    },
+    "CG2/forum/reporting/paper_primary_correlations.csv": {
+      "bytes": 209,
+      "columns": [
+        "group",
+        "n",
+        "pearson_r",
+        "spearman_rho"
+      ],
+      "sha256": "9150c335b4053f82af9e34a32d8f1506dc5518e175c03d3c8c1b8a085a4be651",
+      "source_sha256": "9150c335b4053f82af9e34a32d8f1506dc5518e175c03d3c8c1b8a085a4be651"
+    },
+    "CG2/forum/reporting/paper_primary_feature_correlations.csv": {
+      "bytes": 2427,
+      "columns": [
+        "group",
+        "n",
+        "pearson_r",
+        "spearman_rho",
+        "comparison"
+      ],
+      "sha256": "6f3b4a32a9b7a758b5dd410e0063f32630f702e3b113ef1bae4b4989bce6878d",
+      "source_sha256": "6f3b4a32a9b7a758b5dd410e0063f32630f702e3b113ef1bae4b4989bce6878d"
+    },
+    "CG2/forum/reporting/paper_ranking_metrics.csv": {
+      "bytes": 1226096,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "deployable",
+        "outcome",
+        "depth",
+        "forum",
+        "ndcg",
+        "n_stories"
+      ],
+      "sha256": "e1e2afc21336de4c78ff61c90cc206e8f7311cfd1a270d1beadbf970b8e88029",
+      "transformation": "Policy-level means over private story scores; no story IDs."
+    },
+    "CG2/ranking_similarity/display_coordinates.parquet": {
+      "bytes": 5569,
+      "columns": [
+        "policy_id",
+        "umap1",
+        "umap2",
+        "depth"
+      ],
+      "sha256": "e7df443a2bd1e4b147a03e56902a6ecd2db526e738ef0430135cbe6dfa0cb8d9",
+      "source_sha256": "e7df443a2bd1e4b147a03e56902a6ecd2db526e738ef0430135cbe6dfa0cb8d9"
+    },
+    "CG2/ranking_similarity/full_raw_forum_matrix.csv": {
+      "bytes": 79632,
+      "columns": [
+        "policy_id",
+        "log_words",
+        "sentiment_positive",
+        "sentiment_negative",
+        "toxicity_probability",
+        "lexdiv_length_adjusted",
+        "reading_level_length_adjusted",
+        "url_present",
+        "article_similarity_top3",
+        "novelty_prior_all_model",
+        "log_hours_since_article",
+        "prior_reply_composition",
+        "discussion_pace",
+        "vienna_overnight",
+        "vienna_weekday_shoulder_evening",
+        "vienna_weekend_day_evening",
+        "log_author_prior_30d_comments",
+        "author_prior_30d_upvote_reception",
+        "author_prior_30d_downvote_reception",
+        "log_author_prior_comments_story",
+        "is_reply",
+        "reply_depth_centered",
+        "aqua_relevance_expected",
+        "aqua_fact_expected",
+        "aqua_opinion_expected",
+        "aqua_justification_expected",
+        "aqua_solution_proposal_expected",
+        "aqua_additional_knowledge_expected",
+        "aqua_question_expected",
+        "aqua_referencing_users_expected",
+        "aqua_referencing_medium_expected",
+        "aqua_referencing_contents_expected",
+        "aqua_referencing_personal_expected",
+        "aqua_referencing_format_expected",
+        "aqua_polite_address_expected",
+        "aqua_respect_expected",
+        "aqua_screaming_expected",
+        "aqua_vulgarity_expected",
+        "aqua_insult_expected",
+        "aqua_sarcasm_expected",
+        "aqua_discrimination_expected",
+        "aqua_storytelling_expected"
+      ],
+      "sha256": "34b8600ab05a49ddc0ea9446458bcb00f96667dae457ec61bf661cdfb971e8c2",
+      "source_sha256": "34b8600ab05a49ddc0ea9446458bcb00f96667dae457ec61bf661cdfb971e8c2"
+    },
+    "CG2/ranking_similarity/policy_feature_mean_forum_outcomes.csv": {
+      "bytes": 957901,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "deployable",
+        "outcome",
+        "depth",
+        "mean_forum",
+        "n_stories"
+      ],
+      "sha256": "9833df81d44b02810b00666b7e2fe861cb398749278d6bab6cb7ac663d4a2db9",
+      "source_sha256": "9833df81d44b02810b00666b7e2fe861cb398749278d6bab6cb7ac663d4a2db9"
+    },
+    "CG2/ranking_similarity/top10_raw_forum_matrix.csv": {
+      "bytes": 79032,
+      "columns": [
+        "policy_id",
+        "log_words",
+        "sentiment_positive",
+        "sentiment_negative",
+        "toxicity_probability",
+        "lexdiv_length_adjusted",
+        "reading_level_length_adjusted",
+        "url_present",
+        "article_similarity_top3",
+        "novelty_prior_all_model",
+        "log_hours_since_article",
+        "prior_reply_composition",
+        "discussion_pace",
+        "vienna_overnight",
+        "vienna_weekday_shoulder_evening",
+        "vienna_weekend_day_evening",
+        "log_author_prior_30d_comments",
+        "author_prior_30d_upvote_reception",
+        "author_prior_30d_downvote_reception",
+        "log_author_prior_comments_story",
+        "is_reply",
+        "reply_depth_centered",
+        "aqua_relevance_expected",
+        "aqua_fact_expected",
+        "aqua_opinion_expected",
+        "aqua_justification_expected",
+        "aqua_solution_proposal_expected",
+        "aqua_additional_knowledge_expected",
+        "aqua_question_expected",
+        "aqua_referencing_users_expected",
+        "aqua_referencing_medium_expected",
+        "aqua_referencing_contents_expected",
+        "aqua_referencing_personal_expected",
+        "aqua_referencing_format_expected",
+        "aqua_polite_address_expected",
+        "aqua_respect_expected",
+        "aqua_screaming_expected",
+        "aqua_vulgarity_expected",
+        "aqua_insult_expected",
+        "aqua_sarcasm_expected",
+        "aqua_discrimination_expected",
+        "aqua_storytelling_expected"
+      ],
+      "sha256": "8f40dba25f7c95b4c4dd90acfc72c922e93505111c5649d6bfec0d3a5c3862e2",
+      "source_sha256": "8f40dba25f7c95b4c4dd90acfc72c922e93505111c5649d6bfec0d3a5c3862e2"
+    },
+    "CG2/ranking_similarity/umap_cluster_membership.csv": {
+      "bytes": 19279,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "deployable",
+        "pin_state",
+        "interface",
+        "depth",
+        "umap_cluster"
+      ],
+      "sha256": "e96f8c420ea31710f2960bacc2019812e4c64143c6dfc03ccc595a5a4cc8a31e",
+      "source_sha256": "e96f8c420ea31710f2960bacc2019812e4c64143c6dfc03ccc595a5a4cc8a31e"
+    },
+    "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/pairs.csv": {
+      "bytes": 99893,
+      "columns": [
+        "doc_type",
+        "first",
+        "second",
+        "documents",
+        "first_coverage_pct",
+        "second_coverage_pct",
+        "common_documents",
+        "common_coverage_pct",
+        "assignment_agreement_pct",
+        "assigned_jaccard",
+        "ami_all",
+        "ari_all",
+        "ami_common",
+        "ari_common",
+        "ami_union",
+        "ari_union",
+        "min_cluster_size",
+        "n_neighbors",
+        "min_samples",
+        "fit_corpus"
+      ],
+      "sha256": "c58c05f96920e88bf0332566a66429edf57d029648dfe9097b39e0d2c1888a22",
+      "source_sha256": "c58c05f96920e88bf0332566a66429edf57d029648dfe9097b39e0d2c1888a22"
+    },
+    "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/pareto_frontier_article_comment_coverage_pooled_common_ami.csv": {
+      "bytes": 1120,
+      "columns": [
+        "configuration",
+        "article_coverage",
+        "comment_coverage",
+        "raw_pooled_common_ami",
+        "topics",
+        "docs_in_topics_le5",
+        "docs_in_topics_le10"
+      ],
+      "sha256": "c11fffe078e51d15d067712894c6035a898119b9f5f0f708b298ce3700cbe444",
+      "source_sha256": "c11fffe078e51d15d067712894c6035a898119b9f5f0f708b298ce3700cbe444"
+    },
+    "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/pooled_pairs.csv": {
+      "bytes": 51509,
+      "columns": [
+        "doc_type",
+        "first",
+        "second",
+        "documents",
+        "first_coverage_pct",
+        "second_coverage_pct",
+        "common_documents",
+        "common_coverage_pct",
+        "assignment_agreement_pct",
+        "assigned_jaccard",
+        "ami_all",
+        "ari_all",
+        "ami_common",
+        "ari_common",
+        "ami_union",
+        "ari_union",
+        "min_cluster_size",
+        "n_neighbors",
+        "min_samples",
+        "fit_corpus"
+      ],
+      "sha256": "b7d03ef95f505d4c51090ec8f3c4bdd7f23ff276ae4cc7a9308390e9187f0e6f",
+      "source_sha256": "b7d03ef95f505d4c51090ec8f3c4bdd7f23ff276ae4cc7a9308390e9187f0e6f"
+    },
+    "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/seeds.csv": {
+      "bytes": 77126,
+      "columns": [
+        "run_id",
+        "split_role",
+        "doc_type",
+        "fit_corpus",
+        "label_source",
+        "training_documents",
+        "min_cluster_size",
+        "n_neighbors",
+        "min_samples",
+        "seed",
+        "raw_hdbscan_clusters",
+        "fitted_substantive_topics",
+        "fit_seconds",
+        "raw_coverage_pct",
+        "reassigned_documents",
+        "documents",
+        "assigned_documents",
+        "outlier_documents",
+        "coverage_pct",
+        "substantive_topics"
+      ],
+      "sha256": "d2d32c05cccc5fc5afd2cb08fedc442f94c9016d41e0c02991fb4cb5511ab614",
+      "source_sha256": "d2d32c05cccc5fc5afd2cb08fedc442f94c9016d41e0c02991fb4cb5511ab614"
+    },
+    "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/summary.csv": {
+      "bytes": 121714,
+      "columns": [
+        "fit_corpus",
+        "min_cluster_size",
+        "n_neighbors",
+        "min_samples",
+        "doc_type",
+        "coverage_pct_min",
+        "coverage_pct_median",
+        "coverage_pct_max",
+        "assigned_documents_min",
+        "assigned_documents_median",
+        "assigned_documents_max",
+        "fitted_substantive_topics_min",
+        "fitted_substantive_topics_median",
+        "fitted_substantive_topics_max",
+        "ami_common_min",
+        "ami_common_median",
+        "ami_common_max",
+        "ami_common_count",
+        "ari_common_min",
+        "ari_common_median",
+        "ari_common_max",
+        "ari_common_count",
+        "ami_union_min",
+        "ami_union_median",
+        "ami_union_max",
+        "ami_union_count",
+        "ari_union_min",
+        "ari_union_median",
+        "ari_union_max",
+        "ari_union_count",
+        "ami_all_min",
+        "ami_all_median",
+        "ami_all_max",
+        "ami_all_count",
+        "ari_all_min",
+        "ari_all_median",
+        "ari_all_max",
+        "ari_all_count",
+        "assigned_jaccard_min",
+        "assigned_jaccard_median",
+        "assigned_jaccard_max",
+        "assigned_jaccard_count",
+        "common_coverage_pct_min",
+        "common_coverage_pct_median",
+        "common_coverage_pct_max",
+        "common_coverage_pct_count",
+        "all_seed_coverage_pct",
+        "ami_common_pooled_min",
+        "ami_common_pooled_median",
+        "ami_common_pooled_max",
+        "ami_common_pooled_count",
+        "ari_common_pooled_min",
+        "ari_common_pooled_median",
+        "ari_common_pooled_max",
+        "ari_common_pooled_count",
+        "ami_union_pooled_min",
+        "ami_union_pooled_median",
+        "ami_union_pooled_max",
+        "ami_union_pooled_count",
+        "ari_union_pooled_min",
+        "ari_union_pooled_median",
+        "ari_union_pooled_max",
+        "ari_union_pooled_count",
+        "ami_all_pooled_min",
+        "ami_all_pooled_median",
+        "ami_all_pooled_max",
+        "ami_all_pooled_count",
+        "ari_all_pooled_min",
+        "ari_all_pooled_median",
+        "ari_all_pooled_max",
+        "ari_all_pooled_count",
+        "coverage_range_pp"
+      ],
+      "sha256": "4faa48c922e3deda330165ef4e86cf348e6b30d8790ffc7b1c7640bf9b2e7e4d",
+      "source_sha256": "4faa48c922e3deda330165ef4e86cf348e6b30d8790ffc7b1c7640bf9b2e7e4d"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/final_comment_coverage.csv": {
+      "bytes": 283,
+      "columns": [
+        "coverage_scope",
+        "n_documents",
+        "raw_assigned",
+        "assigned",
+        "reassigned",
+        "raw_coverage_pct",
+        "coverage_pct"
+      ],
+      "sha256": "cfb6f57c618a22a24be4517f6c2078fed06bcbee02e74b93a1c47b9ccccb0f06",
+      "source_sha256": "cfb6f57c618a22a24be4517f6c2078fed06bcbee02e74b93a1c47b9ccccb0f06"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/final_document_coverage.csv": {
+      "bytes": 218,
+      "columns": [
+        "doc_type",
+        "n_documents",
+        "raw_assigned",
+        "assigned",
+        "reassigned",
+        "raw_coverage_pct",
+        "coverage_pct"
+      ],
+      "sha256": "a3ca2a33bc44f780ae252d8ed303b46c61d7690366530595a5ea566fcbb04fb7",
+      "source_sha256": "a3ca2a33bc44f780ae252d8ed303b46c61d7690366530595a5ea566fcbb04fb7"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/final_topic_summary_public.csv": {
+      "bytes": 3445,
+      "columns": [
+        "Topic",
+        "n_fit_documents"
+      ],
+      "sha256": "5a32832eff4414336a9c414eacd0f174836864b4de7da6d687a19dddd18aab87",
+      "source_sha256": "95711b6504ffbbefe499c02bbcab35d7fd783762bc2fa54f97af9c5864cb346a",
+      "transformation": "Retained topic number and fit-document count only."
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/public_plot_references.json": {
+      "bytes": 229,
+      "sha256": "33e502700c009305ff3fb44d4761bfbd24f88f3b3d74c379f233a4a533cee75a",
+      "transformation": "Two oracle reference-line means; no story rows or IDs."
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/public_topic_run_counts.json": {
+      "bytes": 181,
+      "sha256": "f80d3f5bfdcd501ff5f511d85461ee4671ea26498be55d265dfa12135d27de3e",
+      "transformation": "Selected topic-fit document counts only."
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_agenda_baseline_summary.csv": {
+      "bytes": 1473,
+      "columns": [
+        "metric",
+        "label",
+        "mean",
+        "sd",
+        "ci_lower",
+        "ci_upper",
+        "n"
+      ],
+      "sha256": "154b59b465ea57c82e5e99cee34a41efe4bc11682c97da1e66f17abe0ebb3f89",
+      "source_sha256": "154b59b465ea57c82e5e99cee34a41efe4bc11682c97da1e66f17abe0ebb3f89"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_agenda_rarefaction_summary.csv": {
+      "bytes": 1193,
+      "columns": [
+        "metric",
+        "label",
+        "mean",
+        "sd",
+        "ci_lower",
+        "ci_upper",
+        "n",
+        "n_stories",
+        "mean_sample_size"
+      ],
+      "sha256": "bfa6041966306e8132540a8340b34de0233ca3819b7c7658a0d4fc1335b1c585",
+      "source_sha256": "bfa6041966306e8132540a8340b34de0233ca3819b7c7658a0d4fc1335b1c585"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_fitted_attention_sensitivity.csv": {
+      "bytes": 26794,
+      "columns": [
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "js_distance",
+        "alignment_gain",
+        "attention_model",
+        "js_distance_primary",
+        "alignment_gain_primary",
+        "change_in_js_distance",
+        "change_in_alignment_gain"
+      ],
+      "sha256": "393094555296a4aa0b93016cf82b449e3b0012c197baa488488662c196b19759",
+      "source_sha256": "393094555296a4aa0b93016cf82b449e3b0012c197baa488488662c196b19759"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_comparison.csv": {
+      "bytes": 322,
+      "columns": [
+        "model",
+        "role",
+        "cv_cross_entropy",
+        "training_cross_entropy",
+        "n_validation_stories",
+        "cv_delta_vs_power_law"
+      ],
+      "sha256": "d1bdf6652d1a0b95b5b5ccb161406cf1e054164c24ca54ddecdcbd8dc2d71296",
+      "source_sha256": "d1bdf6652d1a0b95b5b5ccb161406cf1e054164c24ca54ddecdcbd8dc2d71296"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_curve.csv": {
+      "bytes": 817589,
+      "columns": [
+        "rank",
+        "upvotes",
+        "downvotes",
+        "n_stories_at_rank",
+        "within_story_vote_fraction",
+        "total_votes",
+        "vote_fraction",
+        "mean_story_vote_fraction",
+        "spline_fitted_vote_fraction",
+        "spline_rank_weight",
+        "power_law_fitted_vote_fraction",
+        "power_law_rank_weight",
+        "exponential_fitted_vote_fraction",
+        "exponential_rank_weight"
+      ],
+      "sha256": "bd88af4a29dbb9273c296ce9f7aa4eb2e258c2e0eedbab61b5a5877bfa807909",
+      "source_sha256": "bd88af4a29dbb9273c296ce9f7aa4eb2e258c2e0eedbab61b5a5877bfa807909"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_cv.csv": {
+      "bytes": 593,
+      "columns": [
+        "model",
+        "fold",
+        "n_stories",
+        "cross_entropy",
+        "smoothing"
+      ],
+      "sha256": "7692f1d84450e4f6ca6ee188f60c5a5d84131e4a967480310e4832573db6a33b",
+      "source_sha256": "7692f1d84450e4f6ca6ee188f60c5a5d84131e4a967480310e4832573db6a33b"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_fit.json": {
+      "bytes": 113578,
+      "columns": [],
+      "sha256": "00b09d025d020629e55700f0929ee325619478255cc0d933ef716acddbf33977",
+      "source_sha256": "00b09d025d020629e55700f0929ee325619478255cc0d933ef716acddbf33977"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_tuning.csv": {
+      "bytes": 4885,
+      "columns": [
+        "outer_fold",
+        "validation_fold",
+        "smoothing",
+        "n_stories",
+        "cross_entropy"
+      ],
+      "sha256": "992c7cebbc96f7f5f1ebc7f610befc7232e6bba77afb37f6ba5e58c8964995e0",
+      "source_sha256": "992c7cebbc96f7f5f1ebc7f610befc7232e6bba77afb37f6ba5e58c8964995e0"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_power_law_cosine_oracle_summary.csv": {
+      "bytes": 1176,
+      "columns": [
+        "policy_id",
+        "n_stories",
+        "article_visible_hellinger_distance_mean",
+        "article_visible_hellinger_distance_sd",
+        "article_visible_hellinger_distance_q10",
+        "article_visible_hellinger_distance_median",
+        "article_visible_hellinger_distance_q90",
+        "article_visible_js_distance_mean",
+        "article_visible_js_distance_sd",
+        "article_visible_js_distance_q10",
+        "article_visible_js_distance_median",
+        "article_visible_js_distance_q90",
+        "alignment_gain_mean",
+        "alignment_gain_sd",
+        "alignment_gain_q10",
+        "alignment_gain_median",
+        "alignment_gain_q90",
+        "hellinger_alpha_mean",
+        "hellinger_alpha_sd",
+        "hellinger_alpha_q10",
+        "hellinger_alpha_median",
+        "hellinger_alpha_q90",
+        "cosine_progress_mean",
+        "cosine_progress_sd",
+        "cosine_progress_q10",
+        "cosine_progress_median",
+        "cosine_progress_q90"
+      ],
+      "sha256": "31f529da5cdd5902aa6c5967c18a80853c0db8ab061cd6877b69c01b9cb99c76",
+      "source_sha256": "31f529da5cdd5902aa6c5967c18a80853c0db8ab061cd6877b69c01b9cb99c76"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_power_law_js_oracle_summary.csv": {
+      "bytes": 1187,
+      "columns": [
+        "policy_id",
+        "n_stories",
+        "article_visible_hellinger_distance_mean",
+        "article_visible_hellinger_distance_sd",
+        "article_visible_hellinger_distance_q10",
+        "article_visible_hellinger_distance_median",
+        "article_visible_hellinger_distance_q90",
+        "article_visible_js_distance_mean",
+        "article_visible_js_distance_sd",
+        "article_visible_js_distance_q10",
+        "article_visible_js_distance_median",
+        "article_visible_js_distance_q90",
+        "alignment_gain_mean",
+        "alignment_gain_sd",
+        "alignment_gain_q10",
+        "alignment_gain_median",
+        "alignment_gain_q90",
+        "hellinger_alpha_mean",
+        "hellinger_alpha_sd",
+        "hellinger_alpha_q10",
+        "hellinger_alpha_median",
+        "hellinger_alpha_q90",
+        "cosine_progress_mean",
+        "cosine_progress_sd",
+        "cosine_progress_q10",
+        "cosine_progress_median",
+        "cosine_progress_q90"
+      ],
+      "sha256": "7cb45ac2bfa11b50c1a74b23a4d4d5f1f4994b1fd5ea7fcf27f6947bba885fc3",
+      "source_sha256": "7cb45ac2bfa11b50c1a74b23a4d4d5f1f4994b1fd5ea7fcf27f6947bba885fc3"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_spline_cosine_oracle_summary.csv": {
+      "bytes": 1177,
+      "columns": [
+        "policy_id",
+        "n_stories",
+        "article_visible_hellinger_distance_mean",
+        "article_visible_hellinger_distance_sd",
+        "article_visible_hellinger_distance_q10",
+        "article_visible_hellinger_distance_median",
+        "article_visible_hellinger_distance_q90",
+        "article_visible_js_distance_mean",
+        "article_visible_js_distance_sd",
+        "article_visible_js_distance_q10",
+        "article_visible_js_distance_median",
+        "article_visible_js_distance_q90",
+        "alignment_gain_mean",
+        "alignment_gain_sd",
+        "alignment_gain_q10",
+        "alignment_gain_median",
+        "alignment_gain_q90",
+        "hellinger_alpha_mean",
+        "hellinger_alpha_sd",
+        "hellinger_alpha_q10",
+        "hellinger_alpha_median",
+        "hellinger_alpha_q90",
+        "cosine_progress_mean",
+        "cosine_progress_sd",
+        "cosine_progress_q10",
+        "cosine_progress_median",
+        "cosine_progress_q90"
+      ],
+      "sha256": "82af7f5118883c5294fe474caa1d5219e0eba72493a6dfb8ede5764edaf7b99d",
+      "source_sha256": "82af7f5118883c5294fe474caa1d5219e0eba72493a6dfb8ede5764edaf7b99d"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_spline_js_oracle_summary.csv": {
+      "bytes": 1187,
+      "columns": [
+        "policy_id",
+        "n_stories",
+        "article_visible_hellinger_distance_mean",
+        "article_visible_hellinger_distance_sd",
+        "article_visible_hellinger_distance_q10",
+        "article_visible_hellinger_distance_median",
+        "article_visible_hellinger_distance_q90",
+        "article_visible_js_distance_mean",
+        "article_visible_js_distance_sd",
+        "article_visible_js_distance_q10",
+        "article_visible_js_distance_median",
+        "article_visible_js_distance_q90",
+        "alignment_gain_mean",
+        "alignment_gain_sd",
+        "alignment_gain_q10",
+        "alignment_gain_median",
+        "alignment_gain_q90",
+        "hellinger_alpha_mean",
+        "hellinger_alpha_sd",
+        "hellinger_alpha_q10",
+        "hellinger_alpha_median",
+        "hellinger_alpha_q90",
+        "cosine_progress_mean",
+        "cosine_progress_sd",
+        "cosine_progress_q10",
+        "cosine_progress_median",
+        "cosine_progress_q90"
+      ],
+      "sha256": "8bd768d54f1fe0435510dccd240547dc5f59478364d68e7e3e8bd58d13bb2488",
+      "source_sha256": "8bd768d54f1fe0435510dccd240547dc5f59478364d68e7e3e8bd58d13bb2488"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_power_law_topic_policy_concentration_summary.csv": {
+      "bytes": 29215,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "n_stories",
+        "normalized_entropy_mean",
+        "effective_topic_count_mean",
+        "normalized_entropy_change_vs_discussion_mean",
+        "normalized_entropy_change_vs_relative_votes_mean",
+        "effective_topic_count_change_vs_discussion_mean",
+        "effective_topic_count_change_vs_relative_votes_mean",
+        "normalized_entropy_sd",
+        "effective_topic_count_sd",
+        "normalized_entropy_change_vs_discussion_sd",
+        "normalized_entropy_change_vs_relative_votes_sd",
+        "effective_topic_count_change_vs_discussion_sd",
+        "effective_topic_count_change_vs_relative_votes_sd"
+      ],
+      "sha256": "8237d507f0732afa9f76ec017904e0e0c0ad413114b548f3c4417e20d26b244e",
+      "source_sha256": "8237d507f0732afa9f76ec017904e0e0c0ad413114b548f3c4417e20d26b244e"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_power_law_topic_policy_exposure_coverage_summary.csv": {
+      "bytes": 17640,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "n_stories",
+        "assigned_exposure_coverage_mean",
+        "assigned_exposure_coverage_sd",
+        "alignment_gain_mean",
+        "alignment_gain_sd",
+        "article_visible_js_distance_mean",
+        "article_visible_js_distance_sd"
+      ],
+      "sha256": "bdf62ed95097b1bb99d4dc680d2b8e88d641d3e5eb710e182cc2156b1c295e5a",
+      "source_sha256": "bdf62ed95097b1bb99d4dc680d2b8e88d641d3e5eb710e182cc2156b1c295e5a"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_article_relative_votes_raw_gain_scatter.csv": {
+      "bytes": 14312,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "n_stories",
+        "cosine_gain_article",
+        "cosine_gain_relative_votes",
+        "js_gain_article",
+        "js_gain_relative_votes"
+      ],
+      "sha256": "0684a5f4e657d07c523887f70e72d06d2464768e396a29a509687880eb6614e0",
+      "source_sha256": "0684a5f4e657d07c523887f70e72d06d2464768e396a29a509687880eb6614e0"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_combined_article_cosine_gain_effects.csv": {
+      "bytes": 4585,
+      "columns": [
+        "series",
+        "family",
+        "contrast",
+        "label",
+        "mean",
+        "lower",
+        "upper",
+        "n"
+      ],
+      "sha256": "f6fe8879de4dde584c41d6e0ad8a4a8425f31585938e4c3d748c6bb8035704b0",
+      "source_sha256": "f6fe8879de4dde584c41d6e0ad8a4a8425f31585938e4c3d748c6bb8035704b0"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_concentration_effects.csv": {
+      "bytes": 10262,
+      "columns": [
+        "metric",
+        "family",
+        "contrast",
+        "label",
+        "mean",
+        "lower",
+        "upper",
+        "n",
+        "contrast_index"
+      ],
+      "sha256": "f0c9c9f5a8b6d6345a8e2db57d6fc6ba7e27e4ceb42d254c435c7115dd035e47",
+      "source_sha256": "f0c9c9f5a8b6d6345a8e2db57d6fc6ba7e27e4ceb42d254c435c7115dd035e47"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_concentration_summary.csv": {
+      "bytes": 29174,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "n_stories",
+        "normalized_entropy_mean",
+        "effective_topic_count_mean",
+        "normalized_entropy_change_vs_discussion_mean",
+        "normalized_entropy_change_vs_relative_votes_mean",
+        "effective_topic_count_change_vs_discussion_mean",
+        "effective_topic_count_change_vs_relative_votes_mean",
+        "normalized_entropy_sd",
+        "effective_topic_count_sd",
+        "normalized_entropy_change_vs_discussion_sd",
+        "normalized_entropy_change_vs_relative_votes_sd",
+        "effective_topic_count_change_vs_discussion_sd",
+        "effective_topic_count_change_vs_relative_votes_sd"
+      ],
+      "sha256": "d3a3da050bd33368f60dea7e43d9937df536b9adb1b4c9e5d1e40180a2022ae9",
+      "source_sha256": "d3a3da050bd33368f60dea7e43d9937df536b9adb1b4c9e5d1e40180a2022ae9"
+    },
+    "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_exposure_coverage_summary.csv": {
+      "bytes": 17606,
+      "columns": [
+        "policy_id",
+        "ordering",
+        "reply_mode",
+        "pinned",
+        "n_stories",
+        "assigned_exposure_coverage_mean",
+        "assigned_exposure_coverage_sd",
+        "alignment_gain_mean",
+        "alignment_gain_sd",
+        "article_visible_js_distance_mean",
+        "article_visible_js_distance_sd"
+      ],
+      "sha256": "78a5811765986e814d6dcc4ced18e873f70c4b0cbe62b903921b407dcb99f2c8",
+      "source_sha256": "78a5811765986e814d6dcc4ced18e873f70c4b0cbe62b903921b407dcb99f2c8"
+    },
+    "shared/features/feature_inventory_public.json": {
+      "bytes": 3286,
+      "sha256": "0638ea29a7c88f7ea14310b479272069c249e6df946ed67ec6f951e4a6b6925d",
+      "source_sha256": "98b49ffa8e4d25bb11cfd4b8cb40652bdb45fb20b50e637cd8fd950ebe4c37d9",
+      "transformation": "Schema and row count only; no source rows."
+    },
+    "shared/model_data/model_inventory_public.json": {
+      "bytes": 3653,
+      "sha256": "75228a2b765716cdb468b67f35a9c36dcf60d551e9bb5c9eaf925591bd57db3a",
+      "source_sha256": "405425279e11ad15a506ce6b1b4798987c8273b26bcf89c6a38d39b8913494aa",
+      "transformation": "Schema and row count only; no source rows."
+    },
+    "shared/model_data/reply_depth_centers.json": {
+      "bytes": 253,
+      "columns": [],
+      "sha256": "f17777453a96e320783469f636004e905ed2b7cc082ddbc2bfabce25f6007601",
+      "transformation": "Only split aggregates and numeric preprocessing centers."
+    },
+    "shared/model_data/split_balance_diagnostics.csv": {
+      "bytes": 649,
+      "columns": [
+        "covariate",
+        "development_mean",
+        "paper2_test_mean",
+        "standardized_mean_difference",
+        "abs_standardized_mean_difference",
+        "acceptance_threshold",
+        "accepted"
+      ],
+      "sha256": "fc665aa93af39ffd2e1fd0e332ae069615475dfb529b1405eebcefdb164553d5",
+      "transformation": "Only split aggregates and numeric preprocessing centers."
+    },
+    "shared/model_data/split_role_counts.csv": {
+      "bytes": 54,
+      "columns": [
+        "split_role",
+        "articles"
+      ],
+      "sha256": "2b72d6a17df6051c4784c54347fdf9ebe36084bafb7913f2bb2449d3d20f420b",
+      "transformation": "Only split aggregates and numeric preprocessing centers."
+    },
+    "shared/scrape_summaries/by_section.parquet": {
+      "bytes": 2973,
+      "columns": [
+        "primary_section",
+        "stories",
+        "stories_with_body"
+      ],
+      "sha256": "1ef58cf7db4f6f6d6a25229d4cb2b768dcbb5ca017c31e1689f9120230ada6ff",
+      "source_sha256": "1ef58cf7db4f6f6d6a25229d4cb2b768dcbb5ca017c31e1689f9120230ada6ff"
+    },
+    "shared/scrape_summaries/monthly.parquet": {
+      "bytes": 5875,
+      "columns": [
+        "year",
+        "month",
+        "stories",
+        "forum_records",
+        "observed_comments",
+        "stored_comments",
+        "published_comments",
+        "deleted_comments"
+      ],
+      "sha256": "85f625a1fd4b0804aa1ffc99ec4c454b87442627e79ae65533ae08da7f2269b9",
+      "source_sha256": "85f625a1fd4b0804aa1ffc99ec4c454b87442627e79ae65533ae08da7f2269b9"
+    },
+    "shared/scrape_summaries/overview.parquet": {
+      "bytes": 3834,
+      "columns": [
+        "stories",
+        "stories_with_body",
+        "primary_sections",
+        "first_published_at",
+        "last_published_at"
+      ],
+      "sha256": "2b358800f02bde286b9aec82519b49b5caf0d27d75c0da869a1150bfd256853a",
+      "source_sha256": "2b358800f02bde286b9aec82519b49b5caf0d27d75c0da869a1150bfd256853a"
+    },
+    "shared/scrape_summaries/qa.parquet": {
+      "bytes": 9727,
+      "columns": [
+        "article_rows",
+        "distinct_article_ids",
+        "forum_rows",
+        "distinct_forum_ids",
+        "comment_rows",
+        "comment_story_ids",
+        "aggregated_comment_rows",
+        "comments_without_article",
+        "forums_without_article",
+        "multi_forum_story_groups",
+        "monthly_story_rows",
+        "monthly_forum_records",
+        "monthly_stored_comments",
+        "top_stories_rows"
+      ],
+      "sha256": "ca2e37e01a2436980df68091572e1a99143b747e25f2eaa9e70ccf057b48b345",
+      "source_sha256": "ca2e37e01a2436980df68091572e1a99143b747e25f2eaa9e70ccf057b48b345"
+    },
+    "shared/scrape_summaries/status.parquet": {
+      "bytes": 3224,
+      "columns": [
+        "crawl_status",
+        "stories",
+        "observed_comments",
+        "absolute_count_discrepancy"
+      ],
+      "sha256": "e88966bfe42412fb36537efd193560ad4db2554492cb6daad36097b9b8ba54c3",
+      "source_sha256": "e88966bfe42412fb36537efd193560ad4db2554492cb6daad36097b9b8ba54c3"
+    },
+    "shared/scrape_summaries/top_stories_public.parquet": {
+      "bytes": 3062,
+      "columns": [
+        "rank",
+        "month",
+        "primary_section",
+        "comments"
+      ],
+      "sha256": "9b058905e89407ed15de27e43e3347ba80a531592cbec517004768a8bbcfb046",
+      "transformation": "Top-story counts and category with titles and URLs removed."
+    }
+  },
+  "purpose": "public computation replay inputs",
+  "schema_version": 1,
+  "selected_topic_run": "mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58",
+  "stages": {
+    "01": [
+      "shared/scrape_summaries/overview.parquet",
+      "shared/scrape_summaries/monthly.parquet",
+      "shared/scrape_summaries/by_section.parquet",
+      "shared/scrape_summaries/status.parquet",
+      "shared/scrape_summaries/qa.parquet",
+      "shared/scrape_summaries/top_stories_public.parquet"
+    ],
+    "02": [
+      "shared/features/feature_inventory_public.json"
+    ],
+    "03": [
+      "shared/model_data/model_inventory_public.json",
+      "shared/model_data/split_balance_diagnostics.csv",
+      "shared/model_data/split_role_counts.csv",
+      "shared/model_data/reply_depth_centers.json"
+    ],
+    "04": [
+      "CG1/feature_diagnostics/full_distribution_summary.csv",
+      "CG1/feature_diagnostics/row_invariant_checks.csv",
+      "CG1/feature_diagnostics/sample_accounting.csv",
+      "CG1/feature_diagnostics/within_story_feature_variation.csv",
+      "CG1/feature_diagnostics/all_spearman_correlations.csv",
+      "CG1/feature_diagnostics/root_spearman_correlations.csv",
+      "CG1/feature_diagnostics/high_correlation_pairs.csv",
+      "CG1/feature_diagnostics/selection_distribution_contrasts.csv",
+      "CG1/feature_diagnostics/feature_histograms.csv",
+      "CG1/feature_diagnostics/aqua_expected_histograms.csv"
+    ],
+    "05": [
+      "CG1/descriptives/sample_flow.csv",
+      "CG1/descriptives/topic_summary.csv",
+      "CG1/descriptives/feature_summary.csv"
+    ],
+    "06": [
+      "CG1/comment_gap/comment_gap_summary.csv",
+      "CG1/comment_gap/comment_gap_topic_summary.csv",
+      "CG1/comment_gap/article_plot_coordinates.parquet",
+      "CG1/comment_gap/jaccard_topic_means.csv",
+      "CG1/comment_gap/jaccard_overall_means.csv"
+    ],
+    "07": [
+      "CG1/regression/all/model_coefficients.csv",
+      "CG1/regression/all/probability_contrasts.csv",
+      "CG1/regression/all/selector_associations.csv",
+      "CG1/regression/all/tie_sensitivity_summary.csv",
+      "CG1/regression/all/feature_scaling.csv",
+      "CG1/regression/all/model_diagnostics.csv",
+      "CG1/sensitivity/efron_exact_shared_preprocessing_v4/all/sensitivity_summary.csv",
+      "CG1/sensitivity/efron_exact_shared_preprocessing_v4/all/coefficient_comparison.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/joint_block_wald_tests.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/variant_coefficient_stability.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/exact_reparameterisation_checks.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/development_cv_paired_differences.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/development_cv_metric_summary.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/covariance_conditioning.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/design_condition_summary.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/all/variant_fit_summary.csv",
+      "CG1/regression/root/model_coefficients.csv",
+      "CG1/regression/root/probability_contrasts.csv",
+      "CG1/regression/root/selector_associations.csv",
+      "CG1/regression/root/tie_sensitivity_summary.csv",
+      "CG1/regression/root/feature_scaling.csv",
+      "CG1/regression/root/model_diagnostics.csv",
+      "CG1/sensitivity/efron_exact_shared_preprocessing_v4/root/sensitivity_summary.csv",
+      "CG1/sensitivity/efron_exact_shared_preprocessing_v4/root/coefficient_comparison.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/joint_block_wald_tests.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/variant_coefficient_stability.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/exact_reparameterisation_checks.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/development_cv_paired_differences.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/development_cv_metric_summary.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/covariance_conditioning.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/design_condition_summary.csv",
+      "CG1/sensitivity/collinearity_shared_preprocessing_v4/root/variant_fit_summary.csv"
+    ],
+    "08": [
+      "CG1/rankers/factorial/experiment_variants.csv",
+      "CG1/winners/development_cv_variant_ranking.csv",
+      "CG1/winners/development_cv_winners.csv"
+    ],
+    "09": [
+      "CG1/reporting/tables/development_cv_variant_ranking.csv",
+      "CG1/reporting/tables/development_cv_winners.csv",
+      "CG1/reporting/tables/figure_26_test_model_performance.csv",
+      "CG1/reporting/tables/held_out_balanced_macro_f1.csv",
+      "CG1/reporting/tables/held_out_model_performance.csv",
+      "CG1/reporting/tables/held_out_paired_balanced_macro_f1.csv",
+      "CG1/reporting/tables/held_out_paired_model_differences.csv",
+      "CG1/reporting/tables/held_out_permutation_importance_gaps.csv",
+      "CG1/reporting/tables/held_out_tie_sensitivity.csv",
+      "CG1/reporting/tables/regression_coefficients_all.csv",
+      "CG1/reporting/tables/regression_diagnostics_all.csv",
+      "CG1/reporting/tables/regression_feature_gaps.csv",
+      "CG1/reporting/tables/regression_missing_numbers.csv",
+      "CG1/reporting/tables/regression_model_diagnostics.csv",
+      "CG1/reporting/tables/regression_selector_associations.csv",
+      "CG1/reporting/tables/held_out_model_implied_gap_summary.csv",
+      "CG1/reporting/tables/held_out_shap_importance.csv",
+      "CG1/reporting/tables/cg1_baseline_performance.csv",
+      "CG1/reporting/tables/held_out_shap_importance.parquet",
+      "CG1/reporting/tables/held_out_shap_story_variability.parquet",
+      "CG1/development_scores/figure_26_training_model_performance.csv",
+      "CG1/development_scores/training_metrics.parquet"
+    ],
+    "10": [
+      "CG2/forum/inference/policy_summary.csv",
+      "CG2/forum/inference/marginal_effects.csv",
+      "CG2/forum/inference/forum_ndcg_agreement.csv",
+      "CG2/forum/inference/mechanism_alignment.csv",
+      "CG2/forum/ranker_handoff/development_cv_rankings.csv",
+      "CG2/forum/ranker_handoff/selected_rankers_public.csv",
+      "CG2/forum/input_summary.csv",
+      "CG2/forum/policy_row_counts.csv"
+    ],
+    "11": [
+      "CG2/forum/inference/policy_summary.csv",
+      "CG2/forum/inference/marginal_effects.csv",
+      "CG2/forum/inference/forum_ndcg_agreement.csv",
+      "CG2/forum/inference/mechanism_alignment.csv"
+    ],
+    "12": [
+      "CG2/forum/reporting/paper_primary_correlations.csv",
+      "CG2/forum/reporting/paper_primary_feature_correlations.csv",
+      "CG2/forum/inference/policy_summary.csv",
+      "CG1/reporting/tables/regression_selector_associations.csv",
+      "CG1/reporting/tables/held_out_shap_importance.parquet",
+      "CG2/forum/reporting/paper_ranking_metrics.csv"
+    ],
+    "13": [
+      "CG2/ranking_similarity/policy_feature_mean_forum_outcomes.csv",
+      "CG2/ranking_similarity/top10_raw_forum_matrix.csv",
+      "CG2/ranking_similarity/full_raw_forum_matrix.csv",
+      "CG2/ranking_similarity/umap_cluster_membership.csv",
+      "CG2/ranking_similarity/display_coordinates.parquet"
+    ],
+    "14": [
+      "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/summary.csv",
+      "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/seeds.csv",
+      "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/pairs.csv",
+      "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/pooled_pairs.csv",
+      "CG2/topics/diagnostics/searches/7cf9d9ba0750d91b/pareto_frontier_article_comment_coverage_pooled_common_ami.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/final_document_coverage.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/final_comment_coverage.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/final_topic_summary_public.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/public_topic_run_counts.json"
+    ],
+    "15": [
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_agenda_baseline_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_agenda_rarefaction_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_comparison.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_cv.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_tuning.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_curve.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_fitted_attention_sensitivity.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_attention_fit.json",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_spline_cosine_oracle_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_spline_js_oracle_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_power_law_cosine_oracle_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/topic_policy_vote_power_law_js_oracle_summary.csv"
+    ],
+    "16": [
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_combined_article_cosine_gain_effects.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_concentration_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_exposure_coverage_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_concentration_effects.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_power_law_topic_policy_concentration_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_power_law_topic_policy_exposure_coverage_summary.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/vote_spline_topic_policy_article_relative_votes_raw_gain_scatter.csv",
+      "CG2/topics/runs/mcs15_nn10_ms5_seed2026_1e1b8fce5deb3e58/analysis/public_plot_references.json"
+    ]
+  }
+}

@@ -14,6 +14,7 @@ from .nlp import (
     DEFAULT_TOXICITY_MODEL_REVISION,
     resolve_hf_model_revision,
 )
+from .paths import ExecutionContext, add_execution_arguments
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,16 +25,16 @@ def build_parser() -> argparse.ArgumentParser:
             "the normalized collection and precomputed semantic similarities."
         ),
     )
-    parser.add_argument("--data-root", type=Path, default=Path("data/scrape_2025"))
+    parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("model_output/selection_2025/features"),
+        default=None,
     )
     parser.add_argument(
         "--similarity-root",
         type=Path,
-        default=Path("model_output/selection_2025/similarities"),
+        default=None,
     )
     parser.add_argument("--similarity-store", type=Path, default=None)
     parser.add_argument(
@@ -76,11 +77,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Permit publication timestamps not extracted from article pages.",
     )
     parser.add_argument("--overwrite", action="store_true")
+    add_execution_arguments(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    context = ExecutionContext.from_values(
+        mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+    )
     sentiment_revision = args.sentiment_revision or (
         DEFAULT_SENTIMENT_MODEL_REVISION
         if args.sentiment_model_id == DEFAULT_SENTIMENT_MODEL_ID
@@ -101,13 +106,13 @@ def main(argv: list[str] | None = None) -> int:
             toxicity_revision,
         )
     config = FeatureBuildConfig(
-        data_root=args.data_root,
-        output_root=args.output_root,
-        similarity_root=args.similarity_root,
-        similarity_store=args.similarity_store,
-        aqua_store=args.aqua_store,
+        data_root=context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT"),
+        output_root=context.output_root("shared/features", explicit=args.output_root, env_var="COMMENTGAP_FEATURE_ROOT"),
+        similarity_root=context.read_root("similarities", explicit=args.similarity_root, env_var="COMMENTGAP_SIMILARITY_ROOT"),
+        similarity_store=context.read_path(args.similarity_store) if args.similarity_store else None,
+        aqua_store=context.read_path(args.aqua_store) if args.aqua_store else None,
         year=args.year,
-        lookback_root=args.lookback_root,
+        lookback_root=context.read_path(args.lookback_root) if args.lookback_root else None,
         allow_incomplete=args.allow_incomplete,
         inference_mode=not args.pilot,
         nlp_mode=args.nlp_mode,

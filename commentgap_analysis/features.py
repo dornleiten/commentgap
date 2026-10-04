@@ -13,6 +13,7 @@ import json
 import math
 import os
 from pathlib import Path
+from .paths import PathContractError, require_writable_destination
 import platform
 import re
 import time
@@ -118,9 +119,9 @@ BINARY_FEATURES = {
 
 @dataclass(frozen=True)
 class FeatureBuildConfig:
-    data_root: Path = Path("data/scrape_2025")
-    output_root: Path = Path("model_output/selection_2025/features")
-    similarity_root: Path = Path("model_output/selection_2025/similarities")
+    data_root: Path = Path("data/raw/scrape_2025")
+    output_root: Path | None = None
+    similarity_root: Path = Path("data/derived/similarities")
     similarity_store: Path | None = None
     aqua_store: Path | None = None
     year: int = 2025
@@ -148,7 +149,8 @@ class FeatureBuildConfig:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "data_root", Path(self.data_root))
-        object.__setattr__(self, "output_root", Path(self.output_root))
+        if self.output_root is not None:
+            object.__setattr__(self, "output_root", Path(self.output_root))
         object.__setattr__(self, "similarity_root", Path(self.similarity_root))
         if self.similarity_store is not None:
             object.__setattr__(self, "similarity_store", Path(self.similarity_store))
@@ -846,7 +848,7 @@ def _novelty_hnsw(vectors: np.ndarray, timestamps: pd.Series, eligible: np.ndarr
         import hnswlib
     except ImportError as exc:
         raise RuntimeError(
-            "Large-discussion novelty requires hnswlib; install requirements-analysis.txt"
+            "Large-discussion novelty requires hnswlib; install requirements.txt"
         ) from exc
     novelty = np.full(len(vectors), np.nan, dtype=np.float32)
     index = hnswlib.Index(space="cosine", dim=vectors.shape[1])
@@ -1778,6 +1780,9 @@ def build_analysis_features(
     toxicity_encoder: ToxicityEncoder | None = None,
 ) -> dict[str, Any]:
     """Run the resumable feature build using precomputed semantic scalars."""
+    if config.output_root is None:
+        raise PathContractError("output_root is required; use a run-scoped outputs/<run_id> directory")
+    require_writable_destination(config.output_root)
     build_started = time.monotonic()
     print(
         "Feature preflight: "

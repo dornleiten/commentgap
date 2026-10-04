@@ -1,0 +1,10 @@
+metric,label,mean,sd,ci_lower,ci_upper,n
+article_discussion_js_distance,Article -discussion JS distance,0.4711435421703539,0.21047478382263612,0.4629436135688369,0.47934347077187095,2531
+article_discussion_cosine_similarity,Article -discussion raw-proportion cosine similarity,0.6494485709211087,0.3622385505935488,0.635336047807237,0.6635610940349805,2531
+article_discussion_bhattacharyya_coefficient,Article -discussion Bhattacharyya coefficient (sqrt-space cosine),0.6390453172170011,0.2976237459887958,0.6274501350155991,0.6506404994184031,2531
+article_normalized_entropy,Article normalized entropy,0.11405503053057561,0.07202241079527652,0.11124909522799765,0.11686096583315357,2531
+discussion_normalized_entropy,Discussion normalized entropy,0.07866775476236924,0.049442499452260535,0.07674151467780535,0.08059399484693314,2531
+discussion_minus_article_normalized_entropy,Discussion minus article normalized entropy,-0.03538727576820637,0.08760856803239539,-0.0388004352436529,-0.03197411629275984,2531
+article_effective_topic_count,Article effective topic count,2.209219747482033,1.0338449317193927,2.168941978947618,2.2494975160164485,2531
+discussion_effective_topic_count,Discussion effective topic count,1.6918686429552094,0.5486458686503235,1.6704938403838903,1.7132434455265286,2531
+discussion_minus_article_effective_topic_count,Discussion minus article effective topic count,-0.5173511045268235,1.1863010353578438,-0.5635684404621218,-0.4711337685915252,2531

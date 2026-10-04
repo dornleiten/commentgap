@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from .similarities import SimilarityBuildConfig, build_similarity_store
+from .paths import ExecutionContext, add_execution_arguments
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,11 +18,11 @@ def build_parser() -> argparse.ArgumentParser:
             "model-versioned embedding store without rerunning the transformer."
         ),
     )
-    parser.add_argument("--data-root", type=Path, default=Path("data/scrape_2025"))
+    parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument(
         "--embedding-root",
         type=Path,
-        default=Path("model_output/selection_2025/embeddings"),
+        default=None,
         help="Parent containing model/build embedding stores.",
     )
     parser.add_argument(
@@ -33,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("model_output/selection_2025/similarities"),
+        default=None,
     )
     parser.add_argument(
         "--year",
@@ -57,16 +58,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--progress-every-stories", type=int, default=100)
+    add_execution_arguments(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    context = ExecutionContext.from_values(
+        mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+    )
     config = SimilarityBuildConfig(
-        data_root=args.data_root,
-        embedding_root=args.embedding_root,
-        embedding_store=args.embedding_store,
-        output_root=args.output_root,
+        data_root=context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT"),
+        embedding_root=context.read_root("embeddings", explicit=args.embedding_root, env_var="COMMENTGAP_EMBEDDING_ROOT"),
+        embedding_store=context.read_path(args.embedding_store) if args.embedding_store else None,
+        output_root=context.output_root("shared/similarities", explicit=args.output_root, env_var="COMMENTGAP_SIMILARITY_ROOT"),
         years=tuple(args.years) if args.years else (2025,),
         model_id=args.model_id,
         revision=args.revision,
@@ -85,4 +90,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

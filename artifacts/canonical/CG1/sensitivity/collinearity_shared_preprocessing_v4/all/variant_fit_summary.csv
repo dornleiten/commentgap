@@ -1,0 +1,8 @@
+scope,variant,coding,parameters,fitted_log_likelihood,iterations,warning_count
+all,full_reference,reference,82,-87724.1153696459,10,0
+all,no_author_history,reference,74,-88343.4784235037,10,0
+all,no_aqua,reference,42,-88519.454042063,10,0
+all,reply_indicator_only,reference,80,-88022.5890703163,8,0
+all,reply_depth_only,reference,80,-92547.3292392936,7,0
+all,reduced_activity,reference,78,-87903.1061994489,9,0
+all,selector_effect_coding_exact,effect,82,-87724.1153696459,10,0

@@ -1,0 +1,104 @@
+\setcounter{secnumdepth}{0} %May be changed to 1 or 2 if section numbers are desired.
+\subsection{Paper Checklist}
+
+\begin{enumerate}
+
+\item For most authors...
+\begin{enumerate}
+    \item  Would answering this research question advance science without violating social contracts, such as violating privacy norms, perpetuating unfair profiling, exacerbating the socio-economic divide, or implying disrespect to societies or cultures?
+    \answerYes{Yes. The research value and privacy risks are discussed in the Introduction and Limitations and Ethical Considerations sections.}
+  \item Do your main claims in the abstract and introduction accurately reflect the paper's contributions and scope?
+    \answerYes{Yes. They describe ranking-policy effects on feature and topic prominence and do not claim effects on reader beliefs or behaviour.}
+   \item Do you clarify how the proposed methodological approach is appropriate for the claims made? 
+    \answerYes{Yes. Data and Methods explains our approaches with their interpretive limits.}
+   \item Do you clarify what are possible artifacts in the data used, given population-specific distributions?
+    \answerYes{Yes. Data and Methods and Limitations and Ethical Considerations discuss the single German-language platform, selection of discussions containing Editors' Picks, snapshot votes and pinning, confounded vote-activity weights, and incomplete topic-assignment coverage.}
+  \item Did you describe the limitations of your work?
+    \answerYes{Yes. Limitations cover the single-platform corpus, topic coverage and validity, voting-activity proxies, counterfactual interface assumptions, and the absence of behavioural measurement.}
+  \item Did you discuss any potential negative societal impacts of your work?
+    \answerYes{Yes. Limitations and Ethical Considerations discusses viewpoint suppression and apparent-consensus engineering, and asks newsrooms to consider whose contributions lose prominence.}
+  \item Did you discuss any potential misuse of your work?
+    \answerYes{Yes. Limitations and Ethical Considerations explicitly discusses misuse for viewpoint suppression and apparent-consensus engineering.}
+  \item Did you describe steps taken to prevent or mitigate potential negative outcomes of the research, such as data and model documentation, data anonymization, responsible release, access control, and the reproducibility of findings?
+    \answerYes{Yes, Limitations and Ethical Considerations describes implemented author pseudonymisation on collection and aggregate reporting, alongside limited data release.}
+  \item Have you read the ethics review guidelines and ensured that your paper conforms to them?
+    \answerYes{Yes.}
+\end{enumerate}
+
+\item Additionally, if your study involves hypotheses testing...
+\begin{enumerate}
+  \item Did you clearly state the assumptions underlying all theoretical results?
+    \answerYes{Yes. Data and Methods states the assumptions underlying FORUM, the random-order baseline, hidden-comment interpolation, paired policy contrasts, topic assignment, and vote-derived attention weights. The paper distinguishes representational comparisons from behavioural or causal effects.}
+  \item Have you provided justifications for all theoretical results?
+    \answerYes{Yes. Data and Methods defines and motivates FORUM and the topic-alignment measures.}
+  \item Did you discuss competing hypotheses or theories that might challenge or complement your theoretical results?
+    \answerYes{Yes. Related Work and Discussion distinguish algorithmic gatekeeping from agenda-setting and contrast journalist-directed, audience-vote-derived, chronological, and discussion-structure accounts of comment prominence.}
+  \item Have you considered alternative mechanisms or explanations that might account for the same outcomes observed in your study?
+    \answerYes{Yes. The paper discusses vote confounding, prior prominence and social feedback, missing or hidden comments, topic-assignment coverage, and interface semantics as alternative explanations or limitations.}
+  \item Did you address potential biases or limitations in your theoretical framework?
+    \answerYes{Yes. Related Work and Limitations and Ethical Considerations explain why article and vote-derived agendas are incomplete normative references, why topic agreement does not imply viewpoint agreement, and why presentation is not equivalent to reader attention or behavioural influence.}
+  \item Have you related your theoretical results to the existing literature in social science?
+    \answerYes{Yes. Related Work and Discussion connect the empirical comparisons to agenda-setting, gatekeeping, online commenting, moderation, and audience-influence research.}
+  \item Did you discuss the implications of your theoretical results for policy, practice, or further research in the social science domain?
+    \answerYes{Yes. The discussion calls for explicit ranking objectives, interface-semantic reporting, measurement disclosure, and future behavioural validation.}
+\end{enumerate}
+
+\item Additionally, if you are including theoretical proofs...
+\begin{enumerate}
+  \item Did you state the full set of assumptions of all theoretical results?
+    \answerNA{N/A.}
+  \item Did you include complete proofs of all theoretical results?
+    \answerNA{N/A.}
+\end{enumerate}
+
+\item Additionally, if you ran machine learning experiments...
+\begin{enumerate}
+  \item Did you include the code, data, and instructions needed to reproduce the main experimental results (either in the supplemental material or as a URL)?
+    \answerYes{Yes. The anonymised repository is available at \url{https://anonymous.4open.science/r/commentgap-15CB}. Full comment-level data is not released due to the privacy risks described in Limitations and Ethical Considerations.}
+  \item Did you specify all the training details (e.g., data splits, hyperparameters, how they were chosen)?
+    \answerYes{Yes. The paper specifies the held-out corpus, topic-model search, selected clustering settings, vote-activity fit, and policy evaluation. Ranker hyperparameters and model-selection details are reported in the companion paper's methods and appendix.}
+  \item Did you report error bars (e.g., with respect to the random seed after running experiments multiple times)?
+    \answerYes{Yes.  Figures report paired discussion-bootstrap intervals.}
+  \item Did you include the total amount of compute and the type of resources used (e.g., type of GPUs, internal cluster, or cloud provider)?
+	  \answerYes{Yes. Appendix~\ref{app:hardware} reports the primary hardware and software environment.}
+  \item Do you justify how the proposed evaluation is sufficient and appropriate for the claims made? 
+    \answerYes{Yes. Data and Methods motivates paired policy contrasts and explicit article- and vote-derived references; the paper states that it does not measure reader behaviour or causal effects.}
+  \item Do you discuss what is ``the cost`` of misclassification and fault (in)tolerance?
+    \answerYes{Yes. Limitations and Ethical Considerations cautions against treating automated quality scores or article alignment as grounds for excluding legitimate criticism, and discusses the risks of viewpoint suppression and apparent-consensus engineering. The discussion explains that feature gains involve trade-offs rather than a single notion of quality.}
+  
+  
+\end{enumerate}
+
+\item Additionally, if you are using existing assets (e.g., code, data, models) or curating/releasing new assets, \textbf{without compromising anonymity}...
+\begin{enumerate}
+  \item If your work uses existing assets, did you cite the creators?
+    \answerYes{Yes. The paper cites BGE-M3, AQuA, the CardiffNLP XLM-R sentiment classifier, the TextDetox XLM-R Large Toxicity Classifier v2, BERTopic, and the reused ranking methods where they are introduced.}
+  \item Did you mention the license of the assets?
+    \answerYes{Yes. Appendix~\ref{app:licences} documents the upstream licence declarations for BGE-M3, sentiment, AQuA, and toxicity.}
+  \item Did you include any new assets in the supplemental material or as a URL?
+    \answerNo{No.}
+  \item Did you discuss whether and how consent was obtained from people whose data you're using/curating?
+    \answerYes{Yes. Limitations and Ethical Considerations explains the public, non-participatory collection and adherence to the AoIR ethics framework.}
+  \item Did you discuss whether the data you are using/curating contains personally identifiable information or offensive content?
+    \answerYes{Yes. Limitations and Ethical Considerations explains that verbatim text, timestamps, and author histories may remain identifying or searchable and that hashed pseudonyms do not anonymise the data.}
+\item If you are curating or releasing new datasets, did you discuss how you intend to make your datasets FAIR (see \citet{fair})?
+\answerNA{N/A. Not releasing a new dataset.}
+
+\item If you are curating or releasing new datasets, did you create a Datasheet for the Dataset (see \citet{gebru2021datasheets})? 
+\answerNA{N/A.}
+
+\end{enumerate}
+
+\item Additionally, if you used crowdsourcing or conducted research with human subjects, \textbf{without compromising anonymity}...
+\begin{enumerate}
+  \item Did you include the full text of instructions given to participants and screenshots?
+    \answerNA{N/A.}
+  \item Did you describe any potential participant risks, with mentions of Institutional Review Board (IRB) approvals?
+    \answerNA{N/A.}
+  \item Did you include the estimated hourly wage paid to participants and the total amount spent on participant compensation?
+    \answerNA{N/A.}
+   \item Did you discuss how data is stored, shared, and deidentified?
+    \answerNA{N/A.}
+\end{enumerate}
+
+\end{enumerate}

@@ -104,7 +104,7 @@ def _modules():
         import pyarrow.parquet as pq
     except ImportError as exc:
         raise RuntimeError(
-            "Parquet support is required; install requirements-scraper.txt"
+            "Parquet support is required; install the project with python -m pip install -e ."
         ) from exc
     return pa, pq
 

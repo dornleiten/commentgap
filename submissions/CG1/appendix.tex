@@ -1,0 +1,72 @@
+\setcounter{secnumdepth}{1} %May be changed to 1 or 2 if section numbers are desired.
+
+\section{Rank-Gap Properties}
+\label{app:gap-properties}
+Fix a discussion with $N$ candidates and $0<k<N$ selected comments. Assign descending midranks $r_i$ to tied audience scores. The sum of all midranks is $N(N+1)/2$. Midranks can be viewed as expected ranks under uniform permutations within each tied block. For any fixed $k$-set, each such permutation has a rank sum between $k(k+1)/2$ and $k(2N-k+1)/2$; taking expectations preserves these bounds. Subtracting $(k+1)/2$ from the mean selected rank and dividing by $N-k$ therefore gives $0\leq G\leq1$. If the selected set is uniformly random among all $k$-subsets, independently of the fixed ranks, each candidate is included with probability $k/N$. The expected selected mean rank is consequently $(N+1)/2$, giving $\mathbb{E}[G]=1/2$. If all scores tie, every midrank is $(N+1)/2$ and $G=1/2$ for every selection. With no ties, the top and bottom $k$-sets attain the endpoints; ties can prevent this.
+
+\section{Feature Operationalisation and Model Development}
+\label{app:feature-operationalisation}
+Count and elapsed-time inputs use $\log(1+x)$ transformations. Prior reply composition is the log ratio of earlier replies to earlier roots, with 0.5 added to numerator and denominator. Discussion pace is $\log[(n_{\mathrm{prior}}+0.5)/(h+0.5)]$, where $h$ is hours since publication. Author reception uses the log ratio of retrospectively observed prior upvotes or downvotes to prior author-comment counts, again with 0.5 smoothing. Reply depth is log-transformed and centred among development replies, then multiplied by the reply indicator so that roots have zero centred depth; fitting folds use their own centre.
+
+Lexical diversity and reading difficulty are residualised against log word count using a six-knot cubic spline with ridge regularisation. Missing novelty (i.e. the first comments in time in a discussion) is imputed with the eligible-candidate mean. The twenty AQuA inputs are raw expected ordinal scores on a zero--three scale, not calibrated quality probabilities. Table~\ref{tab:conditional-logit-coefficients-all} lists all 41 scalar predictors and their model-scale units.
+
+\subsection{Development-only sensitivity checks}
+\label{app:sensitivity}
+All sensitivity checks below use development data only and do not read held-out performance. The Efron--exact comparison uses a reduced model because exact conditional likelihood is computationally expensive: 100 articles sampled from the 207 all-comment articles with $\binom{N_j}{k_j}\leq5000$, with 19 predictors. Efron and exact coefficients had 97.4\% sign agreement, coefficient Spearman correlation 0.995, median absolute coefficient difference 0.010, median query-score Spearman correlation 0.9997, and identical top-scoring comments in 96\% of sampled queries; no sign flip involved a coefficient with absolute value at least 0.10 in either fit.
+
+The collinearity analysis uses all 2,559 development articles and the primary Efron model. For the all-comment scope, the reference-coded full specification showed moderate conditioning: the maximum design condition index was 26.8 (six dimensions above 15 and none above 30). We examined alternative feature and structural specifications excluding author-history or AQuA features, using reply-indicator-only or reply-depth-only terms, and reducing activity controls. These reduced feature-block variants had no fit warnings; removing author-history or reducing activity features caused no coefficient sign changes in the reported selector-specific estimates, while dropping AQuA affected only some small coefficients.
+
+We also evaluated an exactly equivalent midpoint/effect-coded selector parameterisation. Under midpoint coding, the maximum design condition index fell to 11.1, with no dimensions above 15; the robust covariance condition index fell from 14.78 to 9.95. This coding dependence indicates parameterisation geometry rather than a fundamental multicollinearity issue. Selector effect coding leaves the log likelihood unchanged (maximum within-stratum score difference $3.3\times10^{-12}$) and produces identical rankings, so we retain the prespecified full model and report the sensitivity diagnostics rather than treating the reference-coded values as evidence of a failed fit.
+
+\section{Full Conditional-Logit Estimates and Diagnostics}
+\label{app:regression}
+Coefficients in the following tables describe the development-sample fit; predictive diagnostics refer to the held-out discussions where indicated. Continuous predictors use the shared transformed scale (one development-sample standard deviation); binary indicators compare one with zero. Confidence intervals use article-clustered standard errors. The $p$ columns report two-sided tests and the $q$ columns apply the Benjamini--Hochberg adjustment across all 41 features separately for audience coefficients, editor coefficients, and their differences. The fitted model has finite estimates and standard errors and no recorded fit warnings.
+
+\section{Third-Party Asset Licences}
+\label{app:asset-licences}
+We record the upstream licence declarations for the frozen language assets used in this study (checked 16 September 2026).
+\begin{itemize}
+\item \textbf{BGE-M3:} \texttt{BAAI/bge-m3} is released under the MIT licence, as declared in its model card: \url{https://huggingface.co/BAAI/bge-m3}.
+\item \textbf{Sentiment:} The CardiffNLP \texttt{twitter-xlm-roberta-base-sentiment} model card links to the XLM-T repository, whose code is licensed under Apache License 2.0: \url{https://github.com/cardiffnlp/xlm-t/blob/main/LICENSE}.
+\item \textbf{AQuA:} The upstream repository, which includes the released deliberative-dimension adapters and inference code, carries Apache License 2.0: \url{https://github.com/mabehrendt/AQuA/blob/master/LICENSE}.
+\item \textbf{Toxicity:} The TextDetox XLM-R Large Toxicity Classifier v2 model card declares \texttt{openrail++} (OpenRAIL++): \url{https://huggingface.co/textdetox/xlmr-large-toxicity-classifier-v2}.
+\end{itemize}
+
+\section{Compute Resources}
+\label{app:hardware}
+The computational experiments ran on a Linux workstation with an AMD Ryzen 9
+9950X processor (16 physical cores, 32 hardware threads) and 64~GB installed
+system memory (approximately 60~GiB visible to the operating system). GPU
+workloads used one NVIDIA RTX A5000 with 24~GB VRAM.
+
+\onecolumn
+\clearpage
+\begin{landscape}
+\begingroup
+\small
+\input{tables/regression_model_table}
+\endgroup
+\end{landscape}
+
+\twocolumn[
+\begin{center}
+\small
+\input{tables/training_model_performance}
+\captionof{table}{Development/training performance. Brackets contain 95\% article-bootstrap intervals. These are fitted-development results, not the cross-validation scores used to choose the ML recipes, and should not be read as estimates of generalisation.}
+\label{tab:training-performance}
+\end{center}
+]
+
+\section{Model Development and Training Performance}
+\label{app:development}
+The shared article split assigns 2,559 discussions to development and 2,559 to held-out evaluation. Five development folds contain 509, 514, 513, 512, and 511 validation articles. Each fitting fold supplies its own scaling parameters and reply-depth centre. The article split is stratified by month and joint candidate-size tercile and re-randomised until the maximum absolute standardised balance difference is at most 0.05.
+
+For each XGBoost workflow, tuning evaluates 32 reproducible broad random configurations followed by one 27-point local grid centred on the median parameters of the best five broad configurations. The two reported neural winners are selected from a factorial experiment of 64 neural recipes, with reporting restricted to the first audience-label draw. Selection uses development cross-validation, not Table~\ref{tab:training-performance}, which evaluates the final fits on development observations.
+
+The scalar XGBoost winner uses depth 6, 225 trees, learning rate 0.067659, minimum child weight 6.432770, row subsampling 0.712684, column subsampling 0.856588, $L_2$ penalty 13.172306, and zero $L_1$ penalty and split penalty. XGB-T uses depth 5, 291 trees, learning rate 0.061778, minimum child weight 4.742061, row subsampling 0.848434, column subsampling 0.843934, $L_2$ penalty 8.922235, $L_1$ penalty 0.011890, and split penalty 0.456020. Both use histogram trees and the same LambdaRank configuration described in the main text.
+
+Both neural winners use separate selector heads, random sampling of four negatives per positive, and the base network dimensions specified in the main text. Scalar projection is linear--GELU--layer normalisation--dropout; selector heads are linear--GELU--dropout--linear. The plateau scheduler halves the learning rate after two validation epochs without improvement, down to $10^{-6}$. Development folds allow at most 30 epochs with early-stopping patience eight; the final full-development fit uses the median selected epoch across folds (NN: nine; NN-T: twelve).
+
+The development-CV mean nDCG, averaging selectors, is 0.24495 for XGB, 0.25167 for XGB-T, 0.23400 for NN, and 0.23935 for NN-T. These validation scores are distinct from the fitted-development scores. The latter are particularly higher for the boosted trees and should not be used to infer predictive performance on new discussions.
+
+The fitted-development table (Table~\ref{tab:training-performance}) makes the generalisation gap visible. XGB-T has fitted-development nDCG@$k$ of 0.444 for editors and 0.426 for audiences, compared with held-out values of 0.257 and 0.240. The regression's corresponding development and held-out values are 0.233/0.239 for editors/audiences and 0.232/0.232, respectively. Model flexibility therefore improves fitted development performance much more than recovery in held-out discussions; the two tables use the same complete-discussion nDCG diagnostic, while the macro-F1 columns use the separate balanced diagnostic.

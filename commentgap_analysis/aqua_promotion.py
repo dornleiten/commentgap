@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -38,6 +38,7 @@ from .features import (
     dataset_fingerprint,
     validate_qa_summary,
 )
+from .paths import ExecutionContext, PathContractError, ProjectPaths, add_execution_arguments
 
 
 PILOT_WATERMARK = "PILOT_NOT_FOR_INFERENCE"
@@ -57,7 +58,9 @@ def _is_sha256(value: Any) -> bool:
 class AquaPromotionConfig:
     source_store: Path
     output_root: Path
-    data_root: Path = Path("data/scrape_2025")
+    data_root: Path = field(
+        default_factory=lambda: ProjectPaths.load().read_root("raw_scrape")
+    )
     year: int = 2025
     artifact_manifest: Path = DEFAULT_AQUA_ARTIFACT_MANIFEST
     overwrite: bool = False
@@ -84,12 +87,21 @@ def _resolve_recorded_path(value: Any, *anchors: Path) -> Path:
         raise ValueError("Manifest contains a missing or invalid recorded path")
     path = Path(value).expanduser()
     if path.is_absolute():
-        return path
+        from .paths import resolve_artifact_path
+        try:
+            return resolve_artifact_path(path, anchors=tuple(anchors), require_exists=False)
+        except (FileNotFoundError, PathContractError):
+            return path
     candidates = [Path.cwd() / path]
     candidates.extend(anchor / path for anchor in anchors)
     for candidate in candidates:
         if candidate.exists():
             return candidate.resolve()
+    from .paths import resolve_artifact_path
+    try:
+        return resolve_artifact_path(path, anchors=tuple(anchors), require_exists=False)
+    except (FileNotFoundError, PathContractError):
+        pass
     return candidates[0].resolve()
 
 
@@ -353,6 +365,9 @@ def _assert_only_metadata_changed(source: pd.DataFrame, promoted: pd.DataFrame) 
 
 def promote_aqua_store(config: AquaPromotionConfig) -> dict[str, Any]:
     """Promote a complete, verified pilot store by rewriting metadata only."""
+    from .paths import require_writable_destination
+
+    require_writable_destination(config.output_root)
     started = time.monotonic()
     started_at = datetime.now(timezone.utc).isoformat()
     source_store = config.source_store.resolve()
@@ -583,8 +598,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--source-store", type=Path, required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--data-root", type=Path, default=Path("data/scrape_2025"))
+    parser.add_argument("--output-root", type=Path, default=None)
+    parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument("--year", type=int, default=2025)
     parser.add_argument(
         "--artifact-manifest",
@@ -593,16 +608,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--progress-every-stories", type=int, default=25)
+    add_execution_arguments(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    context = ExecutionContext.from_values(mode=args.mode, run_id=args.run_id, repo_root=args.repo_root)
+    data_root = context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT")
+    source_store = context.read_root("aqua", explicit=args.source_store, env_var="COMMENTGAP_AQUA_SOURCE_ROOT")
+    output_root = context.output_root("shared/aqua/promoted", explicit=args.output_root, env_var="COMMENTGAP_AQUA_PROMOTION_ROOT")
     state = promote_aqua_store(
         AquaPromotionConfig(
-            source_store=args.source_store,
-            output_root=args.output_root,
-            data_root=args.data_root,
+            source_store=source_store,
+            output_root=output_root,
+            data_root=data_root,
             year=args.year,
             artifact_manifest=args.artifact_manifest,
             overwrite=args.overwrite,

@@ -1,0 +1,102 @@
+\setcounter{secnumdepth}{0} %May be changed to 1 or 2 if section numbers are desired.
+
+\subsection{Paper Checklist}
+
+\begin{enumerate}
+
+\item For most authors...
+\begin{enumerate}
+    \item  Would answering this research question advance science without violating social contracts, such as violating privacy norms, perpetuating unfair profiling, exacerbating the socio-economic divide, or implying disrespect to societies or cultures?
+    \answerYes{Yes: The research value and privacy risks are discussed in the introduction and Limitations and Ethical Considerations sections.}
+  \item Do your main claims in the abstract and introduction accurately reflect the paper's contributions and scope?
+    \answerYes{Yes. The Abstract and Introduction distinguish observed agreement, adjusted selection associations, and held-out prediction; they do not claim causal effects or universal comment quality.}
+   \item Do you clarify how the proposed methodological approach is appropriate for the claims made? 
+    \answerYes{Yes. Data and Methods explains our approaches with their interpretive limits.}
+   \item Do you clarify what are possible artifacts in the data used, given population-specific distributions?
+    \answerYes{Yes. Data and Methods and Limitations and Ethical Considerations discuss participation and eligibility selection, deletion, retrospective signals, timestamp proxies, and automated measurement error.}
+  \item Did you describe the limitations of your work?
+    \answerYes{Yes. See Limitations and Ethical Considerations, including single-forum scope, exposure confounding, preprocessing dependence, and uncertainty limits.}
+  \item Did you discuss any potential negative societal impacts of your work?
+    \answerYes{Yes. Limitations and Ethical Considerations discusses privacy, unequal visibility, and the risk of treating observed selections as objective quality.}
+      \item Did you discuss any potential misuse of your work?
+    \answerYes{Yes. Limitations and Ethical Considerations discusses profiling, automated suppression, and gaming selection signals.}
+    \item Did you describe steps taken to prevent or mitigate potential negative outcomes of the research, such as data and model documentation, data anonymization, responsible release, access control, and the reproducibility of findings?
+    \answerYes{Yes, Limitations and Ethical Considerations describes implemented author pseudonymisation on collection and aggregate reporting, alongside limited data release.}
+  \item Have you read the ethics review guidelines and ensured that your paper conforms to them?
+    \answerYes{Yes.}
+\end{enumerate}
+
+\item Additionally, if your study involves hypotheses testing...
+\begin{enumerate}
+  \item Did you clearly state the assumptions underlying all theoretical results?
+    \answerYes{Yes. Data and Methods states the conditional-logit specification and non-causal estimand; Limitations and Ethical Considerations states the modelling and inference assumptions. The elementary rank-gap assumptions are in Appendix~\ref{app:gap-properties}.}
+  \item Have you provided justifications for all theoretical results?
+    \answerYes{Yes. Appendix~\ref{app:gap-properties} derives the rank-gap bounds and random-set expectation. Substantive comparisons are empirical associations, not theoretical causal results.}
+  \item Did you discuss competing hypotheses or theories that might challenge or complement your theoretical results?
+    \answerYes{Yes. Related Work and Discussion distinguish professional evaluation, participatory endorsement, and visibility; Limitations and Ethical Considerations gives competing explanations for shared rankings.}
+  \item Have you considered alternative mechanisms or explanations that might account for the same outcomes observed in your study?
+    \answerYes{Yes. Exposure, pinning/vote feedback, timing, participation selection, and unobserved topic or author differences can account for the observed associations; see Related Work and Limitations and Ethical Considerations.}
+  \item Did you address potential biases or limitations in your theoretical framework?
+    \answerYes{Yes. Introduction, Related Work, and Limitations and Ethical Considerations explain why votes and Editors' Picks are incomplete proxies for preferences and quality.}
+  \item Have you related your theoretical results to the existing literature in social science?
+    \answerYes{Yes. Related Work and Discussion connect the empirical comparisons to theory on the news gap.}
+  \item Did you discuss the implications of your theoretical results for policy, practice, or further research in the social science domain?
+    \answerYes{Yes. Discussion addresses newsroom interpretation; Limitations and Ethical Considerations explains why deployment and causal conclusions require further evidence.}
+\end{enumerate}
+
+\item Additionally, if you are including theoretical proofs...
+\begin{enumerate}
+  \item Did you state the full set of assumptions of all theoretical results?
+    \answerNA{N/A}
+	\item Did you include complete proofs of all theoretical results?
+    \answerNA{N/A}
+\end{enumerate}
+
+\item Additionally, if you ran machine learning experiments...
+\begin{enumerate}
+  \item Did you include the code, data, and instructions needed to reproduce the main experimental results (either in the supplemental material or as a URL)?
+    \answerYes{Yes. The anonymised repository is available at \url{https://anonymous.4open.science/r/commentgap-15CB}. Full comment-level data is not released due to the privacy risks described in Limitations and Ethical Considerations.}
+  \item Did you specify all the training details (e.g., data splits, hyperparameters, how they were chosen)?
+    \answerYes{Yes. Data and Methods and Appendix~\ref{app:development} report splits, objectives, selected settings, the random seed, and model-selection rules.}
+  \item Did you report error bars (e.g., with respect to the random seed after running experiments multiple times)?
+    \answerYes{Yes. Performance tables report 95\% intervals from 1,000 article-bootstrap draws; regression intervals use article-clustered standard errors. SHAP bars are interquartile ranges.}
+	\item Did you include the total amount of compute and the type of resources used (e.g., type of GPUs, internal cluster, or cloud provider)?
+	  \answerYes{Yes. Appendix~\ref{app:hardware} reports the primary hardware and software environment.}
+  \item Do you justify how the proposed evaluation is sufficient and appropriate to the claims made? 
+    \answerYes{Yes. Data and Methods motivates full-discussion nDCG at the observed selection count and article-level evaluation, as well as details of the balanced-sample F1.}
+  \item Do you discuss what is ``the cost`` of misclassification and fault (in)tolerance?
+    \answerYes{Yes. Limitations and Ethical Considerations discusses false promotion and omission.}
+  
+\end{enumerate}
+
+\item Additionally, if you are using existing assets (e.g., code, data, models) or curating/releasing new assets, \textbf{without compromising anonymity}...
+\begin{enumerate}
+  \item If your work uses existing assets, did you cite the creators?
+    \answerYes{Yes. The paper cites BGE-M3, AQuA, the CardiffNLP XLM-R sentiment classifier, the TextDetox XLM-R Large Toxicity Classifier v2, XGBoost, and the other reused methods and software where they are introduced.}
+  \item Did you mention the license of the assets?
+    \answerYes{Yes. Appendix~\ref{app:asset-licences} documents the upstream licence declarations for BGE-M3, sentiment, AQuA, and toxicity.}
+  \item Did you include any new assets in the supplemental material or as a URL?
+    \answerNo{No.}
+  \item Did you discuss whether and how consent was obtained from people whose data you're using/curating?
+    \answerYes{Yes. Limitations and Ethical Considerations explains the public, non-participatory collection and adherence to the AoIR ethics framework.}
+  \item Did you discuss whether the data you are using/curating contains personally identifiable information or offensive content?
+    \answerYes{Yes. Limitations and Ethical Considerations discusses potentially identifying text and histories, offensive content, and why pseudonymisation does not establish anonymity.}
+\item If you are curating or releasing new datasets, did you discuss how you intend to make your datasets FAIR (see \citet{fair})?
+\answerNA{N/A. Not releasing a new dataset.}
+\item If you are curating or releasing new datasets, did you create a Datasheet for the Dataset (see \citet{gebru2021datasheets})? 
+\answerNA{N/A.}
+\end{enumerate}
+
+\item Additionally, if you used crowdsourcing or conducted research with human subjects, \textbf{without compromising anonymity}...
+\begin{enumerate}
+  \item Did you include the full text of instructions given to participants and screenshots?
+    \answerNA{N/A.}
+  \item Did you describe any potential participant risks, with mentions of Institutional Review Board (IRB) approvals?
+    \answerNA{N/A.}
+  \item Did you include the estimated hourly wage paid to participants and the total amount spent on participant compensation?
+    \answerNA{N/A.}
+  \item Did you discuss how data is stored, shared, and deidentified?
+    \answerNA{N/A.}
+\end{enumerate}
+
+\end{enumerate}

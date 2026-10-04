@@ -1,0 +1,38 @@
+Diagnostic,Value,statistic
+Development articles,"2,559",development_articles
+Held-out articles,"2,559",paper2_test_articles
+Development candidate comments,"1,189,314",development_candidate_comments
+Held-out candidate comments,"1,203,638",paper2_test_candidate_comments
+Development editor selections,"10,471",development_curator_selections
+Development audience selections,"10,471",development_audience_selections
+Development selected events,"20,942",development_events_total
+Stacked observations,"2,378,628",n_observations
+Stacked selected events,"20,942",n_events
+Article-selector strata,"5,118",n_strata
+Substantive parameters,82,n_parameters
+Newton-Raphson iterations,10,iterations
+Null log likelihood,"-123,048.44",null_log_likelihood
+Fitted log likelihood,"-87,724.12",fitted_log_likelihood
+AIC,"175,612.23",aic
+BIC,"176,264.09",bic
+Likelihood-ratio chi-square,"70,648.66 (df = 82; p <0.001)",likelihood_ratio_chisq
+Model-based Wald chi-square,"15,849.52 (df = 82; p <0.001)",model_wald_chisq
+Cluster-robust score chi-square,"2,187.01 (df = 82; p <0.001)",robust_score_chisq
+Concordance,0.943,concordance
+Concordance SE,0.002,concordance_se
+Maximum clustered SE,0.20,maximum_clustered_standard_error
+Reference-coded robust correlation-scale condition number,218.45,correlation_scale_condition_number
+Reference-coded maximum robust covariance condition index,14.78,maximum_condition_index
+Midpoint-coded robust correlation-scale condition number,99.02,midpoint_correlation_scale_condition_number
+Midpoint-coded maximum robust covariance condition index,9.95,midpoint_maximum_condition_index
+Reference-coded maximum design condition index,26.77,reference_design_maximum_condition_index
+Midpoint-coded maximum design condition index,11.09,midpoint_design_maximum_condition_index
+Reference-coded design dimensions with condition index >=15,6,reference_design_dimensions_over_15
+Midpoint-coded design dimensions with condition index >=15,0,midpoint_design_dimensions_over_15
+Reference-coded design dimensions with condition index >=30,0,reference_design_dimensions_over_30
+Midpoint-coded design dimensions with condition index >=30,0,midpoint_design_dimensions_over_30
+Held-out concordance [95% CI],"0.942 [0.940, 0.945]",heldout_concordance
+Held-out conditional log loss [95% CI],"13.46 [13.18, 13.75]",heldout_conditional_log_loss
+Fit warning count,0.00,fit_warning_count
+All coefficients finite,yes,all_coefficients_finite
+All standard errors finite,yes,all_standard_errors_finite

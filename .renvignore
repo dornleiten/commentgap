@@ -1,0 +1,16 @@
+# Keep renv discovery and snapshots away from retained stores and generated data.
+data/
+artifacts/
+outputs/
+quarantine/
+model_output/
+models/
+html/
+logs/
+provenance/
+submissions/
+legacy/
+.git/
+.venv*/
+.cache/
+*.ipynb

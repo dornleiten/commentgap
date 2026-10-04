@@ -1367,7 +1367,7 @@ def run_neural_ranker_workflow(
     output_root: Path,
     *,
     approach: str,
-    embedding_root: Path = Path("model_output/selection_2025/embeddings"),
+    embedding_root: Path | None = None,
     embedding_store: Path | None = None,
     device: str = "auto",
     bootstrap_draws: int = 1_000,
@@ -1408,8 +1408,9 @@ def run_neural_ranker_workflow(
     resolved_device = _resolve_device(device)
     model_data_root = Path(model_data_root)
     data_root = Path(data_root)
-    output_root = Path(output_root)
-    embedding_root = Path(embedding_root)
+    from .paths import ProjectPaths, require_writable_destination
+    output_root = require_writable_destination(output_root)
+    embedding_root = Path(embedding_root) if embedding_root is not None else ProjectPaths.load().read_root("embeddings")
     if approach == "frozen_bge" and embedding_store is None:
         embedding_store, embedding_manifest = discover_complete_embedding_store(
             embedding_root,

@@ -11,6 +11,7 @@ from .embeddings import (
     build_embedding_store,
     build_token_length_diagnostics,
 )
+from .paths import ExecutionContext, add_execution_arguments
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,11 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
             "from the normalized Parquet collection."
         ),
     )
-    parser.add_argument("--data-root", type=Path, default=Path("data/scrape_2025"))
+    parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("model_output/selection_2025/embeddings"),
+        default=None,
     )
     parser.add_argument(
         "--year",
@@ -115,14 +116,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write token-length diagnostics without loading model weights or using a GPU.",
     )
+    add_execution_arguments(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    context = ExecutionContext.from_values(
+        mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+    )
     config = EmbeddingBuildConfig(
-        data_root=args.data_root,
-        output_root=args.output_root,
+        data_root=context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT"),
+        output_root=context.output_root("shared/embeddings", explicit=args.output_root, env_var="COMMENTGAP_EMBEDDING_ROOT"),
         years=tuple(args.years) if args.years else None,
         model_id=args.model_id,
         revision=args.revision,

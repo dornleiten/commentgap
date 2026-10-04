@@ -6,6 +6,28 @@ output:
     toc_depth: 2
 ---
 
+```{r public-replay, echo=FALSE, results='asis'}
+if (tolower(Sys.getenv("COMMENTGAP_MODE", "replay")) %in% c("replay", "frozen")) {
+  public_root <- file.path(getwd(), "artifacts", "canonical")
+  manifest <- jsonlite::fromJSON(file.path(public_root, "replay_manifest.json"), simplifyVector = FALSE)
+  selected <- unlist(manifest$stages[["07"]], use.names = FALSE)
+  selected <- selected[startsWith(selected, "CG1/sensitivity/efron_")]
+  cat("## Public replay\n\nVerified aggregate tables from the public canonical bundle. Model fitting requires the private archive.\n\n")
+  for (relative in selected) {
+    input <- file.path(public_root, relative)
+    if (!file.exists(input) || !identical(digest::digest(file = input, algo = "sha256", serialize = FALSE), manifest$products[[relative]]$sha256)) {
+      stop("Public replay product missing or changed: ", input)
+    }
+    values <- utils::read.csv(input, check.names = FALSE)
+    cat("### ", relative, " (", nrow(values), " rows)\n\n", sep = "")
+    print(knitr::kable(values, digits = 4))
+    cat("\n\n")
+  }
+  knitr::opts_chunk$set(eval = FALSE)
+}
+```
+
+
 # Objective
 
 Assess whether the Efron approximation used by the primary stacked
@@ -35,15 +57,31 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 # Configuration
 
 ```{r configuration}
-feature_root <- Sys.getenv(
-  "COMMENTGAP_MODEL_DATA_ROOT",
-  "model_output/selection_2025/model_data"
+source(file.path("scripts", "paths.R"))
+rmd_paths <- commentgap_paths()
+rmd_mode <- commentgap_mode()
+feature_root <- commentgap_read_root(
+  rmd_paths, "model_data",
+  explicit = if (nzchar(Sys.getenv("COMMENTGAP_MODEL_DATA_ROOT", "")))
+    Sys.getenv("COMMENTGAP_MODEL_DATA_ROOT") else NULL
 )
 
-output_root <- Sys.getenv(
-  "COMMENTGAP_REGRESSION_SENSITIVITY_ROOT",
-  "model_output/selection_2025/regression_sensitivity/efron_exact_shared_preprocessing_v4"
-)
+stage_area <- "CG1/sensitivity/efron_exact"
+stage_prepared <- identical(Sys.getenv("COMMENTGAP_STAGE_PREPARED", "0"), "1")
+output_root <- if (identical(rmd_mode, "frozen")) {
+  file.path(commentgap_read_root(rmd_paths, "frozen_cg1_sensitivity"),
+            "efron_exact_shared_preprocessing_v4")
+} else if (stage_prepared) {
+  commentgap_stage_path(rmd_paths, stage_area,
+                        explicit = if (nzchar(Sys.getenv("COMMENTGAP_REGRESSION_SENSITIVITY_ROOT", "")))
+                          Sys.getenv("COMMENTGAP_REGRESSION_SENSITIVITY_ROOT") else NULL)
+} else {
+  commentgap_stage(
+    rmd_paths, stage_area,
+    inputs = feature_root,
+    contract = list(workflow = "rmarkdown", stage = "07A2")
+  )
+}
 sample_articles <- as.integer(Sys.getenv(
   "COMMENTGAP_EXACT_SAMPLE_ARTICLES", "100"
 ))
@@ -72,7 +110,9 @@ if (!length(requested_scopes) ||
     !all(requested_scopes %in% c("root", "all"))) {
   stop("COMMENTGAP_EFRON_EXACT_SCOPES must contain only root and/or all")
 }
-dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
+if (!identical(rmd_mode, "frozen")) {
+  commentgap_stage_child(rmd_paths, output_root, output_root)
+}
 
 split_path <- file.path(feature_root, "master_article_split.parquet")
 manifest_path <- file.path(feature_root, "feature_manifest.json")
@@ -262,6 +302,55 @@ coefficient_comparison <- function(efron, exact) {
 
 ```{r run-scope}
 run_scope <- function(scope) {
+  if (identical(rmd_mode, "frozen")) {
+    input_path <- file.path(feature_root, paste0("choice_set_", scope, ".parquet"))
+    if (!file.exists(input_path)) {
+      stop("Frozen input for `choice_set` is missing: ", input_path, call. = FALSE)
+    }
+    choice_set <- as.data.table(arrow::read_parquet(input_path))
+    version_root <- file.path(
+      commentgap_read_root(rmd_paths, "frozen_cg1_sensitivity"),
+      "efron_exact_shared_preprocessing_v4", scope
+    )
+    efron_fit_path <- file.path(version_root, "efron_reduced_model.rds")
+    exact_fit_path <- file.path(version_root, "exact_reduced_model.rds")
+    if (!file.exists(efron_fit_path)) {
+      stop("Frozen input for `efron_result$fit` is missing: ", efron_fit_path, call. = FALSE)
+    }
+    if (!file.exists(exact_fit_path)) {
+      stop("Frozen input for `exact_result$fit` is missing: ", exact_fit_path, call. = FALSE)
+    }
+    efron_fit <- readRDS(efron_fit_path)
+    exact_fit <- readRDS(exact_fit_path)
+    source(file.path("scripts", "frozen_rmd_load.R"))
+    frozen_results <- commentgap_frozen_results(
+      rmd_paths, "07A2_efron_exact_sensitivity", scope
+    )[[1L]]
+    saved_value <- function(statistic) {
+      row <- match(statistic, frozen_results$summary$statistic)
+      if (is.na(row)) {
+        stop("Frozen input for `", statistic, "` is missing from saved summary: ",
+             file.path(version_root, "sensitivity_summary.csv"), call. = FALSE)
+      }
+      frozen_results$summary$value[[row]]
+    }
+    saved_warnings <- function(statistic) {
+      value <- saved_value(statistic)
+      if (is.na(value) || !nzchar(value)) character() else
+        strsplit(value, " | ", fixed = TRUE)[[1L]]
+    }
+    efron_result <- list(
+      fit = efron_fit,
+      warnings = saved_warnings("efron_warnings"),
+      elapsed_seconds = as.numeric(saved_value("efron_elapsed_seconds"))
+    )
+    exact_result <- list(
+      fit = exact_fit,
+      warnings = saved_warnings("exact_warnings"),
+      elapsed_seconds = as.numeric(saved_value("exact_elapsed_seconds"))
+    )
+    return(frozen_results)
+  }
   cat("\n---", toupper(scope), "EFRON/EXACT SENSITIVITY ---\n")
   features <- features_by_scope[[scope]]
   input_path <- file.path(
@@ -421,6 +510,7 @@ run_scope <- function(scope) {
   )
 
   scope_output <- file.path(output_root, scope)
+  scope_output <- commentgap_stage_child(rmd_paths, output_root, scope_output)
   dir.create(scope_output, recursive = TRUE, showWarnings = FALSE)
   fwrite(scaling, file.path(scope_output, "feature_scaling.csv"))
   fwrite(sampled_articles, file.path(

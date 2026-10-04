@@ -11,7 +11,7 @@ import pandas as pd
 
 from commentgap_analysis.topic_diagnostics import (
     corpus_signature, coverage_metrics, diagnostic_fit, load_search_artifacts,
-    search_cache_matches, stability_pairs,
+    run_diagnostic_seed, search_cache_matches, stability_pairs,
 )
 from commentgap_analysis.topic_diagnostics import pooled_stability_pairs
 from commentgap_analysis.topic_modeling import TopicModelConfig
@@ -91,6 +91,19 @@ class StabilityTests(unittest.TestCase):
             self.assertEqual(fit.call_count, 2)
         documents.loc[0, 'text'] = 'changed'
         self.assertNotEqual(signature, corpus_signature(corpus))
+
+    def test_search_seed_wrapper_passes_the_selected_seed(self):
+        config = TopicModelConfig(random_state=2025)
+        with patch('commentgap_analysis.topic_diagnostics.diagnostic_fit', return_value='fit') as fit:
+            result = run_diagnostic_seed(
+                'corpus', config, Path('search'), 'signature', seed=2027,
+                setup_name='articles_mcs15', batch_size=123,
+                fit_corpus='articles', fit_role='development',
+            )
+        self.assertEqual(result, 'fit')
+        self.assertEqual(config.random_state, 2025)
+        self.assertEqual(fit.call_args.args[1].random_state, 2027)
+        self.assertEqual(fit.call_args.kwargs['batch_size'], 123)
 
     def test_loader_excludes_test_and_unusable_comments_by_default(self):
         from commentgap_analysis.topic_diagnostics import load_diagnostic_corpus

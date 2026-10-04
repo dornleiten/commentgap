@@ -1,11 +1,32 @@
 """Development-only voting-activity proxy for rank attention."""
 
+from collections.abc import Mapping
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, minimize_scalar
 from scipy.interpolate import BSpline
 
 from .forum_scores import PolicySpec, make_policy_order
+
+
+def vote_attention_comparison(
+    cv: pd.DataFrame, models: Mapping[str, Mapping[str, object]], *,
+    primary_model: str = 'spline',
+) -> pd.DataFrame:
+    """Summarize validation and training losses for fitted attention models."""
+    comparison = pd.DataFrame([{
+        'model': model,
+        'role': 'primary' if model == primary_model else 'sensitivity',
+        'cv_cross_entropy': float(np.average(group['cross_entropy'], weights=group['n_stories'])),
+        'training_cross_entropy': models[model]['training_cross_entropy'],
+        'n_validation_stories': int(group['n_stories'].sum()),
+    } for model, group in cv.groupby('model', sort=False)])
+    power_law_cv = comparison.loc[
+        comparison['model'].eq('power_law'), 'cv_cross_entropy',
+    ].iloc[0]
+    comparison['cv_delta_vs_power_law'] = comparison['cv_cross_entropy'] - power_law_cv
+    return comparison
 
 
 def _prepare_vote_attention(comments, article_split, *, min_comments=11):
@@ -246,15 +267,7 @@ def fit_vote_attention_models(comments, article_split, *, min_comments=11,
         config['training_cross_entropy'] = _cross_entropy(log_weights, stats)
         models[model] = config
     cv = pd.DataFrame(cv_rows)
-    comparison = []
-    for model, group in cv.groupby('model', sort=False):
-        comparison.append({'model': model, 'role': 'primary' if model == 'spline' else 'sensitivity',
-                           'cv_cross_entropy': float(np.average(group.cross_entropy, weights=group.n_stories)),
-                           'training_cross_entropy': models[model]['training_cross_entropy'],
-                           'n_validation_stories': int(group.n_stories.sum())})
-    comparison = pd.DataFrame(comparison)
-    baseline = comparison.loc[comparison.model.eq('power_law'), 'cv_cross_entropy'].iloc[0]
-    comparison['cv_delta_vs_power_law'] = comparison.cv_cross_entropy - baseline
+    comparison = vote_attention_comparison(cv, models)
     metadata.update(fit='conditional multinomial; nested development CV; equal-story weighting',
                     primary_model='spline', models=models, smoothing_grid=list(smoothing_grid),
                     comparison_metric='mean per-story cross entropy (nats); lower is better',

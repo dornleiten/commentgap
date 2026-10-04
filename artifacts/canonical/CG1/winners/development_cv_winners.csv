@@ -1,0 +1,5 @@
+variant_id,family,scope,mean_macro_ndcg_at_k,sd_macro_ndcg_at_k,min_fold_macro_ndcg_at_k,completed_folds,mean_audience_ndcg_at_k,mean_curator_ndcg_at_k,feature_set,draw_policy,negative_sampling,schedule,heads,network,development_cv_rank
+nn__metadata_bge__draw1__random4__plateau__separate__base,neural,all,0.2393451002458297,0.006855219811675039,0.2315912796394068,5,,,metadata_bge,draw1,random4,plateau,separate,base,1
+nn__metadata__draw1__random4__plateau__separate__base,neural,all,0.23400086798545897,0.0039987867841972105,0.2275367998699523,5,,,metadata,draw1,random4,plateau,separate,base,1
+xgb__metadata_bge__draw1,xgboost,all,0.25166700763126343,0.007818505813798421,0.2429116546268463,5,0.24388884395777638,0.2594451713047504,metadata_bge,draw1,na,na,na,na,1
+xgb__metadata__draw1,xgboost,all,0.24495146444539864,0.005827222555334415,0.2395200876716519,5,0.23494873023479634,0.254954198656001,metadata,draw1,na,na,na,na,1

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -21,27 +22,52 @@ from .forum_scores import (
     run_policy_scoring,
 )
 from .ranking_algorithm_effects import run_ranking_algorithm_effects
+from .paths import ExecutionContext, add_execution_arguments
 
 
-DEFAULT_FACTORIAL_ROOT = Path("model_output/selection_2025/factorial_rankers")
-DEFAULT_REGRESSION_SCORES = Path(
-    "model_output/selection_2025/regression/all/test_scores_wide.parquet"
-)
-DEFAULT_HANDOFF_ROOT = Path(
-    "model_output/selection_2025/forum_ranking_analysis/ranker_handoff"
-)
-DEFAULT_ANALYSIS_ROOT = Path("model_output/selection_2025/forum_ranking_analysis")
-DEFAULT_POLICY_ROOT = DEFAULT_ANALYSIS_ROOT / "policy_scores"
-DEFAULT_INFERENCE_ROOT = DEFAULT_ANALYSIS_ROOT / "inference"
-DEFAULT_REPORTING_ROOT = DEFAULT_ANALYSIS_ROOT / "reporting"
+def resolve_forum_canonical_path(canonical_path: str | Path, forum_root: Path) -> Path:
+    """Map a saved FORUM pipeline target into the selected analysis root."""
+    canonical_path = str(canonical_path).replace("\\", "/")
+    relative_prefix = "CG2/forum/"
+    if canonical_path.startswith(relative_prefix):
+        relative_path = canonical_path[len(relative_prefix):]
+    elif "/CG2/forum/" in canonical_path:
+        relative_path = canonical_path.split("/CG2/forum/", 1)[1]
+    elif canonical_path.endswith("/CG2/forum"):
+        relative_path = ""
+    else:
+        raise ValueError(f"Unrecognized canonical FORUM path: {canonical_path}")
+    return Path(forum_root) / relative_path
+
+
+def _input_path(
+    context: ExecutionContext,
+    *,
+    explicit: Path | None,
+    env_var: str,
+    run_area: str,
+    frozen_key: str,
+    suffix: str = "",
+) -> Path:
+    """Resolve an explicit override before same-run and saved artifacts."""
+    if explicit is not None:
+        return context.read_path(explicit)
+    if (value := os.environ.get(env_var)):
+        return context.read_path(value)
+    same_run = context.run_path(run_area)
+    if context.mode != "frozen" and (same_run / suffix).exists():
+        base = context.run_input(run_area)
+    else:
+        base = context.read_root(frozen_key)
+    return base / suffix if suffix else base
 
 
 def _add_freeze_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--factorial-root", type=Path, default=DEFAULT_FACTORIAL_ROOT)
+    parser.add_argument("--factorial-root", type=Path)
     parser.add_argument(
-        "--regression-scores", type=Path, default=DEFAULT_REGRESSION_SCORES
+        "--regression-scores", type=Path
     )
-    parser.add_argument("--handoff-root", type=Path, default=DEFAULT_HANDOFF_ROOT)
+    parser.add_argument("--handoff-root", type=Path)
     parser.add_argument("--expected-folds", type=int, default=5)
     parser.add_argument(
         "--allow-active-factorial",
@@ -54,30 +80,26 @@ def _add_build_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--handoff-manifest",
         type=Path,
-        default=DEFAULT_HANDOFF_ROOT / "ranker_handoff_manifest.json",
+        default=None,
     )
     parser.add_argument(
         "--choice-set",
         type=Path,
-        default=Path(
-            "model_output/selection_2025/model_data/choice_set_all.parquet"
-        ),
+        default=None,
     )
     parser.add_argument(
         "--split",
         type=Path,
-        default=Path(
-            "model_output/selection_2025/model_data/master_article_split.parquet"
-        ),
+        default=None,
     )
-    parser.add_argument("--data-root", type=Path, default=Path("data/scrape_2025"))
+    parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument(
         "--embedding-store",
         type=Path,
         required=True,
         help="Frozen comment-embedding store used for static novelty.",
     )
-    parser.add_argument("--analysis-root", type=Path, default=DEFAULT_ANALYSIS_ROOT)
+    parser.add_argument("--analysis-root", type=Path, default=None)
     parser.add_argument("--min-comments", type=int, default=11)
 
 
@@ -85,9 +107,9 @@ def _add_score_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--analysis-comments",
         type=Path,
-        default=DEFAULT_ANALYSIS_ROOT / "analysis_comments.parquet",
+        default=None,
     )
-    parser.add_argument("--policy-root", type=Path, default=DEFAULT_POLICY_ROOT)
+    parser.add_argument("--policy-root", type=Path, default=None)
     parser.add_argument("--tie-draws", type=int, default=DEFAULT_TIE_DRAWS)
     parser.add_argument("--random-draws", type=int, default=DEFAULT_RANDOM_DRAWS)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -110,14 +132,14 @@ def _add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--policy-scores",
         type=Path,
-        default=DEFAULT_POLICY_ROOT / "policy_scores.parquet",
+        default=None,
     )
     parser.add_argument(
         "--analysis-comments",
         type=Path,
-        default=DEFAULT_ANALYSIS_ROOT / "analysis_comments.parquet",
+        default=None,
     )
-    parser.add_argument("--inference-root", type=Path, default=DEFAULT_INFERENCE_ROOT)
+    parser.add_argument("--inference-root", type=Path, default=None)
     parser.add_argument(
         "--bootstrap-draws", type=int, default=DEFAULT_BOOTSTRAP_DRAWS
     )
@@ -125,8 +147,8 @@ def _add_inference_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_reporting_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--inference-root", type=Path, default=DEFAULT_INFERENCE_ROOT)
-    parser.add_argument("--reporting-root", type=Path, default=DEFAULT_REPORTING_ROOT)
+    parser.add_argument("--inference-root", type=Path, default=None)
+    parser.add_argument("--reporting-root", type=Path, default=None)
 
 
 
@@ -139,6 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
             "paper outputs."
         ),
     )
+    add_execution_arguments(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_freeze_arguments(
         subparsers.add_parser("freeze", help="Freeze development-selected rankers.")
@@ -164,9 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
         handoff_manifest=None,
         analysis_comments=None,
     )
-    all_parser.add_argument("--policy-root", type=Path, default=DEFAULT_POLICY_ROOT)
-    all_parser.add_argument("--inference-root", type=Path, default=DEFAULT_INFERENCE_ROOT)
-    all_parser.add_argument("--reporting-root", type=Path, default=DEFAULT_REPORTING_ROOT)
+    all_parser.add_argument("--policy-root", type=Path, default=None)
+    all_parser.add_argument("--inference-root", type=Path, default=None)
+    all_parser.add_argument("--reporting-root", type=Path, default=None)
     all_parser.add_argument("--tie-draws", type=int, default=DEFAULT_TIE_DRAWS)
     all_parser.add_argument("--random-draws", type=int, default=DEFAULT_RANDOM_DRAWS)
     all_parser.add_argument(
@@ -256,6 +279,82 @@ def _report(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
+    context = ExecutionContext.from_values(
+        mode=arguments.mode, run_id=arguments.run_id, repo_root=arguments.repo_root
+    )
+    command = arguments.command
+    # Historical stores remain inputs. Every newly produced FORUM stage is
+    # rooted beneath one fresh run, including an `all` pipeline.
+    if hasattr(arguments, "factorial_root"):
+        arguments.factorial_root = _input_path(
+            context, explicit=arguments.factorial_root,
+            env_var="COMMENTGAP_FACTORIAL_ROOT", run_area="CG1/rankers/factorial",
+            frozen_key="frozen_cg1_factorial_rankers",
+        )
+        arguments.regression_scores = _input_path(
+            context, explicit=arguments.regression_scores,
+            env_var="COMMENTGAP_REGRESSION_ROOT", run_area="CG1/regression",
+            frozen_key="frozen_cg1_regression", suffix="all/test_scores_wide.parquet",
+        )
+        arguments.handoff_root = context.output_root(
+            "CG2/forum/ranker_handoff",
+            explicit=arguments.handoff_root,
+            env_var="COMMENTGAP_FORUM_HANDOFF_ROOT",
+        )
+    if command in {"build", "all"}:
+        if arguments.handoff_manifest is not None:
+            arguments.handoff_manifest = context.read_path(arguments.handoff_manifest)
+        model_data_root = context.read_root(
+            "model_data", env_var="COMMENTGAP_MODEL_DATA_ROOT"
+        )
+        arguments.choice_set = context.read_path(arguments.choice_set) if arguments.choice_set else model_data_root / "choice_set_all.parquet"
+        arguments.split = context.read_path(arguments.split) if arguments.split else model_data_root / "master_article_split.parquet"
+        arguments.data_root = context.read_root(
+            "raw_scrape", explicit=arguments.data_root,
+            env_var="COMMENTGAP_DATA_ROOT",
+        )
+        arguments.analysis_root = context.output_root(
+            "CG2/forum", explicit=arguments.analysis_root,
+            env_var="COMMENTGAP_FORUM_ANALYSIS_ROOT",
+        )
+    if command == "score":
+        arguments.analysis_comments = _input_path(
+            context, explicit=arguments.analysis_comments,
+            env_var="COMMENTGAP_ANALYSIS_COMMENTS_PATH", run_area="CG2/forum",
+            frozen_key="frozen_cg2_forum", suffix="analysis_comments.parquet",
+        )
+    if command == "infer":
+        arguments.policy_scores = _input_path(
+            context, explicit=arguments.policy_scores,
+            env_var="COMMENTGAP_FORUM_SCORES_PATH", run_area="CG2/forum/policy_scores",
+            frozen_key="frozen_cg2_forum", suffix="policy_scores.parquet",
+        )
+        arguments.analysis_comments = _input_path(
+            context, explicit=arguments.analysis_comments,
+            env_var="COMMENTGAP_ANALYSIS_COMMENTS_PATH", run_area="CG2/forum",
+            frozen_key="frozen_cg2_forum", suffix="analysis_comments.parquet",
+        )
+    if command == "report":
+        arguments.inference_root = _input_path(
+            context, explicit=arguments.inference_root,
+            env_var="COMMENTGAP_FORUM_INFERENCE_ROOT", run_area="CG2/forum/inference",
+            frozen_key="frozen_cg2_forum", suffix="inference",
+        )
+    if hasattr(arguments, "policy_root"):
+        arguments.policy_root = context.output_root(
+            "CG2/forum/policy_scores", explicit=arguments.policy_root,
+            env_var="COMMENTGAP_FORUM_POLICY_ROOT",
+        )
+    if hasattr(arguments, "inference_root") and command in {"infer", "all"}:
+        arguments.inference_root = context.output_root(
+            "CG2/forum/inference", explicit=arguments.inference_root,
+            env_var="COMMENTGAP_FORUM_INFERENCE_ROOT",
+        )
+    if hasattr(arguments, "reporting_root"):
+        arguments.reporting_root = context.output_root(
+            "CG2/forum/reporting", explicit=arguments.reporting_root,
+            env_var="COMMENTGAP_FORUM_REPORTING_ROOT",
+        )
     if arguments.command == "freeze":
         result = _freeze(arguments)
     elif arguments.command == "build":

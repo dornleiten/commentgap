@@ -1,0 +1,8 @@
+{
+  "output_stories": 2559,
+  "test_article_passages": 48887,
+  "test_comments": 1203611,
+  "training_articles": 2559,
+  "training_comments": 48887,
+  "training_documents": 97774
+}

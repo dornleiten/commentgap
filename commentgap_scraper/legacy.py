@@ -8,7 +8,7 @@ def _duckdb():
         import duckdb
     except ImportError as exc:
         raise RuntimeError(
-            "legacy export requires DuckDB; install requirements-scraper.txt"
+            "legacy export requires DuckDB; install the project with python -m pip install -e ."
         ) from exc
     return duckdb
 

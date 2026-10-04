@@ -1,0 +1,5 @@
+{
+  "snapshot.type": "implicit",
+  "auto.snapshot": false,
+  "use.cache": true
+}
