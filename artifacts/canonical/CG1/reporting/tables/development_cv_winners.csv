@@ -1,0 +1,5 @@
+completed_folds,development_cv_rank,draw_policy,family,feature_set,heads,mean_audience_ndcg_at_k,mean_curator_ndcg_at_k,mean_macro_ndcg_at_k,min_fold_macro_ndcg_at_k,negative_sampling,network,schedule,scope,sd_macro_ndcg_at_k,variant_id
+5,1,draw1,neural,metadata_bge,separate,,,0.2393451002458297,0.2315912796394068,random4,base,plateau,all,0.006855219811675039,nn__metadata_bge__draw1__random4__plateau__separate__base
+5,1,draw1,neural,metadata,separate,,,0.23400086798545897,0.2275367998699523,random4,base,plateau,all,0.0039987867841972105,nn__metadata__draw1__random4__plateau__separate__base
+5,1,draw1,xgboost,metadata_bge,na,0.24388884395777638,0.2594451713047504,0.25166700763126343,0.2429116546268463,na,na,na,all,0.007818505813798421,xgb__metadata_bge__draw1
+5,1,draw1,xgboost,metadata,na,0.23494873023479634,0.254954198656001,0.24495146444539864,0.2395200876716519,na,na,na,all,0.005827222555334415,xgb__metadata__draw1

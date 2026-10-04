@@ -47,6 +47,15 @@ DEPTH_LABELS = {
 }
 
 
+def format_estimate_intervals(frame: pd.DataFrame) -> pd.Series:
+    """Format estimates and confidence bounds for ranking effect tables."""
+    return (
+        frame['estimate'].map('{:.3f}'.format)
+        + ' [' + frame['ci_lower'].map('{:.3f}'.format)
+        + ', ' + frame['ci_upper'].map('{:.3f}'.format) + ']'
+    )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -498,7 +507,7 @@ def plot_ordering_policy_variants(
 
 
 def plot_structure_effects(
-    effects: pd.DataFrame, output_root: Path, *, depth: str = "top10"
+    effects: pd.DataFrame, output_root: Path, *, depth: str = "top10", show: bool = False
 ) -> list[Path]:
     plt, _ = _plot_modules()
     data = _primary_depth(effects, depth)
@@ -540,6 +549,8 @@ def plot_structure_effects(
     figure.tight_layout()
     figure_name = "figure_structure_effects" if depth == "top10" else f"figure_structure_effects_{depth}"
     paths = _save_figure(figure, output_root / figure_name)
+    if show:
+        plt.show()
     plt.close(figure)
     return paths
 
@@ -669,7 +680,9 @@ def plot_metric_agreement(
     return paths
 
 
-def plot_mechanism_heatmap(mechanism: pd.DataFrame, output_root: Path) -> list[Path]:
+def plot_mechanism_heatmap(
+    mechanism: pd.DataFrame, output_root: Path, *, show: bool = False
+) -> list[Path]:
     plt, colors = _plot_modules()
     data = mechanism[
         mechanism["sample"].eq("primary")
@@ -697,6 +710,8 @@ def plot_mechanism_heatmap(mechanism: pd.DataFrame, output_root: Path) -> list[P
     figure.colorbar(image, ax=axis, label="Mean Spearman correlation")
     figure.tight_layout()
     paths = _save_figure(figure, output_root / "figure_mechanism_alignment")
+    if show:
+        plt.show()
     plt.close(figure)
     return paths
 
@@ -734,11 +749,21 @@ def write_primary_effects_table(effects: pd.DataFrame, output_root: Path) -> Pat
 
 def run_ranking_algorithm_effects(
     *,
-    inference_root: Path | str = "model_output/selection_2025/forum_ranking_analysis/inference",
-    output_root: Path | str = "model_output/selection_2025/forum_ranking_analysis/reporting",
+    inference_root: Path | str | None = None,
+    output_root: Path | str | None = None,
 ) -> dict[str, Any]:
-    inference_root = Path(inference_root)
-    output_root = Path(output_root)
+    from .paths import ExecutionContext, require_writable_destination
+    context = ExecutionContext.from_values()
+    inference_root = (
+        context.read_root("frozen_cg2_forum") / "inference"
+        if inference_root is None
+        else context.read_path(inference_root)
+    )
+    output_root = (
+        context.output_root("CG2/forum/reporting")
+        if output_root is None
+        else require_writable_destination(output_root)
+    )
     inputs = {
         "policy_summary": inference_root / "policy_summary.csv",
         "marginal_effects": inference_root / "marginal_effects.csv",

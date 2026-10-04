@@ -33,11 +33,12 @@ from commentgap_analysis.topic_modeling import topic_model_quality_table
 from commentgap_analysis.topic_runs import (
     complete_run, file_inventory, prepare_run, resolve_run,
 )
+from commentgap_analysis.paths import ExecutionContext, PathContractError, add_execution_arguments
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fit the Paper 2 BERTopic model with automatic topic reduction.")
-    parser.add_argument("--repo-root", type=Path, default=Path.cwd())
+    add_execution_arguments(parser)
     parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument("--split", type=Path, default=None)
     parser.add_argument("--analysis-comments", type=Path, default=None, help="Paper 2 comment sample used for transformation (defaults to paper2/analysis_comments.parquet).")
@@ -77,6 +78,18 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _embedding_build_root(parent: Path) -> Path:
+    """Resolve the one completed embedding build below a configured parent."""
+    if (parent / "embedding_manifest.json").is_file():
+        return parent
+    manifests = sorted(parent.glob("model=*/build=*/embedding_manifest.json"))
+    if len(manifests) != 1:
+        raise ValueError(
+            "Specify --embedding-store when the configured embedding root does not contain exactly one build"
+        )
+    return manifests[0].parent
 
 
 def _code_revision(repo_root: Path) -> str:
@@ -395,12 +408,49 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("--batch-size must be positive")
     if args.workers < 1:
         raise ValueError("--workers must be positive")
-    repo_root = args.repo_root.resolve()
-    data_root = (args.data_root or repo_root / "data/scrape_2025").resolve()
-    split_path = (args.split or repo_root / "model_output/selection_2025/model_data/master_article_split.parquet").resolve()
-    analysis_comments_path = (args.analysis_comments or repo_root / "model_output/selection_2025/paper2/analysis_comments.parquet").resolve()
-    output_root = (args.output_root or repo_root / "model_output/selection_2025/paper2_topic_modeling").resolve()
-    embedding_store = (args.embedding_store or repo_root / "model_output/selection_2025/embeddings/model=BAAI__bge-m3--d790e737/build=de5b3016fb2f-010a7cc75a88").resolve()
+    context = ExecutionContext.from_values(mode=args.mode, run_id=args.run_id, repo_root=args.repo_root)
+    if context.mode == "frozen":
+        raise PathContractError(
+            "Topic-model fitting is a computational producer; use --mode fresh with a new run ID."
+        )
+    repo_root = context.paths.root
+    data_root = context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT")
+    split_override = args.split or os.environ.get("COMMENTGAP_SPLIT_PATH")
+    if split_override is not None:
+        split_path = context.read_path(split_override)
+    else:
+        split_root = context.read_root("model_data")
+        split_path = split_root / "master_article_split.parquet"
+    comments_override = args.analysis_comments or os.environ.get("COMMENTGAP_ANALYSIS_COMMENTS_PATH")
+    forum_comments = context.run_path("CG2/forum") / "analysis_comments.parquet"
+    if comments_override is not None:
+        analysis_comments_path = context.read_path(comments_override)
+    elif forum_comments.exists():
+        analysis_comments_path = context.run_input("CG2/forum") / "analysis_comments.parquet"
+    else:
+        analysis_comments_path = context.read_root("frozen_cg2_topic_source") / "analysis_comments.parquet"
+    embedding_store = _embedding_build_root(
+        context.read_root(
+            "embeddings", explicit=args.embedding_store, env_var="COMMENTGAP_EMBEDDING_ROOT"
+        )
+    )
+    if embedding_store not in context.read_inputs:
+        context.read_path(embedding_store)
+    if args.runs_root is not None:
+        runs_root = context.output_root("CG2/topics/runs", explicit=args.runs_root)
+    elif args.output_root is None:
+        runs_root = context.output_root("CG2/topics/runs")
+    else:
+        runs_root = None
+    output_root = (
+        context.output_root("CG2/topics/model", explicit=args.output_root)
+        if args.output_root is not None
+        else None
+    )
+    if runs_root is not None:
+        runs_root = runs_root.resolve()
+    if output_root is not None:
+        output_root = output_root.resolve()
 
     if not split_path.exists():
         raise FileNotFoundError(f"Required Paper 2 split file not found: {split_path}")
@@ -488,17 +538,17 @@ def main(argv: list[str] | None = None) -> int:
         "embedding_inventory": file_inventory(embedding_store),
         "embedding_manifest_sha256": _file_sha256(embedding_store / "embedding_manifest.json"),
     }
-    if args.runs_root:
+    if runs_root:
         setup = dict(configuration=asdict(model_config), inputs=input_signature,
                      batch_size=args.batch_size, workers=args.workers, run_tag=args.run_tag,
                      code_hashes={name: _file_sha256(repo_root / name) for name in (
                          "commentgap_analysis/topic_modeling.py", "commentgap_analysis/embeddings.py",
                          "commentgap_analysis/topic_runs.py", "scripts/run_topic_model_fit.py")},
                      package_versions=_package_versions(), python=python_version())
-        output_root, registered_run = prepare_run(args.runs_root.resolve(), setup)
+        output_root, registered_run = prepare_run(runs_root, setup)
         print(f"Registered run: {output_root.name}", flush=True)
         if registered_run["status"] == "completed":
-            resolve_run(args.runs_root.resolve(), output_root.name)
+            resolve_run(runs_root, output_root.name)
             print(f"Using completed run: {output_root}", flush=True)
             return 0
     output_root.mkdir(parents=True, exist_ok=True)
@@ -513,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     model_path = output_root / "topic_model.joblib"
     manifest_path = output_root / "topic_model_manifest.json"
-    if model_path.exists() and manifest_path.exists() and (args.runs_root or resumable_progress is not None):
+    if model_path.exists() and manifest_path.exists() and (runs_root is not None or resumable_progress is not None):
         if resumable_progress is not None:
             previous = json.loads(resumable_progress.read_text())
             if previous.get("input_signature") != input_signature or previous.get("batch_size") != args.batch_size:
@@ -670,7 +720,7 @@ def main(argv: list[str] | None = None) -> int:
     _write_progress(metadata_path, run_metadata)
     if json.loads(metadata_path.read_text()) != run_metadata:
         raise RuntimeError("Topic run metadata failed its JSON round trip")
-    if args.runs_root:
+    if runs_root:
         complete_run(output_root)
     outlier_count = int(memberships_coverage["n_outlier_sections"].sum())
     print(f"Final topics: {len(bundle.topic_terms)}", flush=True)

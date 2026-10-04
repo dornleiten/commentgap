@@ -13,11 +13,7 @@ from commentgap_analysis.factorial_rankers import (
     run_factorial_experiment,
     select_variants,
 )
-
-
-DEFAULT_OUTPUT_ROOT = Path(
-    "model_output/selection_2025/factorial_rankers"
-)
+from commentgap_analysis.paths import ExecutionContext, add_execution_arguments
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -32,35 +28,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-data-root",
         type=Path,
-        default=Path(
-            os.getenv(
-                "COMMENTGAP_MODEL_DATA_ROOT",
-                "model_output/selection_2025/model_data",
-            )
-        ),
+        default=None,
     )
     parser.add_argument(
         "--data-root",
         type=Path,
-        default=Path(os.getenv("COMMENTGAP_DATA_ROOT", "data/scrape_2025")),
+        default=None,
     )
     parser.add_argument(
         "--embedding-root",
         type=Path,
-        default=Path(
-            os.getenv(
-                "COMMENTGAP_EMBEDDING_ROOT",
-                "model_output/selection_2025/embeddings",
-            )
-        ),
+        default=None,
     )
     parser.add_argument("--embedding-store", type=Path)
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path(
-            os.getenv("COMMENTGAP_FACTORIAL_ROOT", str(DEFAULT_OUTPUT_ROOT))
-        ),
+        default=None,
     )
     parser.add_argument(
         "--device",
@@ -138,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the variants selected by include/exclude filters and exit.",
     )
+    add_execution_arguments(parser)
     return parser
 
 
@@ -163,13 +148,19 @@ def main(argv: list[str] | None = None) -> dict[str, str]:
         return {}
     if not selected:
         raise SystemExit("No variants match the include/exclude filters")
+    context = ExecutionContext.from_values(
+        mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+    )
+    model_data_root = context.read_root("model_data", explicit=args.model_data_root, env_var="COMMENTGAP_MODEL_DATA_ROOT")
+    data_root = context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT")
+    embedding_root = context.read_root("embeddings", explicit=args.embedding_root, env_var="COMMENTGAP_EMBEDDING_ROOT")
     scopes = tuple(dict.fromkeys(args.scopes or ["root", "all"]))
     return run_factorial_experiment(
-        model_data_root=args.model_data_root,
-        data_root=args.data_root,
-        embedding_root=args.embedding_root,
+        model_data_root=model_data_root,
+        data_root=data_root,
+        embedding_root=embedding_root,
         embedding_store=args.embedding_store,
-        output_root=args.output_root,
+        output_root=context.output_root("CG1/rankers/factorial", explicit=args.output_root, env_var="COMMENTGAP_FACTORIAL_ROOT"),
         neural_device=args.neural_device or args.device,
         xgb_device=args.xgb_device or args.device,
         bootstrap_draws=args.bootstrap_draws,

@@ -1,0 +1,5 @@
+family,feature_set,variant_id,scope,audience_column,editor_column
+neural,metadata_bge,nn__metadata_bge__draw1__random4__plateau__separate__base,all,audience_score,curator_score
+neural,metadata,nn__metadata__draw1__random4__plateau__separate__base,all,audience_score,curator_score
+xgboost,metadata_bge,xgb__metadata_bge__draw1,all,audience_score,curator_score
+xgboost,metadata,xgb__metadata__draw1,all,audience_score,curator_score

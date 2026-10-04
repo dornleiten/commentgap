@@ -509,15 +509,22 @@ def plot_selected_feature_contrasts(
 
 def run_descriptive_analysis(
     *,
-    model_data_root: Path = Path("model_output/selection_2025/model_data"),
-    data_root: Path = Path("data/scrape_2025"),
-    output_root: Path = Path("model_output/selection_2025/paper1/descriptives"),
+    model_data_root: Path | None = None,
+    data_root: Path | None = None,
+    output_root: Path | None = None,
     scopes: Iterable[str] = ("all",),
     year: int = 2025,
     threads: int = 4,
     make_figures: bool = True,
 ) -> dict:
     """Build the complete stage-5 artifact set and write its manifest last."""
+    from .paths import ExecutionContext, require_writable_destination
+
+    context = ExecutionContext.from_values()
+    model_data_root = Path(model_data_root) if model_data_root is not None else context.read_root("model_data")
+    data_root = Path(data_root) if data_root is not None else context.read_root("raw_scrape")
+    output_root = Path(output_root) if output_root is not None else context.output_root("CG1/descriptives")
+    output_root = require_writable_destination(output_root)
     scopes = _normalise_scopes(scopes)
     output_root.mkdir(parents=True, exist_ok=True)
     split_path = model_data_root / "master_article_split.parquet"

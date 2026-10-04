@@ -1,0 +1,274 @@
+\begin{thebibliography}{53}
+\providecommand{\natexlab}[1]{#1}
+
+\bibitem[{Althuniya et~al.(2020)Althuniya, Liu, Sirrianni, and Adams}]{Althuniya2020}
+Althuniya, N.; Liu, X.; Sirrianni, J.~W.; and Adams, D. 2020.
+\newblock Opinion Discovery Framework: Toward a Quality Opinion-Centric Platform.
+\newblock \emph{Journal of Advances in Information Technology}, 11(2).
+
+\bibitem[{Anonymous(2026)}]{CommentGap1}
+Anonymous. 2026.
+\newblock The News Comment Gap: Editorial and Audience Preferences in Online News Discussions.
+\newblock Companion paper, under review at ICWSM.
+
+\bibitem[{Atwater, Fico, and Pizante(1987)}]{Atwater1987}
+Atwater, T.; Fico, F.; and Pizante, G. 1987.
+\newblock Reporting on the state legislature: A case study of inter-media agenda-setting.
+\newblock \emph{Newspaper Research Journal}, 8(2): 53--61.
+
+\bibitem[{Bamberger and Vanacek(1984)}]{bamberger1984lesen}
+Bamberger, R.; and Vanacek, E. 1984.
+\newblock \emph{Lesen-Verstehen-Lernen-Schreiben}.
+\newblock Diesterweg.
+
+\bibitem[{Bandy and Diakopoulos(2020)}]{BandyDiakopoulos2020}
+Bandy, J.; and Diakopoulos, N. 2020.
+\newblock Auditing News Curation Systems: A Case Study Examining Algorithmic and Editorial Logic in {Apple News}.
+\newblock \emph{Proceedings of the International AAAI Conference on Web and Social Media}, 14(1): 36--47.
+
+\bibitem[{Barbieri, Espinosa~Anke, and Camacho-Collados(2022)}]{cardiffnlp2022xlmr}
+Barbieri, F.; Espinosa~Anke, L.; and Camacho-Collados, J. 2022.
+\newblock {XLM}-{T}: Multilingual Language Models in {T}witter for Sentiment Analysis and Beyond.
+\newblock In Calzolari, N.; B{\'e}chet, F.; Blache, P.; Choukri, K.; Cieri, C.; Declerck, T.; Goggi, S.; Isahara, H.; Maegaard, B.; Mariani, J.; Mazo, H.; Odijk, J.; and Piperidis, S., eds., \emph{Proceedings of the Thirteenth Language Resources and Evaluation Conference}, 258--266. Marseille, France: European Language Resources Association.
+
+\bibitem[{Behrendt et~al.(2024)Behrendt, Wagner, Ziegele, Wilms, Stoll, Heinbach, and Harmeling}]{Behrendt2024}
+Behrendt, M.; Wagner, S.~S.; Ziegele, M.; Wilms, L.; Stoll, A.; Heinbach, D.; and Harmeling, S. 2024.
+\newblock {AQ}u{A} {--} Combining Experts' and Non-Experts' Views To Assess Deliberation Quality in Online Discussions Using {LLM}s.
+\newblock In Hautli-Janisz, A.; Lapesa, G.; Anastasiou, L.; Gold, V.; Liddo, A.~D.; and Reed, C., eds., \emph{Proceedings of the First Workshop on Language-driven Deliberation Technology (DELITE) @ LREC-COLING 2024}, 1--12. Torino, Italia: ELRA and ICCL.
+
+\bibitem[{Benoit et~al.(2018)Benoit, Watanabe, Wang, Nulty, Obeng, M\"{u}ller, and Matsuo}]{Benoit2018}
+Benoit, K.; Watanabe, K.; Wang, H.; Nulty, P.; Obeng, A.; M\"{u}ller, S.; and Matsuo, A. 2018.
+\newblock quanteda: An R package for the quantitative analysis of textual data.
+\newblock \emph{Journal of Open Source Software}, 3(30): 774--774.
+
+\bibitem[{Bruns(2003)}]{Bruns2003}
+Bruns, A. 2003.
+\newblock Gatewatching, Not Gatekeeping: Collaborative Online News.
+\newblock \emph{Media International Australia}, 107: 31--44.
+
+\bibitem[{Burger(2022)}]{Burger2022}
+Burger, C. 2022.
+\newblock Von zehn auf 20 Millionen in zwei Jahren.
+\newblock \url{https://www.derstandard.de/story/2000132276894/von-zehn-auf-20-millionen-in-zwei-jahren}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{Campello, Moulavi, and Sander(2013)}]{Campello2013HDBSCAN}
+Campello, R. J. G.~B.; Moulavi, D.; and Sander, J. 2013.
+\newblock Density-Based Clustering Based on Hierarchical Density Estimates.
+\newblock In \emph{Pacific-Asia Conference on Knowledge Discovery and Data Mining}, 160--172. Springer.
+
+\bibitem[{Chan et~al.(2026)Chan, Choi, Saha, and Chandrasekharan}]{Chan2026}
+Chan, J.; Choi, F.; Saha, K.; and Chandrasekharan, E. 2026.
+\newblock Examining Algorithmic Curation on Social Media: An Empirical Audit of {Reddit's r/popular} Feed.
+\newblock \emph{Proceedings of the International AAAI Conference on Web and Social Media}, 20(1): 391--406.
+
+\bibitem[{Chen et~al.(2024)Chen, Xiao, Zhang, Luo, Lian, and Liu}]{chen2024m3}
+Chen, J.; Xiao, S.; Zhang, P.; Luo, K.; Lian, D.; and Liu, Z. 2024.
+\newblock {M}3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation.
+\newblock In Ku, L.-W.; Martins, A.; and Srikumar, V., eds., \emph{Findings of the Association for Computational Linguistics: ACL 2024}, 2318--2335. Bangkok, Thailand: Association for Computational Linguistics.
+
+\bibitem[{Cheng, Danescu-Niculescu-Mizil, and Leskovec(2014)}]{Cheng2014}
+Cheng, J.; Danescu-Niculescu-Mizil, C.; and Leskovec, J. 2014.
+\newblock How community feedback shapes user behavior.
+\newblock In \emph{Proceedings of the International AAAI Conference on Web and Social Media}, volume~8, 41--50.
+
+\bibitem[{{Der Standard}(2021)}]{DerStandard2021}
+{Der Standard}. 2021.
+\newblock Community-Guides.
+\newblock \url{https://www.derstandard.at/story/2000125444821/community-guides-aus-der-community-fuer-die-community}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{{Der Standard}(2026{\natexlab{a}})}]{DerStandard2024}
+{Der Standard}. 2026{\natexlab{a}}.
+\newblock Allgemeine Geschäftsbedingungen - Text- und Data-Mining, Crawler.
+\newblock \url{https://about.derstandard.at/agb/#Text-DataMining-Crawler}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{{Der Standard}(2026{\natexlab{b}})}]{DerStandardRobots2026}
+{Der Standard}. 2026{\natexlab{b}}.
+\newblock robots.txt.
+\newblock \url{https://www.derstandard.at/robots.txt}.
+\newblock Accessed 16-September-2026.
+
+\bibitem[{Diakopoulos(2015)}]{Diakopoulos2015}
+Diakopoulos, N. 2015.
+\newblock Picking the NYT picks: Editorial criteria and automation in the curation of online news comments.
+\newblock \emph{ISOJ Journal}, 6(1): 147--166.
+
+\bibitem[{Diakopoulos and Naaman(2011)}]{Diakopoulos2011}
+Diakopoulos, N.; and Naaman, M. 2011.
+\newblock Towards quality discourse in online news comments.
+\newblock In \emph{Proceedings of the ACM 2011 conference on Computer supported cooperative work}, 133--142.
+
+\bibitem[{Efstratiou et~al.(2026)Efstratiou, Duskin, Starbird, and Spiro}]{Efstratiou2026}
+Efstratiou, A.; Duskin, K.; Starbird, K.; and Spiro, E.~S. 2026.
+\newblock Rabble-Rousers in the New King's Court: Algorithmic Effects on Account Visibility in Pre-{X Twitter}.
+\newblock \emph{Proceedings of the International AAAI Conference on Web and Social Media}, 20(1): 691--705.
+
+\bibitem[{Einarsson, Helles, and Lomborg(2025)}]{Einarsson2025}
+Einarsson, A.~M.; Helles, R.; and Lomborg, S. 2025.
+\newblock Algorithmic agenda-setting: the subtle effects of news recommender systems on political agendas in the Danish 2022 general election.
+\newblock \emph{Information, Communication \& Society}, 28(2): 218--238.
+
+\bibitem[{franzke et~al.(2020)franzke, Bechmann, Ess, and Zimmer}]{AoIR2019}
+franzke, a.~s.; Bechmann, A.; Ess, C.~M.; and Zimmer, M. 2020.
+\newblock Internet research: Ethical guidelines 3.0.
+\newblock Technical report.
+
+\bibitem[{Fraxanet et~al.(2026)Fraxanet, G\'omez, Kaltenbrunner, and Pellert}]{Fraxanet2026}
+Fraxanet, E.; G\'omez, V.; Kaltenbrunner, A.; and Pellert, M. 2026.
+\newblock A Decade of News Forum Interactions: Threaded Conversations, Signed Votes, and Topical Tags.
+\newblock \emph{Scientific Data}, 13(1): 1193.
+
+\bibitem[{Gebru et~al.(2021)Gebru, Morgenstern, Vecchione, Vaughan, Wallach, Daum\'e~III, and Crawford}]{gebru2021datasheets}
+Gebru, T.; Morgenstern, J.; Vecchione, B.; Vaughan, J.~W.; Wallach, H.; Daum\'e~III, H.; and Crawford, K. 2021.
+\newblock Datasheets for Datasets.
+\newblock \emph{Communications of the ACM}, 64(12): 86--92.
+
+\bibitem[{Grootendorst(2022)}]{Grootendorst2022BERTopic}
+Grootendorst, M. 2022.
+\newblock BERTopic: Neural Topic Modeling with a Class-Based TF-IDF Procedure.
+\newblock \emph{arXiv preprint arXiv:2203.05794}.
+
+\bibitem[{Guo and McCombs(2011)}]{Guo2011}
+Guo, L.; and McCombs, M. 2011.
+\newblock Network agenda setting: A third level of media effects.
+\newblock In \emph{annual conference of the International Communication Association, Boston, MA}.
+
+\bibitem[{He et~al.(2024)He, Gu, Shekhar, Castro, and Tyson}]{He2024}
+He, Y.; Gu, Y.; Shekhar, R.; Castro, I.; and Tyson, G. 2024.
+\newblock Making the Pick: Understanding Professional Editor Comment Curation in Online News.
+\newblock In \emph{Proceedings of the International AAAI Conference on Web and Social Media}, volume~18, 557--568.
+
+\bibitem[{Juarez~Miro(2022)}]{JuarezMiro2022}
+Juarez~Miro, C. 2022.
+\newblock The comment gap: Affective publics and gatekeeping in The New York Times' comment sections.
+\newblock \emph{Journalism}, 23(4): 858--874.
+
+\bibitem[{Kim and Noh(2026)}]{KimNoh2026}
+Kim, S.; and Noh, S. 2026.
+\newblock Disproportionate Voices: Participation Inequality and Hostile Engagement in News Comments.
+\newblock \emph{Proceedings of the International AAAI Conference on Web and Social Media}, 20(1): 1256--1272.
+
+\bibitem[{Kim and Lee(2006)}]{Kim2006}
+Kim, S.-T.; and Lee, Y.-H. 2006.
+\newblock New functions of Internet mediated agenda-setting: Agenda-rippling and reversed agenda-setting.
+\newblock \emph{Korean journal of journalism \& communication studies}, 50(3): 175--205.
+
+\bibitem[{Lampe et~al.(2014)Lampe, Zube, Lee, Park, and Johnston}]{Lampe2014}
+Lampe, C.; Zube, P.; Lee, J.; Park, C.~H.; and Johnston, E. 2014.
+\newblock Crowdsourcing civility: A natural experiment examining the effects of distributed moderation in online forums.
+\newblock \emph{Government Information Quarterly}, 31(2): 317--326.
+
+\bibitem[{Levy(2008)}]{Levy2008}
+Levy, D.~M. 2008.
+\newblock \emph{Information overload}, 497--513.
+\newblock Wiley.
+
+\bibitem[{Masullo~Chen and Pain(2017)}]{Chen2017}
+Masullo~Chen, G.; and Pain, P. 2017.
+\newblock Normalizing online comments.
+\newblock \emph{Journalism Practice}, 11(7): 876--892.
+
+\bibitem[{McCombs et~al.(1997)McCombs, Llamas, Lopez-Escobar, and Rey}]{McCombs1997}
+McCombs, M.; Llamas, J.~P.; Lopez-Escobar, E.; and Rey, F. 1997.
+\newblock Candidate images in Spanish elections: Second-level agenda-setting effects.
+\newblock \emph{Journalism \& mass communication quarterly}, 74(4): 703--717.
+
+\bibitem[{McCombs and Shaw(1972)}]{McCombs1972}
+McCombs, M.; and Shaw, D.~L. 1972.
+\newblock The agenda-setting function of mass media.
+\newblock \emph{Public opinion quarterly}, 36(2): 176--187.
+
+\bibitem[{McInnes et~al.(2018)McInnes, Healy, Saul, and Grossberger}]{McInnes2018UMAP}
+McInnes, L.; Healy, J.; Saul, N.; and Grossberger, L. 2018.
+\newblock UMAP: Uniform Manifold Approximation and Projection.
+\newblock \emph{Journal of Open Source Software}, 3(29): 861.
+
+\bibitem[{Momeni, Cardie, and Diakopoulos(2015)}]{Momeni2016}
+Momeni, E.; Cardie, C.; and Diakopoulos, N. 2015.
+\newblock A Survey on Assessment and Ranking Methodologies for User-Generated Content on the Web.
+\newblock \emph{ACM Comput. Surv.}, 48(3).
+
+\bibitem[{Nielsen(2016)}]{Nielsen2016}
+Nielsen, R.~K. 2016.
+\newblock News media, search engines and social networking sites as varieties of online gatekeepers.
+\newblock In \emph{Rethinking journalism again}, 93--108. Routledge.
+
+\bibitem[{Nutakki, Kempermann, and Weber(2026)}]{Nutakki2026}
+Nutakki, B.; Kempermann, M.~L.; and Weber, I. 2026.
+\newblock You See It, They Don't: An Exploratory Study of User-to-User Variation in {Instagram} Comments.
+\newblock \emph{Proceedings of the International AAAI Conference on Web and Social Media}, 20(1): 3024--3030.
+
+\bibitem[{Piccardi et~al.(2025)Piccardi, Saveski, Jia, Hancock, Tsai, and Bernstein}]{Piccardi2025}
+Piccardi, T.; Saveski, M.; Jia, C.; Hancock, J.; Tsai, J.~L.; and Bernstein, M.~S. 2025.
+\newblock Reranking partisan animosity in algorithmic social media feeds alters affective polarization.
+\newblock \emph{Science}, 390(6776): eadu5584.
+
+\bibitem[{Shaw et~al.(1999)Shaw, McCombs, Weaver, and Hamm}]{Shaw1999}
+Shaw, D.~L.; McCombs, M.; Weaver, D.~H.; and Hamm, B.~J. 1999.
+\newblock Individuals, groups, and agenda melding: A theory of social dissonance.
+\newblock \emph{International journal of public opinion research}, 11(1): 2--24.
+
+\bibitem[{Shoemaker and Vos(2009)}]{ShoemakerVos2009}
+Shoemaker, P.~J.; and Vos, T. 2009.
+\newblock \emph{Gatekeeping theory}.
+\newblock Routledge.
+
+\bibitem[{{TextDetox}(2025)}]{textdetox2024xlmr}
+{TextDetox}. 2025.
+\newblock XLM-R Large Toxicity Classifier v2.
+\newblock Hugging Face model card.
+\newblock Revision cde9d07ac4df2af9c02d2461dee068bf04a58728.
+
+\bibitem[{Trielli and Diakopoulos(2022)}]{Trielli2022}
+Trielli, D.; and Diakopoulos, N. 2022.
+\newblock Algorithmic agenda-setting: The shape of search media during the 2020 US election.
+\newblock In \emph{International Symposium on Online Journalism}, volume~12, 45--70.
+
+\bibitem[{Van~Dijck and Poell(2013)}]{VanDijck2013}
+Van~Dijck, J.; and Poell, T. 2013.
+\newblock Understanding social media logic.
+\newblock \emph{Media and communication}, 1(1): 2--14.
+
+\bibitem[{Voinea(2025)}]{Voinea2025}
+Voinea, D.~V. 2025.
+\newblock Reconceptualizing Gatekeeping in the Age of Artificial Intelligence: A Theoretical Exploration of Artificial Intelligence-Driven News Curation and Automated Journalism.
+\newblock \emph{Journalism and Media}, 6(2): 68.
+
+\bibitem[{Wallace(2018)}]{Wallace2018}
+Wallace, J. 2018.
+\newblock Modelling contemporary gatekeeping: The rise of individuals, algorithms and platforms in digital news dissemination.
+\newblock \emph{Digital Journalism}, 6(3): 274--293.
+
+\bibitem[{Wang and Diakopoulos(2022)}]{Wang2021}
+Wang, Y.; and Diakopoulos, N. 2022.
+\newblock Highlighting High-quality Content as a Moderation Strategy: The Role of New York Times Picks in Comment Quality and Engagement.
+\newblock \emph{ACM Transactions on Social Computing (TSC)}, 4(4): 1--24.
+
+\bibitem[{Wang et~al.(2013)Wang, Wang, Li, He, and Liu}]{Wang2013}
+Wang, Y.; Wang, L.; Li, Y.; He, D.; and Liu, T.-Y. 2013.
+\newblock A theoretical analysis of NDCG type ranking measures.
+\newblock In \emph{Conference on learning theory}, 25--54. PMLR.
+
+\bibitem[{White(1950)}]{White1950}
+White, D.~M. 1950.
+\newblock The “gate keeper”: A case study in the selection of news.
+\newblock \emph{Journalism quarterly}, 27(4): 383--390.
+
+\bibitem[{Wilkinson et~al.(2016)Wilkinson, Dumontier, Aalbersberg et~al.}]{fair}
+Wilkinson, M.~D.; Dumontier, M.; Aalbersberg, I.~J.; et~al. 2016.
+\newblock The FAIR Guiding Principles for scientific data management and stewardship.
+\newblock \emph{Scientific Data}, 3: 160018.
+
+\bibitem[{Young et~al.(2021)Young, Joglekar, Boschi, and Sastry}]{Young2021}
+Young, A.~P.; Joglekar, S.; Boschi, G.; and Sastry, N. 2021.
+\newblock Ranking comment sorting policies in online debates.
+\newblock \emph{Argument \& Computation}, 12(2): 265--285.
+
+\bibitem[{Ziegele, Naab, and Jost(2020)}]{Ziegele2020}
+Ziegele, M.; Naab, T.~K.; and Jost, P. 2020.
+\newblock Lonely together? Identifying the determinants of collective corrective action against uncivil comments.
+\newblock \emph{New Media \& Society}, 22(5): 731--751.
+
+\end{thebibliography}

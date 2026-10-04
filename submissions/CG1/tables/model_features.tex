@@ -1,0 +1,31 @@
+\begin{table*}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{0.36\linewidth}p{\dimexpr0.64\linewidth-2\tabcolsep\relax}@{}}
+\toprule
+Features (41 scalar inputs in total) & Operationalisation\\
+\midrule
+\textbf{Text and language (7):}
+Comment length; positive and negative sentiment; maximum toxicity; length-adjusted lexical diversity; length-adjusted reading difficulty; URL present &
+$\log(1+$ word count$)$; sentiment probabilities from the CardiffNLP XLM-R classifier; maximum chunk toxicity probability from the TextDetox XLM-R classifier; CTTR $=V/\sqrt{2W}$ and German SMOG $=\sqrt{30P/S}-2$ \cite{bamberger1984lesen} (distinct tokens $V$, words $W$, polysyllabic words $P$, sentences $S$), each residualised against log length with a six-knot cubic spline and ridge penalty; binary URL indicator. \\
+\textbf{Discussion context and timing (7):}
+Article similarity; novelty; hours since publication; discussion pace; overnight, weekday shoulder/evening, and weekend daytime/evening &
+Mean cosine similarity to the three most similar article passages; one minus the maximum cosine similarity to strictly earlier eligible comments (roots for the root scope, all comments for the primary all scope); $\log(1+$ hours$)$; $\log[(\mathrm{prior\ comments}+0.5)/(\mathrm{hours}+0.5)]$; Vienna-local posting-period indicators: 00:00--05:59 every day; weekdays 06:00--08:59 or 18:00--23:59; weekends 06:00--23:59. The reference is weekdays 09:00--17:59. \\
+\textbf{Author history (4):}
+Author comments in the preceding 30 days; prior upvote reception; prior downvote reception; author's earlier comments in the article &
+$\log(1+x)$ for prior 30-day and earlier within-article comment counts; $\log[(v+0.5)/(n+0.5)]$ for prior upvote/downvote reception, where $v$ is snapshot votes on the author's $n$ earlier comments in the 30-day window. History is ordered by timestamp. \\
+\textbf{Reply structure (3):}
+Earlier reply-to-root composition; reply rather than root; centred reply depth &
+$\log[(\mathrm{prior\ comments}-\mathrm{prior\ roots}+0.5)/(\mathrm{prior\ roots}+0.5)]$; binary reply indicator; $\log(1+$ depth$)$ centred at the development-reply mean and multiplied by the reply indicator so roots have zero centred depth. \\
+\textbf{AQuA dimensions (20): }
+Relevance; factual claim; opinion; justification; solution proposal; additional knowledge; question; references to users, media, comment content, and personal details; references to format; polite address; respect; screaming; vulgarity; insult; sarcasm; discrimination; storytelling &
+Twenty expected ordinal scores from the frozen multilingual AQuA adapters, each on its raw 0--3 expected-score scale. The scores are uncalibrated model outputs; hard labels and the weighted composite are descriptive or sensitivity outputs and are excluded from the primary models. \\
+\textbf{Text representation: }
+Fixed BGE-M3 comment embedding (1,024 dimensions) &
+L2-normalised comment embedding, precomputed before selection-model training and held fixed. This block is appended only to XGB-T and NN-T; it is not counted among the 41 scalar predictors. \\
+\bottomrule
+\end{tabular}
+\caption{Features and their Operationalisation. Continuous predictors are standardised within development fitting data; binary indicators remain 0--1. Further details are in Appendix~\ref{app:feature-operationalisation}.}
+\label{tab:model-features}
+\end{table*}

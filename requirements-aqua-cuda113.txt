@@ -1,3 +1,4 @@
+-c requirements-aqua-constraints.txt
 # A5000/Linux reproduction environment. Install with Python 3.10.
 --extra-index-url https://download.pytorch.org/whl/cu113
 adapter-transformers==3.2.1

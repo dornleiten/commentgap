@@ -230,13 +230,9 @@ class SelectedRanker:
 
 def freeze_ranker_handoff(
     *,
-    factorial_root: Path = Path("model_output/selection_2025/factorial_rankers"),
-    regression_scores_path: Path = Path(
-        "model_output/selection_2025/regression/all/test_scores_wide.parquet"
-    ),
-    output_root: Path = Path(
-        "model_output/selection_2025/forum_ranking_analysis/ranker_handoff"
-    ),
+    factorial_root: Path | None = None,
+    regression_scores_path: Path | None = None,
+    output_root: Path | None = None,
     expected_folds: int = 5,
     draw_policies: Sequence[str] | None = ("draw1",),
     require_idle: bool = True,
@@ -250,8 +246,18 @@ def freeze_ranker_handoff(
     as notebook 08 by default; ``mean10`` may be requested explicitly for a
     sensitivity handoff.
     """
+    from .paths import ProjectPaths, require_writable_destination
+    paths = ProjectPaths.load()
+    factorial_root = factorial_root or paths.read_root(
+        "frozen_cg1_factorial_rankers", env_var="COMMENTGAP_FACTORIAL_ROOT"
+    )
+    regression_scores_path = regression_scores_path or (
+        paths.read_root("frozen_cg1_regression", env_var="COMMENTGAP_REGRESSION_ROOT")
+        / "all/test_scores_wide.parquet"
+    )
+    output_root = output_root or (paths.root / "outputs/direct/CG2/forum/ranker_handoff")
     factorial_root = Path(factorial_root)
-    output_root = Path(output_root)
+    output_root = require_writable_destination(output_root)
     if require_idle:
         assert_factorial_idle()
     development_path = factorial_root / "development_cv_results.csv"
@@ -1270,7 +1276,8 @@ def build_static_novelty_store(
     embedding_manifest = json.loads(manifest_path.read_text())
     if embedding_manifest.get("status") != "complete":
         raise RuntimeError("Semantic novelty requires a completed embedding store")
-    output_root = Path(output_root)
+    from .paths import require_writable_destination
+    output_root = require_writable_destination(output_root)
     checkpoint_root = output_root / "semantic_novelty_knn5" / "year=2025"
     pieces: list[pd.DataFrame] = []
     diagnostics: list[dict[str, Any]] = []
@@ -1424,23 +1431,27 @@ def _read_raw_comments_for_stories(
 
 def build_forum_analysis_table(
     *,
-    handoff_manifest_path: Path = Path(
-        "model_output/selection_2025/forum_ranking_analysis/ranker_handoff/"
-        "ranker_handoff_manifest.json"
-    ),
-    choice_set_path: Path = Path(
-        "model_output/selection_2025/model_data/choice_set_all.parquet"
-    ),
-    split_path: Path = Path(
-        "model_output/selection_2025/model_data/"
-        "master_article_split.parquet"
-    ),
-    data_root: Path = Path("data/scrape_2025"),
+    handoff_manifest_path: Path | None = None,
+    choice_set_path: Path | None = None,
+    split_path: Path | None = None,
+    data_root: Path | None = None,
     embedding_store: Path,
-    output_root: Path = Path("model_output/selection_2025/forum_ranking_analysis"),
+    output_root: Path | None = None,
     min_comments: int = PRIMARY_MIN_COMMENTS,
 ) -> dict[str, Any]:
     """Build and manifest the comment-level FORUM handoff table."""
+    from .paths import ProjectPaths, require_writable_destination
+    paths = ProjectPaths.load()
+    forum_root = paths.read_root("frozen_cg2_forum", env_var="COMMENTGAP_FORUM_ANALYSIS_ROOT")
+    model_data_root = paths.read_root("model_data", env_var="COMMENTGAP_MODEL_DATA_ROOT")
+    handoff_manifest_path = handoff_manifest_path or (
+        forum_root / "ranker_handoff/ranker_handoff_manifest.json"
+    )
+    choice_set_path = choice_set_path or (model_data_root / "choice_set_all.parquet")
+    split_path = split_path or (model_data_root / "master_article_split.parquet")
+    data_root = data_root or paths.read_root("raw_scrape", env_var="COMMENTGAP_DATA_ROOT")
+    output_root = output_root or (paths.root / "outputs/direct/CG2/forum")
+    output_root = require_writable_destination(output_root)
     handoff_manifest_path = Path(handoff_manifest_path)
     if not handoff_manifest_path.exists():
         raise FileNotFoundError(handoff_manifest_path)
@@ -1468,14 +1479,18 @@ def build_forum_analysis_table(
         data_root, set(choice["story_id"])
     )
 
-    regression_path = next(
-        Path(path)
+    from .paths import resolve_artifact_path
+    regression_recorded_path = next(
+        path
         for path, metadata in handoff["held_out_artifacts"].items()
         if metadata["role"] == "stacked_regression_held_out_scores"
     )
-    recorded_regression_hash = handoff["held_out_artifacts"][
-        str(regression_path)
-    ]["sha256"]
+    recorded_regression_hash = handoff["held_out_artifacts"][regression_recorded_path]["sha256"]
+    regression_path = resolve_artifact_path(
+        regression_recorded_path,
+        anchors=(handoff_manifest_path.parent,),
+        expected_sha256=recorded_regression_hash,
+    )
     if _sha256(regression_path) != recorded_regression_hash:
         raise RuntimeError(
             "Regression held-out score hash changed after handoff freeze"
@@ -1485,10 +1500,15 @@ def build_forum_analysis_table(
         str, tuple[pd.DataFrame, str, str]
     ] = {}
     for selected in handoff["selected_rankers"]:
-        score_path = Path(selected["score_path"])
-        recorded = handoff["held_out_artifacts"][str(score_path)][
+        recorded_path = selected["score_path"]
+        recorded = handoff["held_out_artifacts"][recorded_path][
             "sha256"
         ]
+        score_path = resolve_artifact_path(
+            recorded_path,
+            anchors=(handoff_manifest_path.parent,),
+            expected_sha256=recorded,
+        )
         if _sha256(score_path) != recorded:
             raise RuntimeError(
                 f"Selected score artifact changed: {score_path}"
@@ -1587,13 +1607,8 @@ def _score_story_worker(
 
 def run_policy_scoring(
     *,
-    analysis_path: Path = Path(
-        "model_output/selection_2025/forum_ranking_analysis/"
-        "analysis_comments.parquet"
-    ),
-    output_root: Path = Path(
-        "model_output/selection_2025/forum_ranking_analysis/policy_scores"
-    ),
+    analysis_path: Path | None = None,
+    output_root: Path | None = None,
     outcomes: Sequence[str] = ALL_OUTCOMES,
     tie_draws: int = DEFAULT_TIE_DRAWS,
     random_draws: int = DEFAULT_RANDOM_DRAWS,
@@ -1615,7 +1630,15 @@ def run_policy_scoring(
         raise FileNotFoundError(analysis_path)
     analysis = pd.read_parquet(analysis_path)
     _require_columns(analysis, outcomes, "FORUM analysis table")
-    output_root = Path(output_root)
+    from .paths import ProjectPaths, require_writable_destination
+    paths = ProjectPaths.load()
+    if analysis_path is None:
+        analysis_path = (
+            paths.read_root("frozen_cg2_forum", env_var="COMMENTGAP_FORUM_ANALYSIS_ROOT")
+            / "analysis_comments.parquet"
+        )
+    output_root = output_root or (paths.root / "outputs/direct/CG2/forum/policy_scores")
+    output_root = require_writable_destination(output_root)
     checkpoint_root = output_root / "stories"
     stories = list(
         analysis.groupby("story_id", sort=True, observed=True)
@@ -2392,10 +2415,55 @@ def run_forum_analysis_pipeline(
     def report_stage(message: str) -> None:
         print(f"FORUM {message}", flush=True)
 
-    repo_root = Path(repo_root)
-    analysis_root = repo_root / "model_output/selection_2025/forum_ranking_analysis"
-    inference_root = analysis_root / "inference"
-    reporting_root = analysis_root / "reporting"
+    from .paths import ExecutionContext
+
+    execution_mode = os.environ.get("COMMENTGAP_MODE")
+    execution_run_id = os.environ.get("COMMENTGAP_RUN_ID")
+    if execution_mode is None:
+        execution_mode = "fresh"
+        execution_run_id = execution_run_id or (
+            "forum-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        )
+    context = ExecutionContext.from_values(
+        mode=execution_mode, run_id=execution_run_id, repo_root=repo_root
+    )
+    repo_root = context.paths.root
+
+    def input_root(area: str, key: str, env_var: str) -> Path:
+        """Prefer caller override, then this run's producer, then saved input."""
+        override = os.environ.get(env_var)
+        if override:
+            return context.read_root(key, explicit=override)
+        same_run = context.run_path(area)
+        if same_run.exists():
+            return context.read_path(same_run)
+        return context.read_root(key)
+
+    def output(area: str, env_var: str) -> Path:
+        return context.output_root(area, env_var=env_var)
+
+    factorial_root = input_root(
+        "CG1/rankers/factorial", "frozen_cg1_factorial_rankers", "COMMENTGAP_FACTORIAL_ROOT"
+    )
+    regression_root = input_root(
+        "CG1/regression", "frozen_cg1_regression", "COMMENTGAP_REGRESSION_ROOT"
+    )
+    model_data_root = input_root("shared/model_data", "model_data", "COMMENTGAP_MODEL_DATA_ROOT")
+    data_root = input_root("shared/raw_scrape", "raw_scrape", "COMMENTGAP_DATA_ROOT")
+    if embedding_store is None and (
+        os.environ.get("COMMENTGAP_EMBEDDING_ROOT")
+        or context.run_path("shared/embeddings").exists()
+    ):
+        embedding_store = input_root(
+            "shared/embeddings", "embeddings", "COMMENTGAP_EMBEDDING_ROOT"
+        )
+    elif embedding_store is not None:
+        embedding_store = context.read_path(embedding_store)
+    analysis_root = output("CG2/forum", "COMMENTGAP_FORUM_ANALYSIS_ROOT")
+    handoff_root = output("CG2/forum/ranker_handoff", "COMMENTGAP_FORUM_HANDOFF_ROOT")
+    policy_root = output("CG2/forum/policy_scores", "COMMENTGAP_FORUM_POLICY_ROOT")
+    inference_root = output("CG2/forum/inference", "COMMENTGAP_FORUM_INFERENCE_ROOT")
+    reporting_root = output("CG2/forum/reporting", "COMMENTGAP_FORUM_REPORTING_ROOT")
     targets = {
         "freeze": [analysis_root / "ranker_handoff/ranker_handoff_manifest.json"],
         "build": [analysis_root / "analysis_comments.parquet"],
@@ -2438,7 +2506,7 @@ def run_forum_analysis_pipeline(
     if build_needs_run and analysis_path.exists() and embedding_store is None:
         extended_features = _extend_existing_analysis_features(
             analysis_path,
-            repo_root / "model_output/selection_2025/model_data/choice_set_all.parquet",
+            model_data_root / "choice_set_all.parquet",
         )
         try:
             pd.read_parquet(
@@ -2473,9 +2541,9 @@ def run_forum_analysis_pipeline(
     else:
         report_stage("freeze: running")
         freeze_ranker_handoff(
-            factorial_root=repo_root / "model_output/selection_2025/factorial_rankers",
-            regression_scores_path=repo_root / "model_output/selection_2025/regression/all/test_scores_wide.parquet",
-            output_root=analysis_root / "ranker_handoff",
+            factorial_root=factorial_root,
+            regression_scores_path=regression_root / "all/test_scores_wide.parquet",
+            output_root=handoff_root,
         )
         statuses["freeze"] = "ran"
         report_stage("freeze: complete")
@@ -2491,10 +2559,10 @@ def run_forum_analysis_pipeline(
                 "Set embedding_store to the completed BGE store for a full rebuild."
             )
         build_forum_analysis_table(
-            handoff_manifest_path=analysis_root / "ranker_handoff/ranker_handoff_manifest.json",
-            choice_set_path=repo_root / "model_output/selection_2025/model_data/choice_set_all.parquet",
-            split_path=repo_root / "model_output/selection_2025/model_data/master_article_split.parquet",
-            data_root=repo_root / "data/scrape_2025",
+            handoff_manifest_path=handoff_root / "ranker_handoff_manifest.json",
+            choice_set_path=model_data_root / "choice_set_all.parquet",
+            split_path=model_data_root / "master_article_split.parquet",
+            data_root=data_root,
             embedding_store=Path(embedding_store),
             output_root=analysis_root,
             min_comments=min_comments,
@@ -2509,7 +2577,7 @@ def run_forum_analysis_pipeline(
         report_stage("score: running")
         run_policy_scoring(
             analysis_path=analysis_root / "analysis_comments.parquet",
-            output_root=analysis_root / "policy_scores",
+            output_root=policy_root,
             tie_draws=tie_draws,
             random_draws=random_draws,
             seed=seed,
@@ -2559,14 +2627,17 @@ def run_policy_inference(
     *,
     policy_scores_path: Path | str,
     analysis_comments_path: Path | str,
-    output_root: Path | str = "model_output/selection_2025/forum_ranking_analysis/inference",
+    output_root: Path | str | None = None,
     bootstrap_draws: int = DEFAULT_BOOTSTRAP_DRAWS,
     seed: int = DEFAULT_SEED,
 ) -> dict[str, Any]:
     """Run the prespecified FORUM/ranking analysis inference suite and freeze its products."""
     policy_scores_path = Path(policy_scores_path)
     analysis_comments_path = Path(analysis_comments_path)
-    output_root = Path(output_root)
+    from .paths import ProjectPaths, require_writable_destination
+    if output_root is None:
+        output_root = ProjectPaths.load().root / "outputs/direct/CG2/forum/inference"
+    output_root = require_writable_destination(output_root)
     scores = pd.read_parquet(policy_scores_path)
     comments = pd.read_parquet(analysis_comments_path)
     _require_columns(

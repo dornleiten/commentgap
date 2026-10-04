@@ -1,0 +1,10 @@
+{
+  "combined_article_cosine": {
+    "article": 0.08596013239919369,
+    "article_minus_votes": 0.11003633950226173
+  },
+  "scatter_oracle_gain": {
+    "cosine_gain": 0.08596013239919373,
+    "js_gain": 0.05435234523251337
+  }
+}

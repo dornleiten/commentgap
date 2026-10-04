@@ -1,0 +1,5 @@
+scope,variant,coding,parameters,fitted_log_likelihood,iterations,warning_count
+root,full_reference,reference,78,-80941.2643869794,6,0
+root,no_author_history,reference,70,-81528.2748074138,6,0
+root,no_aqua,reference,38,-81717.1230203127,6,0
+root,selector_effect_coding_exact,effect,78,-80941.2643869794,6,0

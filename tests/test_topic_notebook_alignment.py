@@ -12,10 +12,15 @@ class NotebookAlignmentTests(unittest.TestCase):
     def test_three_seed_diagnostics_have_unique_columns_and_round_trip(self):
         notebook = json.loads((Path(__file__).resolve().parents[1] / '14_topic_model_fit.ipynb').read_text())
         source = next(''.join(cell['source']) for cell in notebook['cells']
-                      if '        seed_summaries, seed_assignments = [], []\n' in ''.join(cell['source']))
+                      if 'seed_summaries, seed_assignments = [], []' in ''.join(cell['source']))
         # Execute the actual notebook alignment block without launching fits.
         import textwrap
-        block = textwrap.dedent(source[source.index('        seed_summaries, seed_assignments = [], []'):source.index('        label_columns =')])
+        lines = source.splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if line.strip() == 'seed_summaries, seed_assignments = [], []')
+        end = next(i for i in range(start + 1, len(lines))
+                   if lines[i].strip().startswith('label_columns ='))
+        block = textwrap.dedent('\n'.join(lines[start:end]) + '\n')
         seeds = [2025, 2026, 2027]
         seed_results = {}
         for seed in seeds:

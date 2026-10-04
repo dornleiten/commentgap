@@ -7,8 +7,9 @@ import json
 import math
 import os
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from .paths import ExecutionContext, ProjectPaths
 import re
 import time
 from typing import Any
@@ -39,8 +40,8 @@ from .nlp import (
 class EmbeddingBuildConfig:
     """Configuration that uniquely identifies an embedding-store build."""
 
-    data_root: Path = Path("data/scrape_2025")
-    output_root: Path = Path("model_output/selection_2025/embeddings")
+    data_root: Path = field(default_factory=lambda: ProjectPaths.load().read_root("raw_scrape"))
+    output_root: Path | None = None
     years: tuple[int, ...] | None = None
     model_id: str = DEFAULT_EMBEDDING_MODEL_ID
     revision: str | None = None
@@ -61,7 +62,8 @@ class EmbeddingBuildConfig:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "data_root", Path(self.data_root))
-        object.__setattr__(self, "output_root", Path(self.output_root))
+        if self.output_root is not None:
+            object.__setattr__(self, "output_root", Path(self.output_root))
         if self.years is not None:
             normalized_years = tuple(sorted({int(year) for year in self.years}))
             if not normalized_years:
@@ -95,6 +97,21 @@ def _safe_model_key(model_id: str) -> str:
     readable = re.sub(r"[^A-Za-z0-9._-]+", "__", model_id).strip("._-")
     digest = hashlib.sha256(model_id.encode("utf-8")).hexdigest()[:8]
     return f"{readable[:80]}--{digest}"
+
+
+def _with_safe_output_root(config: EmbeddingBuildConfig) -> EmbeddingBuildConfig:
+    """Resolve an omitted destination through the active run contract."""
+    context = ExecutionContext.from_values()
+    context.read_path(config.data_root)
+    if config.output_root is None:
+        output_root = context.output_root("shared/embeddings")
+    else:
+        output_root = context.paths.require_writable(
+            config.output_root,
+            cwd=context.cwd,
+            additional_protected=tuple(context.read_inputs),
+        )
+    return replace(config, output_root=output_root)
 
 
 def discover_embedding_years(data_root: Path) -> tuple[int, ...]:
@@ -446,6 +463,7 @@ def build_token_length_diagnostics(
     inspector: TokenLengthInspector | None = None,
 ) -> dict[str, Any]:
     """Measure exact tokenizer lengths without retaining or emitting raw text."""
+    config = _with_safe_output_root(config)
     years, _ = _validated_embedding_sources(config)
     if inspector is None:
         inspector = TransformerTokenLengthInspector(
@@ -632,6 +650,7 @@ def build_embedding_store(
     embedder: TextEmbedder | None = None,
 ) -> dict[str, Any]:
     """Build a keyed, resumable comment and article-passage vector store."""
+    config = _with_safe_output_root(config)
     years = config.years or discover_embedding_years(config.data_root)
     qa_by_year: dict[str, list[dict[str, Any]]] = {}
     for year in years:

@@ -125,7 +125,7 @@ class AnalysisSimilarityTests(unittest.TestCase):
         try:
             import hnswlib  # noqa: F401
         except ImportError:
-            self.skipTest("hnswlib is optional outside requirements-analysis.txt")
+            self.skipTest("hnswlib is optional outside requirements.txt")
         rng = np.random.default_rng(7)
         vectors = rng.normal(size=(300, 64)).astype(np.float32)
         vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)

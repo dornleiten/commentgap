@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+import seaborn as sns
 
 
 QUANTILES = (0.001, 0.01, 0.05, 0.5, 0.95, 0.99, 0.999)
@@ -26,6 +27,11 @@ TEXT_NLP = {
     "lexdiv_length_adjusted", "reading_level_length_adjusted", "url_present",
 }
 REPLY_STRUCTURE = {"is_reply", "reply_depth_centered", "prior_reply_composition"}
+
+
+def configure_feature_diagnostic_plot_style() -> None:
+    """Use the feature-diagnostic figure style in every execution mode."""
+    sns.set_theme(style="whitegrid", context="notebook")
 
 
 def quote_identifier(name: str) -> str:
@@ -267,10 +273,76 @@ def plot_aqua_expected_distributions(
     plt.show()
 
 
+def plot_distribution_grid_from_bins(
+    scope: str,
+    features: list[str],
+    stem: str,
+    *,
+    bins: pd.DataFrame,
+    labels: dict[str, str],
+):
+    """Draw the diagnostic histogram from saved or freshly computed bin heights."""
+    columns = 3
+    rows = math.ceil(len(features) / columns)
+    fig, axes = plt.subplots(rows, columns, figsize=(14, 3.1 * rows), squeeze=False)
+    for axis, feature in zip(axes.flat, features):
+        data = bins[(bins["scope"] == scope) & (bins["feature"] == feature)]
+        if data.empty:
+            raise ValueError(f"No public distribution bins for {scope}/{feature}")
+        if data["kind"].iloc[0] == "binary":
+            axis.bar(data["left"].map(lambda value: str(float(value))).to_list(),
+                     data["height"], color="#457b9d")
+            axis.set_ylabel("Proportion")
+        else:
+            axis.bar(data["left"], data["height"],
+                     width=data["right"] - data["left"], align="edge",
+                     color="#457b9d", alpha=0.8)
+            axis.axvline(data["median"].iloc[0], color="#e76f51", linewidth=1.2)
+            axis.set_xlabel(f"display clip [{data['clip_low'].iloc[0]:.3g}, {data['clip_high'].iloc[0]:.3g}]")
+        axis.set_title(labels[feature], fontsize=9)
+    for axis in axes.flat[len(features):]:
+        axis.set_visible(False)
+    fig.suptitle(f"{scope.title()} candidates: {stem.replace('_', ' ')}", y=1.002)
+    fig.tight_layout()
+    plt.close(fig)
+    return fig
+
+
+def plot_aqua_distributions_from_bins(
+    features: list[str], *, bins: pd.DataFrame, labels: dict[str, str],
+):
+    """Draw root/all AQuA histograms from saved or computed bin heights."""
+    columns = 4
+    rows = math.ceil(len(features) / columns)
+    fig, axes = plt.subplots(rows, columns, figsize=(14, 2.8 * rows), sharex=True, squeeze=False)
+    for axis, feature in zip(axes.flat, features):
+        for scope, color in (("root", "#457b9d"), ("all", "#e76f51")):
+            data = bins[(bins["scope"] == scope) & (bins["feature"] == feature)]
+            if data.empty:
+                raise ValueError(f"No public AQuA bins for {scope}/{feature}")
+            edges = np.r_[data["left"].to_numpy(), data["right"].iloc[-1]]
+            centers = (edges[:-1] + edges[1:]) / 2
+            weights = data["height"].to_numpy() * np.diff(edges)
+            axis.hist(centers, bins=edges, weights=weights, density=True,
+                      histtype="step", color=color, linewidth=1.3, label=scope)
+        axis.set_xlim(0, 3)
+        axis.set_title(labels[feature].replace("AQuA ", "").replace(
+            " (raw expected ordinal score)", ""), fontsize=9)
+    for axis in axes.flat[len(features):]:
+        axis.set_visible(False)
+    axes.flat[0].legend(frameon=False)
+    fig.suptitle("AQuA expected ordinal distributions", y=1.002)
+    fig.tight_layout()
+    plt.close(fig)
+    return fig
+
+
 def plot_spearman_correlation_heatmap(
     correlation: pd.DataFrame,
     scope: str,
     output_root: Path,
+    *,
+    show: bool = True,
 ) -> None:
     """Render and save one upper-triangular Spearman heatmap."""
     mask = np.triu(np.ones_like(correlation, dtype=bool), k=1)
@@ -293,7 +365,10 @@ def plot_spearman_correlation_heatmap(
     axis.set_title(f"{scope.title()} candidates: sampled Spearman correlations")
     fig.tight_layout()
     save_figure(fig, output_root, f"{scope}_spearman_correlation_heatmap")
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def plot_selection_contrasts(
@@ -301,6 +376,8 @@ def plot_selection_contrasts(
     scope: str,
     registry: dict,
     output_root: Path,
+    *,
+    show: bool = True,
 ) -> None:
     """Plot selected-versus-unselected standardized mean differences."""
     subset = selection_contrasts[selection_contrasts["scope"] == scope].copy()
@@ -337,7 +414,10 @@ def plot_selection_contrasts(
     axis.legend(frameon=False)
     fig.tight_layout()
     save_figure(fig, output_root, f"{scope}_selection_standardized_mean_differences")
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def ks_statistic(left: np.ndarray, right: np.ndarray) -> float:

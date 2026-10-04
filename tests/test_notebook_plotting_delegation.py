@@ -11,18 +11,20 @@ PLOT_METHODS = {
 
 
 class NotebookPlottingDelegationTests(unittest.TestCase):
-    def test_selected_notebooks_have_no_direct_plot_construction(self):
-        for filename in (
-            "04_feature_distribution_diagnostics.ipynb",
-            "12_forum_correlations.ipynb",
-            "13_ranking_algorithm_similarity.ipynb",
-            "15_topic_agenda_calculations.ipynb",
-        ):
-            notebook = json.loads(Path(filename).read_text())
+    def test_notebooks_have_no_inline_functions_or_plot_construction(self):
+        for notebook_path in sorted(Path.cwd().glob("[0-1][0-9]_*.ipynb")):
+            notebook = json.loads(notebook_path.read_text())
             for cell_number, cell in enumerate(notebook["cells"]):
                 if cell["cell_type"] != "code":
                     continue
                 tree = ast.parse("".join(cell.get("source", [])))
+                functions = [node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                             else 'lambda' for node in ast.walk(tree)
+                             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))]
+                self.assertEqual(
+                    functions, [],
+                    f"{notebook_path.name} cell {cell_number} defines functions: {functions}",
+                )
                 direct_calls = []
                 for node in ast.walk(tree):
                     if not isinstance(node, ast.Call):
@@ -38,13 +40,14 @@ class NotebookPlottingDelegationTests(unittest.TestCase):
                 self.assertEqual(
                     direct_calls,
                     [],
-                    f"{filename} cell {cell_number} still plots inline: {direct_calls}",
+                    f"{notebook_path.name} cell {cell_number} still plots inline: {direct_calls}",
                 )
 
     def test_notebooks_call_the_extracted_plot_helpers(self):
         expected = {
             "04_feature_distribution_diagnostics.ipynb": {
-                "plot_aqua_expected_distributions",
+                "plot_aqua_distributions_from_bins",
+                "plot_distribution_grid_from_bins",
                 "plot_spearman_correlation_heatmap",
                 "plot_selection_contrasts",
             },

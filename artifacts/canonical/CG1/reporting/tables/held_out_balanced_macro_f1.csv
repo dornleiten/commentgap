@@ -1,0 +1,11 @@
+scope,model_family,model_id,model_label,selector,estimate,conf_low,conf_high,n_articles,bootstrap_draws,metric,model_pair_label
+all,conditional_logit,stage7_stacked_selection,Reg: Audience,audience,0.8924595607163018,0.889448721087811,0.8956661310637497,2559,1000,balanced_macro_f1_at_k,Reg
+all,conditional_logit,stage7_stacked_selection,Reg: Editor,curator,0.8917654273562832,0.8889097363583076,0.894647586379525,2559,1000,balanced_macro_f1_at_k,Reg
+all,neural,nn__metadata__draw1__random4__plateau__separate__base,NN: Audience,audience,0.8924960722812423,0.8894318667386735,0.8954294967729829,2559,1000,balanced_macro_f1_at_k,NN
+all,neural,nn__metadata__draw1__random4__plateau__separate__base,NN: Editor,curator,0.891958500912487,0.8888449842499887,0.8947321506291027,2559,1000,balanced_macro_f1_at_k,NN
+all,neural,nn__metadata_bge__draw1__random4__plateau__separate__base,NN-T: Audience,audience,0.8865943692558579,0.8833683023063299,0.8897577903745988,2559,1000,balanced_macro_f1_at_k,NN-T
+all,neural,nn__metadata_bge__draw1__random4__plateau__separate__base,NN-T: Editor,curator,0.8917809671874736,0.8889047605381355,0.894463464150803,2559,1000,balanced_macro_f1_at_k,NN-T
+all,xgboost,xgb__metadata__draw1,XGB: Audience,audience,0.8873368707082072,0.8841300822893511,0.8906160163576708,2559,1000,balanced_macro_f1_at_k,XGB
+all,xgboost,xgb__metadata__draw1,XGB: Editor,curator,0.8933675341418601,0.890034572124556,0.8961865598853948,2559,1000,balanced_macro_f1_at_k,XGB
+all,xgboost,xgb__metadata_bge__draw1,XGB-T: Audience,audience,0.8869008723788911,0.8838703312326921,0.8899358037966331,2559,1000,balanced_macro_f1_at_k,XGB-T
+all,xgboost,xgb__metadata_bge__draw1,XGB-T: Editor,curator,0.8936966028739183,0.8908176404594929,0.8965510293647238,2559,1000,balanced_macro_f1_at_k,XGB-T

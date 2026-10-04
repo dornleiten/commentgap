@@ -12,6 +12,7 @@ from .crawler import crawl, discover
 from .legacy import export_legacy
 from .migration import migrate_existing
 from .validation import validate_dataset
+from commentgap_analysis.paths import ExecutionContext, add_execution_arguments
 
 
 def _default_output(year: int) -> Path:
@@ -33,6 +34,7 @@ def _add_year_output(parser: argparse.ArgumentParser, *, allow_month: bool = Fal
         type=Path,
         help="Output directory (default: data/scrape_YEAR)",
     )
+    add_execution_arguments(parser)
 
 
 def _add_network(parser: argparse.ArgumentParser) -> None:
@@ -195,6 +197,24 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     try:
+        if args.command == "validate":
+            context = ExecutionContext.from_values(
+                mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+            )
+            args.output = context.read_root(
+                "raw_scrape", explicit=args.output, env_var="COMMENTGAP_DATA_ROOT"
+            )
+        else:
+            context = ExecutionContext.from_values(
+                mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+            )
+            if args.command in {"export-legacy", "migrate-existing"} and context.mode == "frozen":
+                raise ValueError(
+                    f"{args.command} writes derived data; use --mode fresh with a new run ID"
+                )
+            args.output = context.output_root(
+                "shared/raw_scrape", explicit=args.output, env_var="COMMENTGAP_SCRAPE_OUTPUT"
+            )
         if args.command == "discover":
             result = discover(_config(args))
             print(json.dumps(result, indent=2, sort_keys=True))

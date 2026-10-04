@@ -62,6 +62,39 @@ class TopicPlottingTests(unittest.TestCase):
         self.assertEqual(plot_data.configuration.iloc[0], "articles_comments_mcs5_nn5_ms1")
 
     @unittest.skipUnless(matplotlib is not None, "Matplotlib is not installed")
+    def test_saved_frontier_skips_assignment_reads_and_writes_figures_elsewhere(self):
+        from unittest.mock import patch
+
+        report, seeds = self._inputs()
+        plot_data = build_topic_search_plot_data(report, seeds)
+        saved_frontier = plot_data.loc[plot_data.pareto_frontier].assign(
+            topics=[3, 2, 1], docs_in_topics_le5=[0, 1, 2], docs_in_topics_le10=[1, 2, 3],
+        )[[
+            "configuration", "article_coverage", "comment_coverage",
+            "raw_pooled_common_ami", "topics", "docs_in_topics_le5",
+            "docs_in_topics_le10",
+        ]]
+        with tempfile.TemporaryDirectory() as search_directory, tempfile.TemporaryDirectory() as output_directory:
+            search_root = Path(search_directory)
+            output_root = Path(output_directory)
+            with patch(
+                "commentgap_analysis.topic_plotting.build_topic_search_frontier",
+                side_effect=AssertionError("saved frontier must bypass assignment reads"),
+            ):
+                plot_data, frontier = plot_topic_search_metrics(
+                    report, seeds, search_root, [2025, 2026, 2027],
+                    saved_frontier=saved_frontier, output_root=output_root, show=False,
+                )
+            self.assertEqual(set(frontier.columns), set(plot_data.columns) | {
+                "topics", "docs_in_topics_le5", "docs_in_topics_le10",
+            })
+            self.assertEqual(frontier.configuration.tolist(), saved_frontier.configuration.tolist())
+            self.assertEqual(frontier.topics.tolist(), [3, 2, 1])
+            self.assertEqual(list(search_root.iterdir()), [])
+            self.assertTrue(any(output_root.glob("*.png")))
+            self.assertTrue(any(output_root.glob("*.pdf")))
+
+    @unittest.skipUnless(matplotlib is not None, "Matplotlib is not installed")
     def test_renderer_writes_two_ami_figures_with_fixed_bounds_and_shape_outlines(self):
         report, seeds = self._inputs()
         with tempfile.TemporaryDirectory() as directory:
@@ -102,7 +135,12 @@ class TopicPlottingTests(unittest.TestCase):
 
     def test_notebook_delegates_plotting_to_module(self):
         notebook = json.loads(Path("14_topic_model_fit.ipynb").read_text())
-        source = "".join(notebook["cells"][8]["source"])
+        source = next(
+            "".join(cell["source"])
+            for cell in notebook["cells"]
+            if cell["cell_type"] == "code"
+            and "plot_topic_search_metrics" in "".join(cell["source"])
+        )
         self.assertIn("plot_topic_search_metrics", source)
         self.assertNotIn("def ", source)
         self.assertNotIn("matplotlib", source)

@@ -400,13 +400,13 @@ class AquaAnalysisTests(unittest.TestCase):
     def test_default_requirements_lock_matches_requested_device(self):
         cpu = AquaBuildConfig(device="cpu")
         cuda = AquaBuildConfig(device="cuda")
-        self.assertEqual(cpu.requirements_lock.name, "requirements-aqua-legacy.txt")
+        self.assertEqual(cpu.requirements_lock.name, "requirements-aqua-cpu.txt")
         self.assertEqual(cuda.requirements_lock.name, "requirements-aqua-cuda113.txt")
 
         explicit = AquaBuildConfig(
-            device="cuda", requirements_lock=Path("requirements-aqua-legacy.txt")
+            device="cuda", requirements_lock=Path("requirements-aqua-cpu.txt")
         )
-        self.assertEqual(explicit.requirements_lock, Path("requirements-aqua-legacy.txt"))
+        self.assertEqual(explicit.requirements_lock, Path("requirements-aqua-cpu.txt"))
 
     def test_parity_verifier_compares_upstream_hard_outputs_and_runtime_logits(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -583,7 +583,7 @@ class AquaAnalysisTests(unittest.TestCase):
                 runtime_python=runtime_python,
                 adapter_root=root / "adapters",
                 artifact_manifest=Path("aqua_runtime/artifacts.json").resolve(),
-                requirements_lock=Path("requirements-aqua-legacy.txt").resolve(),
+                requirements_lock=Path("requirements-aqua-cpu.txt").resolve(),
                 require_parity=False,
             )
             calls = []

@@ -176,17 +176,29 @@ def rank_development_cv_variants(
 
 def freeze_development_cv_winners(
     *,
-    development_cv_path: Path = Path(
-        "model_output/selection_2025/factorial_rankers/development_cv_results.csv"
-    ),
+    development_cv_path: Path | None = None,
     experiment_variants_path: Path | None = None,
-    output_root: Path = Path("model_output/selection_2025/paper1/factorial_winners"),
+    output_root: Path | None = None,
     scopes: Iterable[str] = ("all",),
     draw_policies: Iterable[str] | None = None,
     expected_folds: int = 5,
     require_idle: bool = True,
 ) -> dict:
     """Write the ranking and manifest without reading any held-out artifact."""
+    from .paths import ExecutionContext, require_writable_destination
+    context = ExecutionContext.from_values()
+    if development_cv_path is None:
+        development_cv_path = (
+            context.read_root("frozen_cg1_factorial_rankers")
+            / "development_cv_results.csv"
+        )
+    else:
+        development_cv_path = context.read_path(development_cv_path)
+    output_root = (
+        context.output_root("CG1/winners")
+        if output_root is None
+        else require_writable_destination(output_root)
+    )
     if require_idle:
         assert_factorial_idle()
     if not development_cv_path.exists():

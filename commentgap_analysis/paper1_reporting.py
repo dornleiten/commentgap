@@ -5,9 +5,13 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import os
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .paths import ProjectPaths
 from typing import Any, Callable, Iterable
 
 import numpy as np
@@ -565,6 +569,7 @@ def _winner_permutation_components(
     factorial_root: Path,
     model_data_root: Path,
     split_role: str = "paper2_test",
+    cache_root: Path | None = None,
 ) -> tuple[pd.DataFrame, list[str], Callable[[pd.DataFrame], pd.DataFrame]]:
     """Load a frozen winner and return a split frame and score function."""
     from commentgap_analysis.factorial_rankers import (
@@ -610,12 +615,22 @@ def _winner_permutation_components(
             embedding_store = manifest.get("embedding_store")
             if not embedding_store:
                 raise RuntimeError(f"{variant_id}/{scope} lacks its embedding store")
+            from .paths import resolve_artifact_path
             full_frame, _, _, _, _ = _load_scope_inputs(model_data_root, scope)
             embedding_matrix = _embedding_cache(
                 full_frame.reset_index(drop=True),
                 scope=scope,
-                embedding_store=Path(embedding_store),
-                cache_root=Path(factorial_root) / "_cache" / "xgboost_bge",
+                embedding_store=resolve_artifact_path(
+                    embedding_store, anchors=(root, factorial_root)
+                ),
+                cache_root=(
+                    Path(cache_root)
+                    if cache_root is not None
+                    else Path(os.environ.get(
+                        "COMMENTGAP_XGBOOST_CACHE_ROOT",
+                        str(Path(factorial_root) / "_cache" / "xgboost_bge"),
+                    ))
+                ),
                 progress_every_stories=100,
                 run_label=f"stage9-permutation-{variant_id}",
             )
@@ -646,9 +661,13 @@ def _winner_permutation_components(
     model = _make_model(len(features), recipe, "cpu")
     _load_model_checkpoint(model, root / "development_model.pt", recipe.approach)
     embedding_store = manifest.get("embedding_store")
+    from .paths import resolve_artifact_path
     source = _source_for_model(
         recipe,
-        embedding_store=Path(embedding_store) if embedding_store else None,
+        embedding_store=(
+            resolve_artifact_path(embedding_store, anchors=(root, factorial_root))
+            if embedding_store else None
+        ),
     )
 
     def predict_neural(candidate_frame: pd.DataFrame) -> pd.DataFrame:
@@ -800,6 +819,7 @@ def _load_or_compute_winner_permutation(
         winner=winner,
         factorial_root=factorial_root,
         model_data_root=model_data_root,
+        cache_root=Path(cache_root).parent / "xgboost_bge",
     )
     output = selector_permutation_importance(
         frame,
@@ -841,7 +861,12 @@ def _load_winner_inputs(
     _require_hash(experiment_path, manifest.get("experiment_plan", {}).get("sha256"), "Experiment plan")
 
     ranking_record = manifest.get("outputs", {}).get("ranking", {})
-    ranking_path = Path(ranking_record.get("path", ""))
+    from .paths import resolve_artifact_path
+    ranking_path = resolve_artifact_path(
+        ranking_record.get("path", ""),
+        anchors=(winner_manifest_path.parent,),
+        expected_sha256=ranking_record.get("sha256"),
+    )
     _require_hash(ranking_path, ranking_record.get("sha256"), "Frozen CV ranking")
     ranking = pd.read_csv(ranking_path)
     winners = pd.DataFrame(manifest.get("winners", []))
@@ -1318,7 +1343,7 @@ def _save_latex(frame: pd.DataFrame, path: Path, columns: list[str]) -> None:
     )
 
 
-def _save_figures(
+def plot_paper1_report_figures(
     ranking: pd.DataFrame,
     performance: pd.DataFrame,
     ties: pd.DataFrame,
@@ -1327,10 +1352,9 @@ def _save_figures(
     permutation_gaps: pd.DataFrame,
     shap_summary: pd.DataFrame,
     output_root: Path,
+    *,
+    show: bool = False,
 ) -> list[Path]:
-    import matplotlib
-
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     figures_root = output_root / "figures"
@@ -1342,6 +1366,8 @@ def _save_figures(
             path = figures_root / f"{stem}.{suffix}"
             fig.savefig(path, dpi=180, bbox_inches="tight")
             outputs.append(path)
+        if show:
+            plt.show()
         plt.close(fig)
 
     primary = ranking[ranking["scope"] == "all"] if "all" in set(ranking["scope"]) else ranking
@@ -1384,7 +1410,7 @@ def _save_figures(
             (plot_regression_selector_differences, "all_regression_selector_differences"),
             (plot_regression_selector_coefficients, "all_regression_selector_coefficients"),
         ):
-            if plotter(association_scope, output_root, show=False) is not None:
+            if plotter(association_scope, output_root, show=show) is not None:
                 outputs.extend(figures_root / f"{stem}.{suffix}" for suffix in ("png", "pdf"))
 
     shown_gap = model_gap_summary[
@@ -1453,7 +1479,7 @@ def _save_figures(
             (plot_winner_permutation_importance_gaps, "all_winner_permutation_importance_gaps"),
             (plot_winner_permutation_importance, "all_winner_permutation_importance"),
         ):
-            if plotter(primary_permutation, output_root, show=False) is not None:
+            if plotter(primary_permutation, output_root, show=show) is not None:
                 outputs.extend(figures_root / f"{stem}.{suffix}" for suffix in ("png", "pdf"))
 
     primary_shap = shap_summary[shap_summary["scope"] == "all"].copy()
@@ -1464,10 +1490,10 @@ def _save_figures(
         for plotter, stem in (
             (plot_winner_shap_importance, "all_winner_shap_importance"),
         ):
-            if plotter(primary_shap, output_root, show=False) is not None:
+            if plotter(primary_shap, output_root, show=show) is not None:
                 outputs.extend(figures_root / f"{stem}.{suffix}" for suffix in ("png", "pdf"))
         shap_gap_figures = plot_winner_shap_importance_gaps(
-            primary_shap, output_root, show=False,
+            primary_shap, output_root, show=show,
         )
         if shap_gap_figures:
             for stem in (
@@ -1482,7 +1508,7 @@ def _save_figures(
             association_scope,
             primary_shap,
             output_root,
-            show=False,
+            show=show,
         ) is not None:
             outputs.extend(
                 figures_root / f"all_regression_vs_shap_gaps.{suffix}"
@@ -1491,13 +1517,145 @@ def _save_figures(
     return outputs
 
 
+def publication_test_performance_latex(performance: pd.DataFrame) -> str:
+    """Format saved test metrics and the three baselines in publication order."""
+    models = ["Reg", "XGB", "XGB-T", "NN", "NN-T"]
+    baselines = [("Earliest-first", "Earliest"),
+                 ("Roots-first/earliest-first", "Roots/earliest"),
+                 ("Length-based", "Longest")]
+    columns = [("audience", "ndcg_at_k"), ("curator", "ndcg_at_k"),
+               ("audience", "balanced_macro_f1_at_k"),
+               ("curator", "balanced_macro_f1_at_k")]
+    frame = performance[performance["scope"] == "all"].copy()
+    frame["publication_model"] = frame["model_pair_label"].fillna(frame["model_label"])
+    def row_for(model, selector, metric):
+        rows = frame[(frame["publication_model"] == model) &
+                     (frame["selector"] == selector) & (frame["metric"] == metric)]
+        if len(rows) != 1:
+            raise ValueError(f"Expected one saved metric for {model}/{selector}/{metric}")
+        return rows.iloc[0]
+    best = {(selector, metric): max(float(row_for(model, selector, metric)["estimate"])
+                                   for model in models)
+            for selector, metric in columns}
+    lines = [r"\begin{tabular}{lllll}", r"\toprule",
+             r"Model & Audience nDCG@k & Editor nDCG@k & Audience macro-F1 & Editor macro-F1 \\",
+             r"\midrule"]
+    for model, label in [(m, m) for m in models] + baselines:
+        if model == baselines[0][0]:
+            lines.append(r"\midrule")
+        cells = []
+        for selector, metric in columns:
+            row = row_for(model, selector, metric)
+            cell = f"{row['estimate']:.3f} [{row['conf_low']:.3f}, {row['conf_high']:.3f}]"
+            if model in models and float(row["estimate"]) == best[selector, metric]:
+                cell = r"\textbf{" + cell + "}"
+            cells.append(cell)
+        lines.append(label + " & " + " & ".join(cells) + r" \\")
+    return "\n".join(lines + [r"\bottomrule", r"\end{tabular}", ""])
+
+
+def replay_paper1_reporting(*, source_root: Path, output_root: Path,
+                            show_figures: bool = False) -> dict[str, Any]:
+    """Rebuild the Paper 1 presentation bundle from frozen reporting inputs.
+
+    ``source_root`` is a read-only historical reporting bundle.  This path is
+    deliberately separate from :func:`run_paper1_reporting`: the latter may
+    calculate permutation and SHAP products, whereas replay only consumes the
+    completed tabular products and writes a new presentation bundle.
+    """
+    source_root = Path(source_root)
+    output_root = Path(output_root)
+    source_tables = source_root / "tables"
+    if not source_tables.is_dir():
+        raise FileNotFoundError(source_tables)
+    required_names = {
+        "development_cv_variant_ranking.csv",
+        "held_out_model_performance.csv",
+        "held_out_balanced_macro_f1.csv",
+        "held_out_tie_sensitivity.csv",
+        "regression_selector_associations.csv",
+        "held_out_model_implied_gap_summary.csv",
+        "held_out_permutation_importance_gaps.csv",
+        "held_out_shap_importance.csv",
+        "cg1_baseline_performance.csv",
+    }
+    missing = sorted(name for name in required_names if not (source_tables / name).is_file())
+    if missing:
+        raise FileNotFoundError("Frozen Paper 1 reporting inputs are missing: " + ", ".join(missing))
+
+    tables_root = output_root / "tables"
+    tables_root.mkdir(parents=True, exist_ok=True)
+    # The files below are saved statistical products, not rendered paper
+    # assets.  Preserve their bytes in staging so figures and tables can be
+    # independently inspected beside their inputs.
+    copied: list[dict[str, str]] = []
+    for source in sorted(source_tables.iterdir()):
+        if source.is_file() and source.suffix.lower() in {".csv", ".parquet", ".json"}:
+            target = tables_root / source.name
+            shutil.copy2(source, target)
+            copied.append({"name": source.name, "source_sha256": _sha256(source)})
+
+    ranking = pd.read_csv(tables_root / "development_cv_variant_ranking.csv")
+    performance = pd.read_csv(tables_root / "held_out_model_performance.csv")
+    ties = pd.read_csv(tables_root / "held_out_tie_sensitivity.csv")
+    associations = pd.read_csv(tables_root / "regression_selector_associations.csv")
+    model_gaps = pd.read_csv(tables_root / "held_out_model_implied_gap_summary.csv")
+    permutation_gaps = pd.read_csv(tables_root / "held_out_permutation_importance_gaps.csv")
+    shap_summary = pd.read_csv(tables_root / "held_out_shap_importance.csv")
+    baseline = pd.read_csv(tables_root / "cg1_baseline_performance.csv")
+    expected_baselines = {"Earliest-first", "Length-based", "Roots-first/earliest-first"}
+    observed_baselines = set(baseline["model"].astype(str))
+    if observed_baselines != expected_baselines:
+        raise ValueError(
+            "Frozen baseline table must contain exactly the three prespecified "
+            f"rows; got {sorted(observed_baselines)}"
+        )
+    # Regenerate the publication-facing performance table from saved metrics.
+    performance_with_baselines = pd.concat(
+        [
+            performance,
+            pd.read_csv(tables_root / "held_out_balanced_macro_f1.csv"),
+            baseline.rename(columns={"model": "model_label"}).assign(
+                model_family="baseline", scope="all", analysis_partition="held_out_test"
+            ),
+        ],
+        ignore_index=True,
+        sort=False,
+    )
+    performance_with_baselines.to_csv(
+        tables_root / "cg1_test_performance_with_baselines.csv", index=False
+    )
+    (tables_root / "cg1_test_performance_with_baselines.tex").write_text(
+        publication_test_performance_latex(performance_with_baselines), encoding="utf-8"
+    )
+    figures = plot_paper1_report_figures(
+        ranking, performance, ties, associations, model_gaps, permutation_gaps,
+        shap_summary, output_root, show=show_figures,
+    )
+    manifest = {
+        "mode": "frozen",
+        "source": str(source_root),
+        "source_tables": copied,
+        "generated_tables": [
+            "cg1_test_performance_with_baselines.csv",
+            "cg1_test_performance_with_baselines.tex",
+        ],
+        "generated_figures": [str(path.relative_to(output_root)) for path in figures],
+        "selection": "loaded from frozen development-CV reporting products; no reselection or fitting",
+    }
+    (output_root / "report_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return manifest
+
+
 def run_paper1_reporting(
     *,
-    model_data_root: Path = Path("model_output/selection_2025/model_data"),
-    factorial_root: Path = Path("model_output/selection_2025/factorial_rankers"),
-    winner_root: Path = Path("model_output/selection_2025/paper1/factorial_winners"),
-    regression_root: Path = Path("model_output/selection_2025/regression"),
-    output_root: Path = Path("model_output/selection_2025/paper1/reporting"),
+    model_data_root: Path = ProjectPaths.load().read_root("model_data"),
+    factorial_root: Path = ProjectPaths.load().read_root("frozen_cg1_factorial_rankers"),
+    winner_root: Path = ProjectPaths.load().read_root("frozen_cg1_winners"),
+    regression_root: Path = ProjectPaths.load().read_root("frozen_cg1_regression"),
+    output_root: Path = ProjectPaths.load().read_root("frozen_cg1_reporting"),
     scopes: Iterable[str] = ("all",),
     bootstrap_draws: int = 1000,
     permutation_repeats: int = 1,
@@ -1513,6 +1671,8 @@ def run_paper1_reporting(
     require_factorial_idle: bool = True,
 ) -> dict:
     """Create Stage 9 only after Stage 8 has frozen development-CV winners."""
+    from .paths import require_writable_destination
+    output_root = require_writable_destination(output_root)
     if require_factorial_idle:
         assert_factorial_idle()
     if bootstrap_draws < 100:
@@ -1729,7 +1889,7 @@ def run_paper1_reporting(
         _save_latex(feature_gaps, latex_paths["regression_feature_gaps.tex"], ["scope", "feature", "feature_gap_log_odds", "feature_gap_conf_low", "feature_gap_conf_high", "curator_to_audience_odds_ratio"])
         _save_latex(permutation_gaps, latex_paths["permutation_importance_gaps.tex"], ["scope", "model_label", "feature_label", "audience_importance", "curator_importance", "permutation_importance_gap", "conf_low", "conf_high"])
     figure_paths = (
-        _save_figures(
+        plot_paper1_report_figures(
             ranking,
             performance,
             ties,

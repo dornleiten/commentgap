@@ -1,0 +1,6 @@
+scope,primary_or_appendix,stage,n_articles,n_comment_rows,n_candidates,n_picks
+all,primary,scraped_2025_collection,44596,9415942.0,,
+all,primary,published_feature_choice_set,5128,,2394962.0,20945.0
+all,primary,shared_preprocessed_choice_set,5118,,2392952.0,20930.0
+all,primary,development,2559,,1189314.0,10471.0
+all,primary,held_out_test,2559,,1203638.0,10459.0

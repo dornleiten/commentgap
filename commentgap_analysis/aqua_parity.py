@@ -18,6 +18,7 @@ from aqua_runtime.schema import (
     logit_column,
     sha256_file,
 )
+from .paths import ExecutionContext, PathContractError, add_execution_arguments
 
 
 PARITY_LOGIT_ATOL = 2e-6
@@ -183,22 +184,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-output", type=Path, required=True)
     parser.add_argument("--repeat-output", type=Path, default=None)
     parser.add_argument("--sequential-output", type=Path, default=None)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--artifact-manifest", type=Path, default=Path("aqua_runtime/artifacts.json"))
     parser.add_argument("--update-artifact-manifest", action="store_true")
+    add_execution_arguments(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    context = ExecutionContext.from_values(mode=args.mode, run_id=args.run_id, repo_root=args.repo_root)
+    report_path = context.staging_output("shared/aqua_validation/parity.json", explicit=args.report)
     report = verify_parity(
         args.upstream_output,
         args.runtime_output,
         repeat_output=args.repeat_output,
         sequential_output=args.sequential_output,
     )
-    _atomic_json(report, args.report)
+    _atomic_json(report, report_path)
     if args.update_artifact_manifest:
+        raise PathContractError(
+            "Parity artifact manifests are retained inputs; record new parity evidence in the run output instead."
+        )
         if report["status"] != "verified":
             raise RuntimeError("Refusing to mark a failed parity report as verified")
         if args.repeat_output is None or args.sequential_output is None:
@@ -209,8 +216,8 @@ def main(argv: list[str] | None = None) -> int:
         artifact_manifest = json.loads(args.artifact_manifest.read_text())
         artifact_manifest["parity"] = {
             "status": "verified",
-            "fixture": str(args.report),
-            "fixture_sha256": sha256_file(args.report),
+            "fixture": str(report_path),
+            "fixture_sha256": sha256_file(report_path),
         }
         _atomic_json(artifact_manifest, args.artifact_manifest)
     print(json.dumps(report, indent=2, sort_keys=True))

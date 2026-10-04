@@ -1,0 +1,276 @@
+\begin{thebibliography}{53}
+\providecommand{\natexlab}[1]{#1}
+
+\bibitem[{Bamberger and Vanacek(1984)}]{bamberger1984lesen}
+Bamberger, R.; and Vanacek, E. 1984.
+\newblock \emph{Lesen-Verstehen-Lernen-Schreiben}.
+\newblock Diesterweg.
+
+\bibitem[{Barbieri, Espinosa~Anke, and Camacho-Collados(2022)}]{cardiffnlp2022xlmr}
+Barbieri, F.; Espinosa~Anke, L.; and Camacho-Collados, J. 2022.
+\newblock {XLM}-{T}: Multilingual Language Models in {T}witter for Sentiment Analysis and Beyond.
+\newblock In Calzolari, N.; B{\'e}chet, F.; Blache, P.; Choukri, K.; Cieri, C.; Declerck, T.; Goggi, S.; Isahara, H.; Maegaard, B.; Mariani, J.; Mazo, H.; Odijk, J.; and Piperidis, S., eds., \emph{Proceedings of the Thirteenth Language Resources and Evaluation Conference}, 258--266. Marseille, France: European Language Resources Association.
+
+\bibitem[{Behrendt et~al.(2024)Behrendt, Wagner, Ziegele, Wilms, Stoll, Heinbach, and Harmeling}]{Behrendt2024}
+Behrendt, M.; Wagner, S.~S.; Ziegele, M.; Wilms, L.; Stoll, A.; Heinbach, D.; and Harmeling, S. 2024.
+\newblock {AQ}u{A} {--} Combining Experts' and Non-Experts' Views To Assess Deliberation Quality in Online Discussions Using {LLM}s.
+\newblock In Hautli-Janisz, A.; Lapesa, G.; Anastasiou, L.; Gold, V.; Liddo, A.~D.; and Reed, C., eds., \emph{Proceedings of the First Workshop on Language-driven Deliberation Technology (DELITE) @ LREC-COLING 2024}, 1--12. Torino, Italia: ELRA and ICCL.
+
+\bibitem[{Berger and Milkman(2012)}]{Berger2012}
+Berger, J.; and Milkman, K.~L. 2012.
+\newblock What makes online content viral?
+\newblock \emph{Journal of marketing research}, 49(2): 192--205.
+
+\bibitem[{Boczkowski and Mitchelstein(2013)}]{Boczkowski2013}
+Boczkowski, P.~J.; and Mitchelstein, E. 2013.
+\newblock \emph{The news gap: when the information preferences of the media and the public diverge}.
+\newblock Cambridge, Massachusetts: The MIT Press.
+
+\bibitem[{Bright(2016)}]{Bright2016}
+Bright, J. 2016.
+\newblock The social news gap: How news reading and news sharing diverge.
+\newblock \emph{Journal of communication}, 66(3): 343--365.
+
+\bibitem[{Burger(2022)}]{Burger2022}
+Burger, C. 2022.
+\newblock Von zehn auf 20 Millionen in zwei Jahren.
+\newblock \url{https://www.derstandard.de/story/2000132276894/von-zehn-auf-20-millionen-in-zwei-jahren}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{Chen et~al.(2024)Chen, Xiao, Zhang, Luo, Lian, and Liu}]{chen2024m3}
+Chen, J.; Xiao, S.; Zhang, P.; Luo, K.; Lian, D.; and Liu, Z. 2024.
+\newblock {M}3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation.
+\newblock In Ku, L.-W.; Martins, A.; and Srikumar, V., eds., \emph{Findings of the Association for Computational Linguistics: ACL 2024}, 2318--2335. Bangkok, Thailand: Association for Computational Linguistics.
+
+\bibitem[{Chen and Guestrin(2016)}]{chen2016xgboost}
+Chen, T.; and Guestrin, C. 2016.
+\newblock XGBoost: A Scalable Tree Boosting System.
+\newblock In \emph{Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining}, KDD '16, 785--794. New York, NY, USA: Association for Computing Machinery.
+\newblock ISBN 9781450342322.
+
+\bibitem[{Cheng, Danescu-Niculescu-Mizil, and Leskovec(2014)}]{Cheng2014}
+Cheng, J.; Danescu-Niculescu-Mizil, C.; and Leskovec, J. 2014.
+\newblock How community feedback shapes user behavior.
+\newblock In \emph{Proceedings of the International AAAI Conference on Web and Social Media}, volume~8, 41--50.
+
+\bibitem[{{Der Standard}(2021)}]{DerStandard2021}
+{Der Standard}. 2021.
+\newblock Community-Guides.
+\newblock \url{https://www.derstandard.at/story/2000125444821/community-guides-aus-der-community-fuer-die-community}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{{Der Standard}(2026{\natexlab{a}})}]{DerStandard2024}
+{Der Standard}. 2026{\natexlab{a}}.
+\newblock Allgemeine Geschäftsbedingungen - Text- und Data-Mining, Crawler.
+\newblock \url{https://about.derstandard.at/agb/#Text-DataMining-Crawler}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{{Der Standard}(2026{\natexlab{b}})}]{DerStandardRobots2026}
+{Der Standard}. 2026{\natexlab{b}}.
+\newblock robots.txt.
+\newblock \url{https://www.derstandard.at/robots.txt}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{Diakopoulos(2015)}]{Diakopoulos2015}
+Diakopoulos, N. 2015.
+\newblock Picking the NYT picks: Editorial criteria and automation in the curation of online news comments.
+\newblock \emph{ISOJ Journal}, 6(1): 147--166.
+
+\bibitem[{Diakopoulos and Naaman(2011)}]{Diakopoulos2011}
+Diakopoulos, N.; and Naaman, M. 2011.
+\newblock Towards quality discourse in online news comments.
+\newblock In \emph{Proceedings of the ACM 2011 conference on Computer supported cooperative work}, 133--142.
+
+\bibitem[{Erion et~al.(2021)Erion, Janizek, Sturmfels, Lundberg, and Lee}]{erion2021improving}
+Erion, G.; Janizek, J.~D.; Sturmfels, P.; Lundberg, S.~M.; and Lee, S.-I. 2021.
+\newblock Improving performance of deep learning models with axiomatic attribution priors and expected gradients.
+\newblock \emph{Nature machine intelligence}, 3(7): 620--631.
+
+\bibitem[{franzke et~al.(2020)franzke, Bechmann, Ess, and Zimmer}]{AoIR2019}
+franzke, a.~s.; Bechmann, A.; Ess, C.~M.; and Zimmer, M. 2020.
+\newblock Internet research: Ethical guidelines 3.0.
+\newblock Technical report.
+
+\bibitem[{Gebru et~al.(2021)Gebru, Morgenstern, Vecchione, Vaughan, Wallach, Daum{\'e}~III, and Crawford}]{gebru2021datasheets}
+Gebru, T.; Morgenstern, J.; Vecchione, B.; Vaughan, J.~W.; Wallach, H.; Daum{\'e}~III, H.; and Crawford, K. 2021.
+\newblock Datasheets for Datasets.
+\newblock \emph{Communications of the ACM}, 64(12): 86--92.
+
+\bibitem[{Harcup and O'Neill(2017)}]{Harcup2017}
+Harcup, T.; and O'Neill, D. 2017.
+\newblock What is news? News values revisited (again).
+\newblock \emph{Journalism studies}, 18(12): 1470--1488.
+
+\bibitem[{He et~al.(2020)He, Han, Mukherjee, Obradovic, and Dragut}]{He2019}
+He, L.; Han, C.; Mukherjee, A.; Obradovic, Z.; and Dragut, E. 2020.
+\newblock On the dynamics of user engagement in news comment media.
+\newblock \emph{WIREs Data Mining and Knowledge Discovery}, 10(1): e1342.
+
+\bibitem[{He et~al.(2024)He, Gu, Shekhar, Castro, and Tyson}]{He2024}
+He, Y.; Gu, Y.; Shekhar, R.; Castro, I.; and Tyson, G. 2024.
+\newblock Making the Pick: Understanding Professional Editor Comment Curation in Online News.
+\newblock In \emph{Proceedings of the International AAAI Conference on Web and Social Media}, volume~18, 557--568.
+
+\bibitem[{Juarez~Miro(2022)}]{JuarezMiro2022}
+Juarez~Miro, C. 2022.
+\newblock The comment gap: Affective publics and gatekeeping in The New York Times' comment sections.
+\newblock \emph{Journalism}, 23(4): 858--874.
+
+\bibitem[{Kelly, Fisher, and Smith(2005)}]{Kelly2005}
+Kelly, J.; Fisher, D.; and Smith, M. 2005.
+\newblock Debate, division, and diversity: Political discourse networks in USENET newsgroups.
+\newblock In \emph{Online Deliberation Conference}, 3, 4--3. Stanford University.
+
+\bibitem[{Kennedy et~al.(2020)Kennedy, Jin, Mostafazadeh~Davani, Dehghani, and Ren}]{Kennedy2020}
+Kennedy, B.; Jin, X.; Mostafazadeh~Davani, A.; Dehghani, M.; and Ren, X. 2020.
+\newblock Contextualizing Hate Speech Classifiers with Post-hoc Explanation.
+\newblock In Jurafsky, D.; Chai, J.; Schluter, N.; and Tetreault, J., eds., \emph{Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics}, 5435--5442. Online: Association for Computational Linguistics.
+
+\bibitem[{Krenn and Petrak(2021)}]{KrennPetrak2021}
+Krenn, B.; and Petrak, J. 2021.
+\newblock FemDwell: User-Centric Analysis \& Improvement of Web Page Engagement with User Generated Content.
+\newblock \url{https://www.ofai.at/projects/femdwell}.
+\newblock Accessed 14-September-2026.
+
+\bibitem[{Lundberg et~al.(2020)Lundberg, Erion, Chen, DeGrave, Prutkin, Nair, Katz, Himmelfarb, Bansal, and Lee}]{lundberg2020local}
+Lundberg, S.~M.; Erion, G.; Chen, H.; DeGrave, A.; Prutkin, J.~M.; Nair, B.; Katz, R.; Himmelfarb, J.; Bansal, N.; and Lee, S.-I. 2020.
+\newblock From local explanations to global understanding with explainable AI for trees.
+\newblock \emph{Nature machine intelligence}, 2(1): 56--67.
+
+\bibitem[{Lundberg and Lee(2017)}]{lundberg2017unified}
+Lundberg, S.~M.; and Lee, S.-I. 2017.
+\newblock A Unified Approach to Interpreting Model Predictions.
+\newblock In Guyon, I.; Luxburg, U.~V.; Bengio, S.; Wallach, H.; Fergus, R.; Vishwanathan, S.; and Garnett, R., eds., \emph{Advances in Neural Information Processing Systems}, volume~30. Curran Associates, Inc.
+
+\bibitem[{Manosevitch and Walker(2009)}]{ManosevitchWalker2009}
+Manosevitch, E.; and Walker, D. 2009.
+\newblock Reader comments to online opinion journalism: A space of public deliberation.
+\newblock In \emph{International Symposium on Online Journalism}, volume~10, 1--30.
+
+\bibitem[{Manosevitch and Tenenboim(2017)}]{ManosevitchTenenboim2017}
+Manosevitch, I.; and Tenenboim, O. 2017.
+\newblock The multifaceted role of user-generated content in news websites: An analytical framework.
+\newblock \emph{Digital journalism}, 5(6): 731--752.
+
+\bibitem[{Marcus, Neuman, and MacKuen(2000)}]{MarcusNeumanMacKuen2000}
+Marcus, G.~E.; Neuman, W.~R.; and MacKuen, M. 2000.
+\newblock \emph{Affective intelligence and political judgment}.
+\newblock University of Chicago Press.
+
+\bibitem[{Masullo~Chen and Pain(2017)}]{Chen2017}
+Masullo~Chen, G.; and Pain, P. 2017.
+\newblock Normalizing online comments.
+\newblock \emph{Journalism Practice}, 11(7): 876--892.
+
+\bibitem[{Meijer and Bijleveld(2020)}]{MeijerBijleveld2020}
+Meijer, I.~C.; and Bijleveld, H.~P. 2020.
+\newblock Valuable Journalism: Measuring news quality from a user’s perspective.
+\newblock In \emph{The Future of Journalism: Risks, Threats and Opportunities}, 306--317. Routledge.
+
+\bibitem[{Momeni, Cardie, and Diakopoulos(2015)}]{Momeni2016}
+Momeni, E.; Cardie, C.; and Diakopoulos, N. 2015.
+\newblock A Survey on Assessment and Ranking Methodologies for User-Generated Content on the Web.
+\newblock \emph{ACM Comput. Surv.}, 48(3).
+
+\bibitem[{Naab(2022)}]{Naab2022}
+Naab, T.~K. 2022.
+\newblock The impact of giving feedback in online discussions: Effects of evaluative reply comments on the authors of evaluated user comments.
+\newblock \emph{Journal of Media Psychology: Theories, Methods, and Applications}, 34(6): 334–347.
+
+\bibitem[{Nelson, Ksiazek, and Springer(2021)}]{Nelson2021}
+Nelson, M.~N.; Ksiazek, T.~B.; and Springer, N. 2021.
+\newblock Killing the comments: Why do news organizations remove user commentary functions?
+\newblock \emph{Journalism and Media}, 2(4): 572--583.
+
+\bibitem[{Noci et~al.(2012)Noci, Domingo, Masip, Mic\'{o}, and Ruiz}]{Noci2012}
+Noci, J.~D.; Domingo, D.; Masip, P.; Mic\'{o}, J.; and Ruiz, C. 2012.
+\newblock Comments in news, democracy booster or journalistic nightmare: Assessing the quality and dynamics of citizen debates in Catalan online newspapers.
+\newblock In \emph{International symposium on online journalism}, volume~2, 46--64.
+
+\bibitem[{Otterbacher(2009)}]{Otterbacher2009}
+Otterbacher, J. 2009.
+\newblock `Helpfulness' in online communities: a measure of message quality.
+\newblock In \emph{Proceedings of the SIGCHI conference on human factors in computing systems}, 955--964.
+
+\bibitem[{Park et~al.(2016)Park, Sachar, Diakopoulos, and Elmqvist}]{Park2016}
+Park, D.; Sachar, S.; Diakopoulos, N.; and Elmqvist, N. 2016.
+\newblock Supporting comment moderators in identifying high quality online news comments.
+\newblock In \emph{Proceedings of the 2016 CHI Conference on Human Factors in Computing Systems}, 1114--1125.
+
+\bibitem[{Rajadesingan(2026)}]{Rajadesingan2026}
+Rajadesingan, A. 2026.
+\newblock Shifting Gatekeeping Practices and Audience Engagement Under {AI}-Assisted Comment Moderation.
+\newblock \emph{Proceedings of the International AAAI Conference on Web and Social Media}, 20(1): 1942--1956.
+
+\bibitem[{Reimer et~al.(2023)Reimer, H\"{a}ring, Loosen, Maalej, and Merten}]{Reimer2021}
+Reimer, J.; H\"{a}ring, M.; Loosen, W.; Maalej, W.; and Merten, L. 2023.
+\newblock Content analyses of user comments in journalism: A systematic literature review spanning communication studies and computer science.
+\newblock \emph{Digital Journalism}, 11(7): 1328--1352.
+
+\bibitem[{Risch and Krestel(2020)}]{RischKrestel2020}
+Risch, J.; and Krestel, R. 2020.
+\newblock Top Comment or Flop Comment? Predicting and Explaining User Engagement in Online News Discussions.
+\newblock \emph{Proceedings of the International AAAI Conference on Web and Social Media}, 14(1): 579--589.
+
+\bibitem[{Rowe(2015)}]{Rowe2015}
+Rowe, I. 2015.
+\newblock Deliberation 2.0: Comparing the deliberative quality of online news user comments across platforms.
+\newblock \emph{Journal of broadcasting \& electronic media}, 59(4): 539--555.
+
+\bibitem[{Sap et~al.(2019)Sap, Card, Gabriel, Choi, and Smith}]{Sap2019}
+Sap, M.; Card, D.; Gabriel, S.; Choi, Y.; and Smith, N.~A. 2019.
+\newblock The Risk of Racial Bias in Hate Speech Detection.
+\newblock In Korhonen, A.; Traum, D.; and M{\`a}rquez, L., eds., \emph{Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics}, 1668--1678. Florence, Italy: Association for Computational Linguistics.
+
+\bibitem[{Schuth, Marx, and De~Rijke(2007)}]{Schuth2007}
+Schuth, A.; Marx, M.; and De~Rijke, M. 2007.
+\newblock Extracting the discussion structure in comments on news-articles.
+\newblock In \emph{Proceedings of the 9th annual ACM international workshop on Web information and data management}, 97--104.
+
+\bibitem[{Tan et~al.(2016)Tan, Niculae, Danescu-Niculescu-Mizil, and Lee}]{Tan2016}
+Tan, C.; Niculae, V.; Danescu-Niculescu-Mizil, C.; and Lee, L. 2016.
+\newblock Winning arguments: Interaction dynamics and persuasion strategies in good-faith online discussions.
+\newblock In \emph{Proceedings of the 25th international conference on world wide web}, 613--624.
+
+\bibitem[{{TextDetox}(2025)}]{textdetox2024xlmr}
+{TextDetox}. 2025.
+\newblock XLM-R Large Toxicity Classifier v2.
+\newblock Hugging Face model card.
+\newblock Revision cde9d07ac4df2af9c02d2461dee068bf04a58728.
+
+\bibitem[{Therneau(2026)}]{survival-Therneau2024survival}
+Therneau, T.~M. 2026.
+\newblock \emph{A Package for Survival Analysis in R}.
+\newblock R package version 3.8-12.
+
+\bibitem[{Wang and Diakopoulos(2022)}]{Wang2021}
+Wang, Y.; and Diakopoulos, N. 2022.
+\newblock Highlighting High-quality Content as a Moderation Strategy: The Role of New York Times Picks in Comment Quality and Engagement.
+\newblock \emph{ACM Transactions on Social Computing (TSC)}, 4(4): 1--24.
+
+\bibitem[{Wang et~al.(2013)Wang, Wang, Li, He, and Liu}]{Wang2013}
+Wang, Y.; Wang, L.; Li, Y.; He, D.; and Liu, T.-Y. 2013.
+\newblock A theoretical analysis of NDCG type ranking measures.
+\newblock In \emph{Conference on learning theory}, 25--54. PMLR.
+
+\bibitem[{Weber(2014)}]{Weber2014}
+Weber, P. 2014.
+\newblock Discussions in the comments section: Factors influencing participation and interactivity in online newspapers' reader comments.
+\newblock \emph{New media \& society}, 16(6): 941--957.
+
+\bibitem[{Wei, Liu, and Li(2016)}]{Wei2016}
+Wei, Z.; Liu, Y.; and Li, Y. 2016.
+\newblock Is this post persuasive? Ranking argumentative comments in online forum.
+\newblock In \emph{Proceedings of the 54th Annual Meeting of the Association for Computational Linguistics (Volume 2: Short Papers)}, 195--200.
+
+\bibitem[{Wilkinson et~al.(2016)Wilkinson, Dumontier, Aalbersberg et~al.}]{fair}
+Wilkinson, M.~D.; Dumontier, M.; Aalbersberg, I.~J.; et~al. 2016.
+\newblock The FAIR Guiding Principles for scientific data management and stewardship.
+\newblock \emph{Scientific Data}, 3: 160018.
+
+\bibitem[{Ziegele et~al.(2018)Ziegele, Weber, Quiring, and Breiner}]{Ziegele2018}
+Ziegele, M.; Weber, M.; Quiring, O.; and Breiner, T. 2018.
+\newblock The dynamics of online news discussions: Effects of news articles and reader comments on users' involvement, willingness to participate, and the civility of their contributions.
+\newblock \emph{Information, Communication \& Society}, 21(10): 1419--1435.
+
+\end{thebibliography}

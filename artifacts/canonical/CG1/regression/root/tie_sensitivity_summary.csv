@@ -1,0 +1,40 @@
+term,draws,estimate_median,estimate_min,estimate_max,estimate_sd,sign_changes_across_draws,feature
+log_words,10,0.126613523941077,0.120343939716156,0.132210207781056,0.00367087034346252,FALSE,Comment length (log words)
+sentiment_positive,10,0.0323807698210221,0.0288633129833103,0.0354919018387843,0.00189978508897142,FALSE,Positive sentiment
+sentiment_negative,10,-0.0435150584012081,-0.0466629402619962,-0.0415648363438418,0.00165644886298205,FALSE,Negative sentiment
+toxicity_probability,10,-0.114462709418585,-0.116952799204944,-0.113387370002955,0.00118843522318231,FALSE,Maximum toxicity probability
+lexdiv_length_adjusted,10,0.0254428095752105,0.0238083499947904,0.02743083931571,0.00110808384548931,FALSE,Length-adjusted lexical diversity
+reading_level_length_adjusted,10,-0.0312141532205736,-0.0329790924949441,-0.0295767991179052,0.000943325593772264,FALSE,Length-adjusted reading difficulty
+url_present,10,1.04322877783922,1.03295082729833,1.04939837763997,0.0053322421599685,FALSE,URL present
+article_similarity_top3,10,0.0829069861714078,0.0799427933457613,0.0868692149462462,0.00224270988232825,FALSE,Article similarity (top-three passages)
+novelty_prior_roots_model,10,0.0572669608982072,0.0553152916121951,0.0584859838054114,0.00104610646010331,FALSE,Novelty from earlier roots
+log_hours_since_article,10,0.310402448206729,0.30743303074522,0.316595402673583,0.00329662703619661,FALSE,Hours since article publication
+prior_reply_composition,10,0.0361397037280949,0.0337621498688255,0.0386439418012734,0.00150121566188939,FALSE,Earlier reply-to-root composition
+discussion_pace,10,0.055356678368899,0.0544973684299547,0.0578639077410886,0.00100623324923071,FALSE,Earlier comments per article-hour
+vienna_overnight,10,-0.338762397818024,-0.354449747223088,-0.332643079177613,0.00702505549024641,FALSE,Overnight posting period
+vienna_weekday_shoulder_evening,10,-0.232129083321535,-0.240237076971768,-0.222823412035173,0.00615658137545273,FALSE,Weekday shoulder/evening
+vienna_weekend_day_evening,10,-0.602523974122109,-0.652684136761956,-0.58915584938193,0.0216405512897656,FALSE,Weekend daytime/evening
+log_author_prior_30d_comments,10,0.00594279630789341,0.00516727109049454,0.00763975149597205,0.000821564335488736,FALSE,Author comments in prior 30 days
+author_prior_30d_upvote_reception,10,-0.0632640490521549,-0.0654837546993096,-0.0623073275906816,0.00129972314979899,FALSE,Upvotes per prior author comment
+author_prior_30d_downvote_reception,10,0.033211386250177,0.0317641334633955,0.034341510528394,0.000885492702276775,FALSE,Downvotes per prior author comment
+log_author_prior_comments_story,10,0.00581045240021795,0.00247858434542995,0.00668479203691388,0.00129720933210094,FALSE,Author's earlier comments in article
+aqua_relevance_expected,10,0.070443784889856,0.0670552354761606,0.0777894285207698,0.00350961444856346,FALSE,AQuA Relevance to the discussion topic (raw expected ordinal score)
+aqua_fact_expected,10,-0.112808230034372,-0.119171324769308,-0.110472817478465,0.00300061047412908,FALSE,AQuA At least one factual claim (raw expected ordinal score)
+aqua_opinion_expected,10,0.065162754079441,0.0634984336519299,0.0692274096985608,0.00203397730950879,FALSE,AQuA Subjective statement or opinion (raw expected ordinal score)
+aqua_justification_expected,10,0.0565266287023065,0.0523135690536233,0.0639479033098469,0.0035129489059765,FALSE,AQuA A statement is justified (raw expected ordinal score)
+aqua_solution_proposal_expected,10,0.0885370203462492,0.0846422535566581,0.0906604136122843,0.00194887450623665,FALSE,AQuA A solution is proposed (raw expected ordinal score)
+aqua_additional_knowledge_expected,10,-0.040384294923512,-0.0433497455499954,-0.0335962386857386,0.00287823496121496,FALSE,AQuA Additional knowledge is contributed (raw expected ordinal score)
+aqua_question_expected,10,-0.0247520831943732,-0.0271159532636649,-0.023055025760042,0.00139143423233844,FALSE,"AQuA Genuine, non-rhetorical question (raw expected ordinal score)"
+aqua_referencing_users_expected,10,0.0113823811124908,0.00874558247627074,0.0142420985874698,0.00215012383537848,FALSE,AQuA Reference to another user or community (raw expected ordinal score)
+aqua_referencing_medium_expected,10,-0.0238330022807427,-0.0249510738347466,-0.0230146205432228,0.000649264938798212,FALSE,"AQuA Reference to medium, editor, or moderator (raw expected ordinal score)"
+aqua_referencing_contents_expected,10,0.0188180423901759,0.0168043793140327,0.0229557128074763,0.00220876926948856,FALSE,AQuA Reference to another comment's content (raw expected ordinal score)
+aqua_referencing_personal_expected,10,0.0110955808313969,0.00918545709295434,0.0132709658912403,0.00132141983892221,FALSE,AQuA Personal reference to another user (raw expected ordinal score)
+aqua_referencing_format_expected,10,0.0365807373020527,0.0337593947957884,0.0386935373733848,0.00156174558365647,FALSE,"AQuA Reference to tone, spelling, or format (raw expected ordinal score)"
+aqua_polite_address_expected,10,0.0550552319595046,0.0521243125877862,0.0555619440605507,0.00115061047762286,FALSE,"AQuA Greeting, farewell, or polite address (raw expected ordinal score)"
+aqua_respect_expected,10,-0.0312050950603584,-0.0327616429590848,-0.0299014522276859,0.000908548222748814,FALSE,"AQuA Respect, appreciation, or gratitude (raw expected ordinal score)"
+aqua_screaming_expected,10,-0.0187319246202426,-0.0214398406030955,-0.0168004194979518,0.00129355823855129,FALSE,AQuA Capitalization or punctuation suggesting shouting (raw expected ordinal score)
+aqua_vulgarity_expected,10,-0.0225046693533263,-0.0271994292743343,-0.0195502497984906,0.00244905726333485,FALSE,AQuA Language inappropriate for civil discourse (raw expected ordinal score)
+aqua_insult_expected,10,-0.0265642185663107,-0.0293704182553491,-0.0243846628548447,0.00177520480652895,FALSE,AQuA Insult or personal attack (raw expected ordinal score)
+aqua_sarcasm_expected,10,-0.0284778731518828,-0.0306971539394173,-0.0262007068224305,0.00140899325102701,FALSE,"AQuA Devaluing, biting mockery (raw expected ordinal score)"
+aqua_discrimination_expected,10,-0.0065938405261678,-0.0092975923877171,-0.00448264700373575,0.00142206076219895,FALSE,AQuA Discriminatory language (raw expected ordinal score)
+aqua_storytelling_expected,10,-0.0343317930876846,-0.0358040825402975,-0.0320925347806605,0.00130649165456201,FALSE,AQuA Personal story or experience (raw expected ordinal score)

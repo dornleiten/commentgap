@@ -14,7 +14,7 @@ def _duckdb():
         import duckdb
     except ImportError as exc:
         raise RuntimeError(
-            "validation requires DuckDB; install requirements-scraper.txt"
+            "validation requires DuckDB; install the project with python -m pip install -e ."
         ) from exc
     return duckdb
 

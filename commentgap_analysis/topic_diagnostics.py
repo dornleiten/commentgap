@@ -1,5 +1,6 @@
 """Clustering diagnostics on an explicitly selected corpus."""
 import json
+from dataclasses import replace
 from itertools import combinations
 from pathlib import Path
 from typing import Mapping
@@ -32,6 +33,11 @@ def search_cache_matches(path, expected_cache: Mapping[str, object]) -> bool:
     except (OSError, json.JSONDecodeError, TypeError):
         return False
     return all(cached.get(key) == value for key, value in expected_cache.items())
+
+
+def search_cache_mtime(path: Path) -> float:
+    """Return the summary modification time used to choose a completed search."""
+    return (Path(path) / 'summary.csv').stat().st_mtime
 
 
 def _without_ari_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -78,6 +84,56 @@ def load_search_artifacts(search_root, *, diagnostic_root=None) -> dict[str, obj
         'search_pooled_pairs': _without_ari_columns(pd.read_csv(search_root / 'pooled_pairs.csv')),
         'search_report': _without_ari_columns(pd.read_csv(search_root / 'summary.csv')),
     }
+
+
+def summarize_search_metrics(
+    search_seeds: pd.DataFrame,
+    search_pairs: pd.DataFrame,
+    search_pooled_pairs: pd.DataFrame,
+    saved_coverage: pd.DataFrame,
+) -> pd.DataFrame:
+    """Aggregate seed and pair metrics, adding joint coverage from assignments."""
+    group_columns = [
+        'fit_corpus', 'min_cluster_size', 'n_neighbors', 'min_samples', 'doc_type',
+    ]
+    pooled_group_columns = group_columns[:-1]
+    coverage_report = search_seeds.groupby(group_columns)[
+        ['coverage_pct', 'assigned_documents', 'fitted_substantive_topics']
+    ].agg(['min', 'median', 'max'])
+    stability_metrics = [metric for metric in (
+        'ami_common', 'ari_common', 'ami_union', 'ari_union', 'ami_all', 'ari_all',
+        'assigned_jaccard', 'common_coverage_pct') if metric in search_pairs]
+    stability_report = search_pairs.groupby(group_columns)[stability_metrics].agg(
+        ['min', 'median', 'max', 'count'])
+    pooled_metrics = [metric for metric in (
+        'ami_common', 'ari_common', 'ami_union', 'ari_union', 'ami_all', 'ari_all')
+        if metric in search_pooled_pairs]
+    pooled_stability_report = search_pooled_pairs.groupby(pooled_group_columns)[
+        pooled_metrics].agg(['min', 'median', 'max', 'count'])
+    for report in (coverage_report, stability_report):
+        report.columns = ['_'.join(column) for column in report.columns]
+    pooled_stability_report.columns = [
+        f'{metric}_pooled_{stat}' for metric, stat in pooled_stability_report.columns]
+    search_report = coverage_report.join(stability_report).reset_index().merge(
+        saved_coverage, on=group_columns, validate='one_to_one').merge(
+        pooled_stability_report.reset_index(), on=pooled_group_columns, validate='many_to_one')
+    search_report['coverage_range_pp'] = (
+        search_report.coverage_pct_max - search_report.coverage_pct_min)
+    return search_report
+
+
+def run_diagnostic_seed(
+    corpus, config, output_root, signature, *, seed: int, setup_name: str,
+    batch_size: int, fit_corpus: str, fit_role: str,
+):
+    """Fit one topic-search seed with progress messages for parallel searches."""
+    print(f'  START {setup_name}, seed={seed}', flush=True)
+    result = diagnostic_fit(
+        corpus, replace(config, random_state=seed), output_root, signature,
+        batch_size=batch_size, fit_corpus=fit_corpus, fit_role=fit_role,
+    )
+    print(f'  COMPLETE {setup_name}, seed={seed}', flush=True)
+    return result
 
 
 def coverage_metrics(labels) -> dict:

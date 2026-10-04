@@ -38,7 +38,7 @@ def _require_shap() -> Any:
     except ImportError as exc:  # pragma: no cover - depends on analysis environment
         raise RuntimeError(
             "SHAP calculation requires the optional analysis dependency; "
-            "install requirements-analysis.txt"
+            "install requirements.txt"
         ) from exc
     return shap
 
@@ -72,6 +72,7 @@ def _load_embedding_matrix(
     *,
     embedding_store: Path,
     factorial_root: Path,
+    cache_root: Path | None = None,
     scope: str,
     run_label: str,
 ) -> np.ndarray:
@@ -81,7 +82,10 @@ def _load_embedding_matrix(
         full_frame.reset_index(drop=True),
         scope=scope,
         embedding_store=Path(embedding_store),
-        cache_root=Path(factorial_root) / "_cache" / "xgboost_bge",
+        # Explanation execution must never materialize its convenience cache
+        # beneath an immutable factorial input.  Fresh callers retain the
+        # historical location; frozen/reporting callers provide staging.
+        cache_root=Path(cache_root or Path(factorial_root) / "_cache" / "xgboost_bge"),
         progress_every_stories=100,
         run_label=run_label,
     )
@@ -279,6 +283,7 @@ def _calculate_xgb(
     background_rows: int,
     seed: int,
     chunk_rows: int,
+    embedding_cache_root: Path | None = None,
 ) -> pd.DataFrame:
     shap = _require_shap()
     from commentgap_analysis.ranking import make_ranker
@@ -297,10 +302,14 @@ def _calculate_xgb(
         embedding_store = context["manifest"].get("embedding_store")
         if not embedding_store:
             raise RuntimeError(f"{context['model_id']}/{context['scope']} lacks its embedding store")
+        from .paths import resolve_artifact_path
         embedding_matrix = _load_embedding_matrix(
             context["full_frame"],
-            embedding_store=Path(embedding_store),
+            embedding_store=resolve_artifact_path(
+                embedding_store, anchors=(root, factorial_root)
+            ),
             factorial_root=factorial_root,
+            cache_root=embedding_cache_root,
             scope=context["scope"],
             run_label=f"stage9-shap-{context['model_id']}",
         )
@@ -365,6 +374,7 @@ def _calculate_neural(
     nsamples: int,
     seed: int,
     chunk_rows: int,
+    embedding_cache_root: Path | None = None,
 ) -> pd.DataFrame:
     shap = _require_shap()
     import torch
@@ -386,10 +396,14 @@ def _calculate_neural(
         embedding_store = context["manifest"].get("embedding_store")
         if not embedding_store:
             raise RuntimeError(f"{context['model_id']}/{context['scope']} lacks its embedding store")
+        from .paths import resolve_artifact_path
         embedding_matrix = _load_embedding_matrix(
             context["full_frame"],
-            embedding_store=Path(embedding_store),
+            embedding_store=resolve_artifact_path(
+                embedding_store, anchors=(root, factorial_root)
+            ),
             factorial_root=factorial_root,
+            cache_root=embedding_cache_root,
             scope=context["scope"],
             run_label=f"stage9-shap-{context['model_id']}",
         )
@@ -678,6 +692,7 @@ def run_shap_explanations(
     seed: int = 20260813,
     force_recompute: bool = False,
     chunk_rows: int = SHAP_CHUNK_ROWS,
+    embedding_cache_root: Path | None = None,
 ) -> dict[str, Any]:
     """Calculate cached SHAP values and story-aggregated winner summaries."""
     if test_rows < 1 or background_rows < 1 or nsamples < 1 or chunk_rows < 1:
@@ -688,6 +703,7 @@ def run_shap_explanations(
         raise ValueError("No frozen winners match the requested SHAP scopes")
     cache_root = Path(output_root) / "cache" / "shap"
     cache_root.mkdir(parents=True, exist_ok=True)
+    embedding_cache_root = Path(embedding_cache_root or (Path(output_root) / "cache" / "embeddings"))
     value_frames: list[pd.DataFrame] = []
     cache_records: list[dict[str, Any]] = []
     for index, winner in enumerate(selected.to_dict("records"), start=1):
@@ -735,6 +751,7 @@ def run_shap_explanations(
                 background_rows=background_rows,
                 seed=seed + index,
                 chunk_rows=chunk_rows,
+                embedding_cache_root=embedding_cache_root,
             )
             values.to_parquet(cache_path, index=False)
             manifest_path.write_text(
@@ -750,6 +767,7 @@ def run_shap_explanations(
                 nsamples=nsamples,
                 seed=seed + index,
                 chunk_rows=chunk_rows,
+                embedding_cache_root=embedding_cache_root,
             )
             values.to_parquet(cache_path, index=False)
             manifest_path.write_text(

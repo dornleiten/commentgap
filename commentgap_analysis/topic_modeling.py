@@ -5,11 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
-from typing import Iterable, Mapping, Sequence
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -20,6 +19,13 @@ TOPIC_COLUMN_RE = re.compile(r"^topic_(\d+)$")
 
 
 TOPIC_MODEL_VERSION = 3
+
+
+def topic_top_terms(topic_model, topic: int, *, limit: int = 10) -> str:
+    """Format a fitted topic's highest-ranked terms for summary tables."""
+    return ' | '.join(
+        term for term, _ in (topic_model.get_topic(int(topic)) or [])[:limit]
+    )
 
 
 def _current_code_revision() -> str:
@@ -456,7 +462,7 @@ def fit_topic_model(
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
                 "BERTopic, hdbscan, umap-learn, and scikit-learn are required; "
-                "install requirements-analysis.txt"
+                "install requirements.txt"
             ) from exc
         vectorizer_model = CountVectorizer(
             stop_words=topic_stopwords() if config.representation_stopwords else None,
@@ -519,7 +525,7 @@ def fit_topic_model(
         from sklearn.decomposition import LatentDirichletAllocation, NMF
         from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
     except ImportError as exc:  # pragma: no cover - exercised only without analysis extras
-        raise ImportError("Topic modeling requires scikit-learn; install requirements-analysis.txt") from exc
+        raise ImportError("Topic modeling requires scikit-learn; install requirements.txt") from exc
 
     if config.model_type == "nmf":
         vectorizer = TfidfVectorizer(
@@ -558,7 +564,8 @@ def save_topic_model(bundle: TopicModelBundle, output_root: Path | str) -> dict[
         import joblib
     except ImportError as exc:  # pragma: no cover
         raise ImportError("Saving a topic model requires joblib from scikit-learn") from exc
-    output_root = Path(output_root)
+    from .paths import require_writable_destination
+    output_root = require_writable_destination(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     model_path = output_root / "topic_model.joblib"
     manifest_path = output_root / "topic_model_manifest.json"

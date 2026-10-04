@@ -10,32 +10,30 @@ from .neural_ranking import (
     default_recipe,
     run_neural_ranker_workflow,
 )
+from .paths import ExecutionContext, add_execution_arguments
 
 
-DEFAULT_OUTPUTS = {
-    "frozen_bge": Path("model_output/selection_2025/neural_rankers/frozen_bge_m3"),
-    "metadata_mlp": Path("model_output/selection_2025/neural_rankers/metadata_mlp"),
-}
+SUPPORTED_APPROACHES = ("frozen_bge", "metadata_mlp")
 
 
 def build_parser(default_approach: str | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--approach",
-        choices=tuple(DEFAULT_OUTPUTS),
+        choices=SUPPORTED_APPROACHES,
         default=default_approach,
         required=default_approach is None,
     )
     parser.add_argument(
         "--model-data-root",
         type=Path,
-        default=Path("model_output/selection_2025/model_data"),
+        default=None,
     )
-    parser.add_argument("--data-root", type=Path, default=Path("data/scrape_2025"))
+    parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument(
         "--embedding-root",
         type=Path,
-        default=Path("model_output/selection_2025/embeddings"),
+        default=None,
     )
     parser.add_argument("--embedding-store", type=Path)
     parser.add_argument("--output-root", type=Path)
@@ -47,6 +45,7 @@ def build_parser(default_approach: str | None = None) -> argparse.ArgumentParser
         default=100,
         help="Print training/inference progress and ETA every N completed articles.",
     )
+    add_execution_arguments(parser)
     parser.add_argument(
         "--training-mode",
         choices=("cv", "fixed_split", "full"),
@@ -68,16 +67,22 @@ def build_parser(default_approach: str | None = None) -> argparse.ArgumentParser
 
 def main(argv: list[str] | None = None, *, default_approach: str | None = None) -> None:
     args = build_parser(default_approach).parse_args(argv)
+    context = ExecutionContext.from_values(
+        mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+    )
     approach = args.approach
     recipe = default_recipe(approach)
-    output_root = args.output_root or DEFAULT_OUTPUTS[approach]
+    model_data_root = context.read_root("model_data", explicit=args.model_data_root, env_var="COMMENTGAP_MODEL_DATA_ROOT")
+    data_root = context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT")
+    embedding_root = context.read_root("embeddings", explicit=args.embedding_root, env_var="COMMENTGAP_EMBEDDING_ROOT")
+    output_root = context.output_root(f"CG1/rankers/neural/{approach}", explicit=args.output_root, env_var="COMMENTGAP_NEURAL_RANKER_ROOT")
     result = run_neural_ranker_workflow(
-        args.model_data_root,
-        args.data_root,
+        model_data_root,
+        data_root,
         output_root,
         approach=approach,
-        embedding_root=args.embedding_root,
-        embedding_store=args.embedding_store,
+        embedding_root=embedding_root,
+        embedding_store=context.read_path(args.embedding_store) if args.embedding_store else None,
         device=args.device,
         bootstrap_draws=args.bootstrap_draws,
         progress_every_stories=args.progress_every_stories,

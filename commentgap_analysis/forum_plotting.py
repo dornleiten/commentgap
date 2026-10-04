@@ -18,6 +18,48 @@ def _show(show: bool) -> None:
         plt.show()
 
 
+def configure_forum_plot_style() -> None:
+    """Set the shared notebook and export style for FORUM figures."""
+    sns.set_theme(style='whitegrid', context='talk')
+    plt.rcParams['figure.dpi'] = 120
+    plt.rcParams['savefig.bbox'] = 'tight'
+
+
+def forum_feature_palette(feature_order: Sequence[str]) -> dict[str, object]:
+    """Assign the stable tab10 palette to the ordered FORUM outcomes."""
+    return dict(zip(feature_order, sns.color_palette('tab10', len(feature_order))))
+
+
+def feature_category(feature: object) -> str:
+    """Group regression features for the FORUM coefficient figure."""
+    value = str(feature)
+    lower = value.lower()
+    if value.startswith("AQuA "):
+        return "AQuA"
+    if "earlier reply-to-root composition" in lower:
+        return "Timing / discussion\ncontext"
+    if "comment length" in lower or any(w in lower for w in ("url", "reply", "root")):
+        return "Comment form"
+    if any(w in lower for w in (
+        "length", "lexical diversity", "reading difficulty", "sentiment",
+        "toxicity", "similarity", "novelty",
+    )):
+        return "Text / NLP\nfeatures"
+    if "author" in lower or "prior author" in lower:
+        return "Author history"
+    return "Timing / discussion\ncontext"
+
+
+def save_forum_figure(figure, output_path: str | Path, *, close: bool = False) -> Path:
+    """Save a notebook-created FORUM figure without inline plotting calls."""
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, bbox_inches="tight")
+    if close:
+        plt.close(figure)
+    return path
+
+
 def plot_forum_calculation(
     feature_values: Sequence[float],
     policy_cumulative: Sequence[float],

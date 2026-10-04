@@ -1,0 +1,3 @@
+scope,sample_rows,sample_stories,requested_sample_rows,seed,sampling_method,sampling_method_version
+root,100000,5078,100000,20260824,DuckDB reservoir,duckdb-reservoir-single-thread-v1
+all,100000,5047,100000,20260824,DuckDB reservoir,duckdb-reservoir-single-thread-v1

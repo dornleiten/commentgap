@@ -1,0 +1,9 @@
+scope,variant,covariance,raw_covariance_condition_number,correlation_scale_condition_number,corresponding_max_condition_index,coefficients
+root,full_reference,model_based,5008.92561916767,489.205651114171,22.1179938311361,78
+root,full_reference,cluster_robust,4118.66335220185,175.976400074666,13.2656096759506,78
+root,no_author_history,model_based,5073.81050309256,491.762986610338,22.1757296748109,70
+root,no_author_history,cluster_robust,4222.73039504804,176.392736840537,13.2812927398104,70
+root,no_aqua,model_based,2292.01101673669,61.3190115122909,7.83064566381926,38
+root,no_aqua,cluster_robust,1894.09219981665,27.9413791052862,5.28596056599804,38
+root,selector_effect_coding_exact,model_based,2756.01830148086,93.7130037963549,9.68054770125936,78
+root,selector_effect_coding_exact,cluster_robust,2158.27633720781,100.851492639082,10.0424843858025,78

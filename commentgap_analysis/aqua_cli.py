@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from .aqua import AquaBuildConfig, build_aqua_store
+from .paths import ExecutionContext, add_execution_arguments
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,19 +15,19 @@ def build_parser() -> argparse.ArgumentParser:
         prog="commentgap-aqua",
         description="Build a resumable AQuA feature store via an isolated legacy runtime.",
     )
-    parser.add_argument("--data-root", type=Path, default=Path("data/scrape_2025"))
-    parser.add_argument("--output-root", type=Path, default=Path("model_output/selection_2025/aqua"))
+    parser.add_argument("--data-root", type=Path, default=None)
+    parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--year", type=int, default=2025)
-    parser.add_argument("--runtime-python", type=Path, default=Path(".venv-aqua/bin/python"))
+    parser.add_argument("--runtime-python", type=Path, default=None)
     parser.add_argument(
         "--adapter-root",
         type=Path,
-        default=Path(".cache/aqua-upstream-637914d/trained adapters"),
+        default=None,
     )
     parser.add_argument(
         "--artifact-manifest",
         type=Path,
-        default=Path("aqua_runtime/artifacts.json"),
+        default=None,
     )
     parser.add_argument(
         "--requirements-lock",
@@ -81,19 +82,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Permit only a pilot-watermarked build before upstream parity is frozen.",
     )
+    add_execution_arguments(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    context = ExecutionContext.from_values(
+        mode=args.mode, run_id=args.run_id, repo_root=args.repo_root
+    )
     config = AquaBuildConfig(
-        data_root=args.data_root,
-        output_root=args.output_root,
+        data_root=context.read_root("raw_scrape", explicit=args.data_root, env_var="COMMENTGAP_DATA_ROOT"),
+        output_root=context.output_root("shared/aqua", explicit=args.output_root, env_var="COMMENTGAP_AQUA_ROOT"),
         year=args.year,
-        runtime_python=args.runtime_python,
-        adapter_root=args.adapter_root,
-        artifact_manifest=args.artifact_manifest,
-        requirements_lock=args.requirements_lock,
+        runtime_python=context.read_path(args.runtime_python) if args.runtime_python else context.paths.root / ".venv-aqua/bin/python",
+        adapter_root=context.read_path(args.adapter_root) if args.adapter_root else context.paths.root / ".cache/aqua-upstream-637914d/trained adapters",
+        artifact_manifest=context.read_path(args.artifact_manifest) if args.artifact_manifest else context.paths.root / "aqua_runtime/artifacts.json",
+        requirements_lock=context.read_path(args.requirements_lock) if args.requirements_lock else None,
         device=args.device,
         execution_mode=args.execution_mode,
         sequential_fallback=not args.no_sequential_fallback,

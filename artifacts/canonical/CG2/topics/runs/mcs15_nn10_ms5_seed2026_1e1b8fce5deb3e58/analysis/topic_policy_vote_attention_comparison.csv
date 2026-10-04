@@ -1,0 +1,4 @@
+model,role,cv_cross_entropy,training_cross_entropy,n_validation_stories,cv_delta_vs_power_law
+spline,primary,5.411267494369073,5.411093737395994,2553,-0.09572631006087384
+power_law,sensitivity,5.506993804429947,5.50697986158303,2553,0.0
+exponential,sensitivity,5.605724367732737,5.605700307824858,2553,0.09873056330278995

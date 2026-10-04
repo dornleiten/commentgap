@@ -1072,7 +1072,8 @@ def run_factorial_experiment(
         all_variants, include=include, exclude=exclude
     )
     selected_ids = {variant.variant_id for variant in selected}
-    output_root = Path(output_root)
+    from .paths import require_writable_destination
+    output_root = require_writable_destination(output_root)
     statuses = {
         variant.variant_id: (
             "complete"
